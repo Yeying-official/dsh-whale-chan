@@ -9,7 +9,7 @@
 - 注册 `whale-chan` 主面板和侧栏入口。
 - 挂载 `GET /whale-chan/api/state`，显示宿主版本、状态目录与启动时间。
 - 冻结设置/人设 API，并提供同源头校验的 `GET settings`、内存态 `PUT settings/:block` 与只读 `GET persona`。
-- 冻结完整的设置 schema、字段表、管理 API 合约与中英文文案。
+- 冻结完整的设置 schema、字段表、19 个管理 API 端点与中英文文案。
 - 通过契约测试证明 schema、field registry、API 路由和 i18n 一一对应。
 - 在状态目录无法创建时返回结构化 503，面板显示可重试的离线/错误态。
 

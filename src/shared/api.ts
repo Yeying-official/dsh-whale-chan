@@ -155,6 +155,11 @@ export interface ApiContract {
     request: Empty
     response: SettingsView
   }
+  /**
+   * Partial block patch. Plain objects are deep-merged; arrays, scalars and
+   * `null` replace the existing value; unknown keys are rejected by strict
+   * schema validation.
+   */
   'PUT settings/:block': {
     method: 'PUT'
     path: 'settings/:block'

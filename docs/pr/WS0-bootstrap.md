@@ -2,7 +2,7 @@
 
 - 分支：`feat/ws0-bootstrap`
 - 基线：`main`
-- 状态：Review round 1 修复完成；**未合并、未推送、未由实现方安装到 profile**。
+- 状态：Review round 2 修复完成；**未合并、未推送、未由实现方安装到 profile**。
 - 关联文档：[测试报告](../test-reports/WS0.md)、[rc.5 spike](../spike-rc5.md)、[设计摘要](../010-design.md)。
 
 ## 目标
@@ -34,7 +34,7 @@ WS0 **不**实现钉钉通道、发送、任务、审批、检索或持久化；
 ```text
 pnpm install --frozen-lockfile  -> Already up to date
 pnpm typecheck                  -> exit 0
-pnpm test                       -> 4 files, 35 tests passed
+pnpm test                       -> 4 files, 39 tests passed
 pnpm check                      -> typecheck + test + build, exit 0
 pnpm build                      -> lib/index.js, lib/client.js, lib/index.d.ts
 node scripts/check-pack.mjs     -> pack check passed: 10 artifacts, icon 711 bytes
@@ -44,21 +44,22 @@ pnpm docs:settings              -> 57 fields
 
 详细输出摘要、spike 结论、已知缺口和逐条自评见 [WS0 测试报告](../test-reports/WS0.md)。
 
-## Review round 1 → 修复项与证据
+## Review round 1–2 → 修复项与证据
 
-| 项                     | 落点                                                                                  | 证据                                                                                                                                                                                                          |
-| ---------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| P0.1 settings revision | `src/shared/api.ts`、`src/shared/models.ts`、`src/app/settings.ts`、`src/app/http.ts` | `GET settings` 返回 `SettingsView`；`PUT settings/:block` 缺 revision 为 400 `revision_required`，过期 revision 为 409 `settings_conflict` 且带 `actualRevision`；`tests/state.spec.ts` 覆盖。                |
-| P0.2 删除双写人设      | `src/shared/api.ts`、`src/shared/models.ts`                                           | 删除 `PUT persona` / `PersonaUpdateRequest`；`GET persona` 保留只读；`tests/state.spec.ts` 验证 PUT persona 为 405。**注意：删除一个端点后实际为 19 个，不是审核意见中的 18；没有擅自删除另一个已批准端点。** |
-| P0.3 客户端共享值      | `src/client/index.tsx`、`src/client/api.ts`、删除 `src/client/constants.ts`           | `PANEL_ID` 直接 import shared；`STATE_URL = apiUrl('GET state')`；契约测试断言 client 不出现字面量 `/whale-chan/api/`，并允许纯 shared 值导入。                                                               |
-| P0.4 同源头            | `src/shared/api.ts`、`src/app/http.ts`、`src/client/api.ts`                           | 所有管理请求要求 `x-whale-chan-request: 1`；无头 403 且响应不含 `stateDir`；OPTIONS 预检关闭；HTTP 测试覆盖。                                                                                                 |
-| P0.5 stateDir 边界     | `src/app/runtime.ts`                                                                  | `~`、`~/x`、Windows 主目录形式、绝对路径通过；相对路径明确抛错；测试覆盖。                                                                                                                                    |
-| P0.6 打包白名单        | `package.json`、`scripts/check-pack.mjs`                                              | files 加入 `prompts`；脚本在目录存在且有文件时校验 `npm pack` 包含 `prompts/`。                                                                                                                               |
-| P0.7 文档编号          | `docs/009-dws-protocol.md`、`docs/013-security.md`、README、`docs/011`                | 安全文档改为 013；新增 009 DWS 协议占位；索引/链接/契约测试同步为 14 个文档。                                                                                                                                 |
-| P1.8 魔法数            | `tests/contract.spec.ts`                                                              | 删除 `toHaveLength(57)`；schema↔fields 双向比较保留。                                                                                                                                                        |
-| P1.9 启动失败与 inject | `src/index.ts`                                                                        | `await runtime.ready` 失败先 `ctx.logger.error(...)` 再抛出；`inject` 改为普通数组。                                                                                                                          |
-| P1.10 spike 真机结论   | `docs/spike-rc5.md`                                                                   | 记录 desktop profile 安装、Config schema、客户端加载、侧栏/面板渲染和 state 200；只保留真实 dws 事件/发送为未验证。                                                                                           |
-| P1.11 默认值决策       | `docs/010-design.md`                                                                  | 写入 `quietHours.enabled=true`（22:00–08:00）、`replyDuringQuiet=false`，以及无目标时空转、无副作用。                                                                                                         |
+| 项                     | 落点                                                                                  | 证据                                                                                                                                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P0.1 settings revision | `src/shared/api.ts`、`src/shared/models.ts`、`src/app/settings.ts`、`src/app/http.ts` | `GET settings` 返回 `SettingsView`；`PUT settings/:block` 缺 revision 为 400 `revision_required`，过期 revision 为 409 `settings_conflict` 且带 `actualRevision`；`tests/state.spec.ts` 覆盖。 |
+| R2 深合并              | `src/app/settings.ts`、`src/shared/api.ts`、`docs/011-settings-contract.md`           | 普通对象递归深合并；数组、标量和 `null` 整体替换；嵌套未知键仍由 strict 返回 400 `invalid_settings`；`tests/state.spec.ts` 覆盖 quietHours、models.reply、未知键和数组替换。                   |
+| P0.2 删除双写人设      | `src/shared/api.ts`、`src/shared/models.ts`                                           | 删除 `PUT persona` / `PersonaUpdateRequest`；`GET persona` 保留只读；`tests/state.spec.ts` 验证 PUT persona 为 405。删除后路由总数为 19，已确认。                                              |
+| P0.3 客户端共享值      | `src/client/index.tsx`、`src/client/api.ts`、删除 `src/client/constants.ts`           | `PANEL_ID` 直接 import shared；`STATE_URL = apiUrl('GET state')`；契约测试断言 client 不出现字面量 `/whale-chan/api/`，并允许纯 shared 值导入。                                                |
+| P0.4 同源头            | `src/shared/api.ts`、`src/app/http.ts`、`src/client/api.ts`                           | 所有管理请求要求 `x-whale-chan-request: 1`；无头 403 且响应不含 `stateDir`；OPTIONS 预检关闭；HTTP 测试覆盖。                                                                                  |
+| P0.5 stateDir 边界     | `src/app/runtime.ts`                                                                  | `~`、`~/x`、Windows 主目录形式、绝对路径通过；相对路径明确抛错；测试覆盖。                                                                                                                     |
+| P0.6 打包白名单        | `package.json`、`scripts/check-pack.mjs`                                              | files 加入 `prompts`；脚本在目录存在且有文件时校验 `npm pack` 包含 `prompts/`。                                                                                                                |
+| P0.7 文档编号          | `docs/009-dws-protocol.md`、`docs/013-security.md`、README、`docs/011`                | 安全文档改为 013；新增 009 DWS 协议占位；索引/链接/契约测试同步为 14 个文档。                                                                                                                  |
+| P1.8 魔法数            | `tests/contract.spec.ts`                                                              | 删除 `toHaveLength(57)`；schema↔fields 双向比较保留。                                                                                                                                         |
+| P1.9 启动失败与 inject | `src/index.ts`                                                                        | `await runtime.ready` 失败先 `ctx.logger.error(...)` 再抛出；`inject` 改为普通数组。                                                                                                           |
+| P1.10 spike 真机结论   | `docs/spike-rc5.md`                                                                   | 记录 desktop profile 安装、Config schema、客户端加载、侧栏/面板渲染和 state 200；只保留真实 dws 事件/发送为未验证。                                                                            |
+| P1.11 默认值决策       | `docs/010-design.md`                                                                  | 写入 `quietHours.enabled=true`（22:00–08:00）、`replyDuringQuiet=false`，以及无目标时空转、无副作用。                                                                                          |
 
 ## 风险与未决
 
@@ -66,7 +67,7 @@ pnpm docs:settings              -> 57 fields
 - **WebServer.port 差异**：rc.5 中端口可能为 `undefined`；未来的同源校验需要 `getOrigin()` 或显式判空。
 - **设置只存在内存**：WS0 的 revision 行为是契约探针，重启后恢复默认；持久化留到 WS4。
 - **同源头的新行为未在 profile 重装后复验**：审核方的真机验证针对安装版本；修复后的 header 路径由本地 HTTP 测试覆盖，建议合并前在隔离 profile 再点一次面板。
-- **端点计数分歧**：删除 `PUT persona` 后为 19；审核意见写 18，未擅自再删端点，等待确认。
+- **端点计数**：删除 `PUT persona` 后为 19，已确认；不再删除其他端点。
 
 ## 文档同步
 

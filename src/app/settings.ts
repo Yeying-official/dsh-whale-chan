@@ -37,6 +37,35 @@ export class SettingsValueError extends Error {
   }
 }
 
+/** True only for plain records; arrays, null and scalars are replacements. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
+/**
+ * Recursively merge one settings block.
+ *
+ * Only two plain objects are merged. Arrays, scalars and `null` replace the
+ * previous value wholesale, and an absent key keeps its previous value. Unknown
+ * keys survive this step so `SettingsSchema` can reject them with strict mode.
+ */
+export function deepMerge(base: unknown, patch: unknown): unknown {
+  if (!isPlainObject(base) || !isPlainObject(patch)) return patch
+  const merged = Object.fromEntries(Object.entries(base))
+  for (const [key, value] of Object.entries(patch)) {
+    const next = Object.prototype.hasOwnProperty.call(base, key) ? deepMerge(base[key], value) : value
+    Object.defineProperty(merged, key, {
+      value: next,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    })
+  }
+  return merged
+}
+
 /** Mutable settings state used by the HTTP contract canary. */
 export class SettingsState {
   private current: Settings
@@ -69,7 +98,7 @@ export class SettingsState {
       throw new SettingsConflictError(block, expectedRevision, actualRevision)
     }
 
-    const merged = { ...this.current[block], ...value }
+    const merged = deepMerge(this.current[block], value)
     const parsed = SettingsSchema.safeParse({ ...this.current, [block]: merged })
     if (!parsed.success) {
       throw new SettingsValueError(

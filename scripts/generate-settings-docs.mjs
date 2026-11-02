@@ -58,10 +58,11 @@ ${rows.join('\n')}
 - \`models.reply\` 与 \`models.worker\` 的 \`provider\`、\`model\`、\`effort\` 为空字符串时表示使用 DSH 默认值。
 - 所有对象块均为 strict：未知键会被拒绝，而不是静默保留。
 
-## 管理 API 变更（Review round 1）
+## 管理 API 变更（Review round 1–2）
 
 - \`GET settings\` 返回 \`SettingsView\`（blocks + revision），不再是裸 \`Settings\`。
 - \`PUT settings/:block\` 必须带非负整数 \`revision\`；缺失为 400 \`revision_required\`，过期 revision 为 409 \`settings_conflict\`。
+- 块内 patch 采用递归深合并（仅当两侧都是普通对象）；数组、标量和 \`null\` 整体替换；未知键仍由 strict 拒绝。
 - 人设唯一写入口是 \`PUT settings/persona\`；\`GET persona\` 只读；原 \`PUT persona\` 已删除。
 - 所有管理请求要求 \`x-whale-chan-request: 1\`，缺失为 403 且不回传 \`stateDir\`。
 

@@ -68,6 +68,20 @@ function writeJson(value: unknown): RequestInit {
   }
 }
 
+interface SettingsPayload {
+  readonly revision: number
+  readonly blocks: Record<
+    string,
+    { readonly block: string; readonly value: Record<string, unknown>; readonly revision: number }
+  >
+}
+
+async function getSettings(baseUrl: string): Promise<SettingsPayload> {
+  const response = await request(baseUrl, '/whale-chan/api/settings')
+  expect(response.status).toBe(200)
+  return (await response.json()) as SettingsPayload
+}
+
 describe('runtime state directory', () => {
   it('creates the directory, exposes a stable startedAt and closes idempotently', async () => {
     const stateDir = join(root, 'whale-chan')
@@ -258,6 +272,98 @@ describe('settings and persona contract routes', () => {
       expect(view.blocks.monitor?.revision).toBe(1)
       expect(view.blocks.monitor?.value.paused).toBe(true)
       expect(view.blocks.persona?.revision).toBe(0)
+    } finally {
+      await close()
+    }
+  })
+
+  it('deep-merges quietHours without resetting its sibling fields', async () => {
+    const runtime = runtimeAt(join(root, 'settings-deep-monitor'))
+    await runtime.ready
+    const { baseUrl, close } = await serve(runtime)
+    try {
+      const write = await request(
+        baseUrl,
+        '/whale-chan/api/settings/monitor',
+        writeJson({ value: { quietHours: { enabled: false } }, revision: 0 }),
+      )
+      expect(write.status).toBe(200)
+      const view = await getSettings(baseUrl)
+      expect(view.blocks.monitor?.value).toMatchObject({
+        quietHours: { enabled: false, start: '22:00', end: '08:00' },
+      })
+    } finally {
+      await close()
+    }
+  })
+
+  it('deep-merges model routes without clearing provider and effort', async () => {
+    const runtime = runtimeAt(join(root, 'settings-deep-models'))
+    await runtime.ready
+    const { baseUrl, close } = await serve(runtime)
+    try {
+      const write = await request(
+        baseUrl,
+        '/whale-chan/api/settings/models',
+        writeJson({ value: { reply: { model: 'm1' } }, revision: 0 }),
+      )
+      expect(write.status).toBe(200)
+      const view = await getSettings(baseUrl)
+      expect(view.blocks.models?.value).toMatchObject({
+        reply: { provider: '', model: 'm1', effort: '' },
+      })
+    } finally {
+      await close()
+    }
+  })
+
+  it('rejects an unknown key nested inside a merged object', async () => {
+    const runtime = runtimeAt(join(root, 'settings-deep-unknown'))
+    await runtime.ready
+    const { baseUrl, close } = await serve(runtime)
+    try {
+      const write = await request(
+        baseUrl,
+        '/whale-chan/api/settings/monitor',
+        writeJson({ value: { quietHours: { foo: true } }, revision: 0 }),
+      )
+      expect(write.status).toBe(400)
+      expect(await write.json()).toMatchObject({ ok: false, error: { code: 'invalid_settings' } })
+      const view = await getSettings(baseUrl)
+      expect(view.blocks.monitor?.value).toMatchObject({
+        quietHours: { enabled: true, start: '22:00', end: '08:00' },
+      })
+      expect((view.blocks.monitor?.value.quietHours as Record<string, unknown>).foo).toBeUndefined()
+      expect(view.blocks.monitor?.revision).toBe(0)
+    } finally {
+      await close()
+    }
+  })
+
+  it('replaces arrays instead of merging them by index', async () => {
+    const runtime = runtimeAt(join(root, 'settings-deep-array'))
+    await runtime.ready
+    const { baseUrl, close } = await serve(runtime)
+    try {
+      const first = await request(
+        baseUrl,
+        '/whale-chan/api/settings/reply',
+        writeJson({ value: { allowedSenders: ['alice', 'bob'] }, revision: 0 }),
+      )
+      expect(first.status).toBe(200)
+      expect((await getSettings(baseUrl)).blocks.reply?.value).toMatchObject({
+        allowedSenders: ['alice', 'bob'],
+      })
+
+      const second = await request(
+        baseUrl,
+        '/whale-chan/api/settings/reply',
+        writeJson({ value: { allowedSenders: ['carol'] }, revision: 1 }),
+      )
+      expect(second.status).toBe(200)
+      expect((await getSettings(baseUrl)).blocks.reply?.value).toMatchObject({
+        allowedSenders: ['carol'],
+      })
     } finally {
       await close()
     }

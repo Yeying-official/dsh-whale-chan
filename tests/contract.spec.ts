@@ -133,6 +133,7 @@ describe('management API contract', () => {
     expect(API_ROUTES.map((route) => route.key).sort()).toEqual([...expectedRoutes].sort())
     expect(new Set(API_ROUTES.map((route) => route.key)).size).toBe(API_ROUTES.length)
     expect(new Set(API_ROUTES.map((route) => `${route.method} ${route.path}`)).size).toBe(API_ROUTES.length)
+    expect(API_ROUTES).toHaveLength(19)
   })
 
   it('uses the frozen prefix and consistent HTTP methods', () => {

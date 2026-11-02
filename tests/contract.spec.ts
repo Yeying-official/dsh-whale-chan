@@ -189,6 +189,22 @@ describe('repository and layer invariants', () => {
     }
   })
 
+  it('keeps persistence and scheduling modules off transport layers', () => {
+    // The store, its read queries, the migration, the effects queue, the pass
+    // scheduler and the key-value helper may use Node built-ins and core types,
+    // but must not depend on a channel, an executor, a client bundle or the HTTP
+    // host around them.
+    for (const name of ['store.ts', 'store-read.ts', 'migration.ts', 'effects.ts', 'passes.ts', 'kv.ts']) {
+      const file = join('src/app', name)
+      const source = readFileSync(file, 'utf8')
+      for (const specifier of importSpecifiers(source)) {
+        expect(specifier, file).not.toMatch(/^@deepseek-ai\//)
+        expect(specifier, file).not.toMatch(/^\.\.\/(?:channel|executor|client)(?:\/|$)/)
+        expect(specifier, file).not.toMatch(/^\.\/(?:http|runtime|views|settings|deployment)\.ts$/)
+      }
+    }
+  })
+
   it('keeps the client away from host implementation layers', () => {
     const forbidden = ['../app/', '../channel/', '../sender/', '../executor/', '../core/']
     for (const file of sourceFiles('src/client')) {

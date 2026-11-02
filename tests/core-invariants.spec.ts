@@ -277,6 +277,53 @@ describe('domain invariants', () => {
     expect(harness.repos.approvals.byTaskId(task.id)?.status).toBe('pending')
     expect(harness.repos.listAssignments()).toEqual([])
   })
+
+  it('compares approval deadlines numerically across UTC offsets', () => {
+    const harness = createHarness()
+    const short = receiveTask(harness, { id: 'message-offset' }, { title: 'offset' }, 3_600_000)
+    expect(short.approval.expiresAt).toBe('2026-11-02T10:00:00.000Z')
+
+    expect(harness.engine.pendingApprovals('2026-11-02T17:30:00+08:00').map((item) => item.id)).toEqual([
+      short.approval.id,
+    ])
+    expect(harness.engine.pendingApprovals('2026-11-02T18:30:00+08:00')).toEqual([])
+    expect(harness.engine.expireTasks('2026-11-02T17:30:00+08:00')).toEqual([])
+    expect(harness.engine.task(short.task.id)?.status).toBe('awaiting-approval')
+    expect(harness.engine.expireTasks('2026-11-02T18:30:00+08:00')).toEqual([short.task.id])
+    expect(harness.engine.task(short.task.id)?.status).toBe('expired')
+
+    const within = receiveTask(harness, { id: 'message-offset-approve' }, { title: 'approved' }, 3_600_000)
+    const approved = harness.engine.approveTask(within.task.id, {
+      by: 'owner',
+      at: '2026-11-02T17:30:00+08:00',
+      workspace: '/workspace/offset',
+    })
+    expect(approved.approval.decidedAt).toBe('2026-11-02T17:30:00+08:00')
+
+    const late = receiveTask(harness, { id: 'message-offset-late' }, { title: 'late' }, 3_600_000)
+    expect(() =>
+      harness.engine.approveTask(late.task.id, {
+        by: 'owner',
+        at: '2026-11-02T18:30:00+08:00',
+        workspace: '/workspace/late',
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'approvalExpired' }))
+  })
+
+  it('refuses a malformed time with invalidTime', () => {
+    const harness = createHarness()
+    const { task } = receiveTask(harness, { id: 'message-invalid-time' }, { title: 'invalid' }, 3_600_000)
+    expect(() => harness.engine.expireTasks('not-a-time')).toThrowError(
+      expect.objectContaining({ code: 'invalidTime' }),
+    )
+    expect(() => harness.engine.pendingApprovals('2026-13-45T99:99:99Z')).toThrowError(
+      expect.objectContaining({ code: 'invalidTime' }),
+    )
+    expect(() =>
+      harness.engine.approveTask(task.id, { by: 'owner', at: 'yesterday', workspace: '/workspace/invalid' }),
+    ).toThrowError(expect.objectContaining({ code: 'invalidTime' }))
+    expect(harness.engine.task(task.id)?.status).toBe('awaiting-approval')
+  })
 })
 
 function capture(work: () => unknown): unknown {

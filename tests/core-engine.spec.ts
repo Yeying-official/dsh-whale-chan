@@ -50,6 +50,21 @@ describe('intake', () => {
     })
   })
 
+  it('uses the title the channel reports and follows a rename', () => {
+    const harness = createHarness()
+    harness.receive({ id: 'message-title-1', title: 'AI工程师孵化中心' })
+    expect(harness.engine.thread(THREAD_KEY)?.title).toBe('AI工程师孵化中心')
+
+    harness.receive({ id: 'message-title-2', title: 'AI工程师孵化中心 · 新' })
+    expect(harness.engine.thread(THREAD_KEY)?.title).toBe('AI工程师孵化中心 · 新')
+
+    harness.receive({ id: 'message-title-3' })
+    expect(harness.engine.thread(THREAD_KEY)?.title).toBe('AI工程师孵化中心 · 新')
+
+    harness.receive({ id: 'message-title-4', title: '   ' })
+    expect(harness.engine.thread(THREAD_KEY)?.title).toBe('AI工程师孵化中心 · 新')
+  })
+
   it('keeps the newest message time when an older message arrives late', () => {
     const harness = createHarness()
     harness.receive({ id: 'message-new', at: '2026-11-02T09:30:00.000Z' })
@@ -330,7 +345,7 @@ describe('execution', () => {
       workspace: '/workspace/task-1',
     })
     const started = harness.engine.assignmentStarted(task.id, approved.assignment.id)
-    expect(started).toMatchObject({ state: 'running', startedAt: '2026-11-02T09:00:00.000Z' })
+    expect(started).toMatchObject({ state: 'running', startedAt: '2026-11-02T09:00:00.000Z', sessionId: null })
     expect(harness.engine.task(task.id)?.status).toBe('running')
 
     const ended = harness.engine.assignmentEnded(task.id, approved.assignment.id, {
@@ -349,6 +364,26 @@ describe('execution', () => {
     })
     expect(harness.events.map((event) => event.type)).toContain('assignment.started')
     expect(harness.events.map((event) => event.type)).toContain('assignment.ended')
+  })
+
+  it('binds the executor session to the assignment and keeps it after the end', () => {
+    const harness = createHarness()
+    const { task } = receiveTask(harness)
+    const approved = harness.engine.approveTask(task.id, {
+      by: 'owner',
+      at: '2026-11-02T09:00:10.000Z',
+      workspace: '/workspace/task-1',
+    })
+    const started = harness.engine.assignmentStarted(task.id, approved.assignment.id, {
+      sessionId: 'session-abc',
+    })
+    expect(started).toMatchObject({ state: 'running', sessionId: 'session-abc' })
+    expect(harness.engine.task(task.id)?.assignmentId).toBe(approved.assignment.id)
+    expect(harness.repos.assignments.get(approved.assignment.id)?.sessionId).toBe('session-abc')
+
+    const ended = harness.engine.assignmentEnded(task.id, approved.assignment.id, { outcome: 'succeeded' })
+    expect(ended.assignment).toMatchObject({ state: 'ended', sessionId: 'session-abc', outcome: 'succeeded' })
+    expect(harness.repos.assignments.get(approved.assignment.id)?.sessionId).toBe('session-abc')
   })
 
   it('maps a failed and a timed-out assignment to a failed task', () => {

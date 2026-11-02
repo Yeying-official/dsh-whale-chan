@@ -95,7 +95,11 @@ describe('store aggregates', () => {
     const database = open()
     const { engine } = harnessOn(database)
 
-    const replyMessage = inboundMessage({ id: 'message-reply', at: '2026-11-02T08:58:00.000Z' })
+    const replyMessage = inboundMessage({
+      id: 'message-reply',
+      at: '2026-11-02T08:58:00.000Z',
+      title: 'AI工程师孵化中心',
+    })
     const reply = engine.receive(replyMessage).decision
     engine.classify(reply.id, { intent: 'chat', confidence: 0.7 })
     engine.draft(reply.id, { text: '好的', researched: true, sources: ['https://example.test'] })
@@ -123,7 +127,7 @@ describe('store aggregates', () => {
       workspace: '/workspace/task-1',
     })
     const approval = database.approvals.byTaskId(taskId)
-    engine.assignmentStarted(taskId, approved.assignment.id)
+    engine.assignmentStarted(taskId, approved.assignment.id, { sessionId: 'session-task-1' })
     engine.assignmentEnded(taskId, approved.assignment.id, {
       outcome: 'succeeded',
       result: { summary: '完成', sessionId: 'session-1', artifactPaths: ['/tmp/a.md'] },
@@ -149,6 +153,8 @@ describe('store aggregates', () => {
     expect(storedTask?.result).toEqual({ summary: '完成', sessionId: 'session-1', artifactPaths: ['/tmp/a.md'] })
     expect(storedOutbound?.receipt).toBe('receipt-1')
     expect(storedAssignment?.outcome).toBe('succeeded')
+    expect(reopened.messages.get('message-reply')?.title).toBe('AI工程师孵化中心')
+    expect(reopened.assignments.get(approved.assignment.id)?.sessionId).toBe('session-task-1')
   })
 
   it('rolls back every write of a failed transaction', () => {

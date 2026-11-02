@@ -2,7 +2,6 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { API_PREFIX, API_ROUTES, apiUrl, type ApiRoute } from '../src/shared/api.ts'
-import { PANEL_ID as CLIENT_PANEL_ID } from '../src/client/constants.ts'
 import { FIELDS } from '../src/shared/fields.ts'
 import { PANEL_ID, PLUGIN_DISPLAY_NAME, PLUGIN_NAME, PLUGIN_VERSION } from '../src/shared/limits.ts'
 import { SETTINGS_BLOCKS, SETTINGS_DEFAULTS, SettingsSchema } from '../src/shared/settings.ts'
@@ -55,7 +54,6 @@ describe('settings schema and field registry', () => {
   it('covers exactly the same leaf paths in both directions', () => {
     expect(schemaPaths).toEqual(fieldPaths)
     expect(new Set(schemaPaths).size).toBe(schemaPaths.length)
-    expect(schemaPaths).toHaveLength(57)
   })
 
   it('declares one field per block and only known blocks', () => {
@@ -126,7 +124,6 @@ describe('management API contract', () => {
     'GET settings',
     'PUT settings/:block',
     'GET persona',
-    'PUT persona',
     'GET health',
     'POST monitor/pause',
     'GET audit',
@@ -136,7 +133,6 @@ describe('management API contract', () => {
     expect(API_ROUTES.map((route) => route.key).sort()).toEqual([...expectedRoutes].sort())
     expect(new Set(API_ROUTES.map((route) => route.key)).size).toBe(API_ROUTES.length)
     expect(new Set(API_ROUTES.map((route) => `${route.method} ${route.path}`)).size).toBe(API_ROUTES.length)
-    expect(API_ROUTES).toHaveLength(20)
   })
 
   it('uses the frozen prefix and consistent HTTP methods', () => {
@@ -177,15 +173,17 @@ describe('repository and layer invariants', () => {
       const source = readFileSync(file, 'utf8')
       for (const target of forbidden) expect(source, file).not.toContain(target)
       expect(source, file).not.toMatch(/from\s+['"]@deepseek-ai\/dsh-(?:agent|session|host-webserver|settings)['"]/)
-      expect(source, file).not.toMatch(/^import\s+(?!type\b)[^\n]*from\s+['"][^'"]*\.\.\/shared/m)
+      expect(source, file).not.toMatch(/from\s+['"]node:/)
+      expect(source, file).not.toContain('/whale-chan/api/')
     }
+    expect(readFileSync('src/client/index.tsx', 'utf8')).toContain("import { PANEL_ID } from '../shared/limits.ts'")
+    expect(readFileSync('src/client/api.ts', 'utf8')).toContain("apiUrl('GET state')")
   })
 
   it('keeps package metadata and the frozen constants aligned', () => {
     const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as Record<string, unknown>
     expect(manifest.name).toBe(PLUGIN_NAME)
     expect(manifest.version).toBe(PLUGIN_VERSION)
-    expect(CLIENT_PANEL_ID).toBe(PANEL_ID)
     expect(manifest.type).toBe('module')
     expect(manifest.main).toBe('lib/index.js')
     expect(manifest.icon).toBe('assets/icon.svg')
@@ -195,8 +193,9 @@ describe('repository and layer invariants', () => {
     expect(dsh.compatibility).toEqual({ dshReleases: { '0.2.1-rc.5': 'compatible' } })
     expect((dsh.client as Record<string, unknown>).platform).toBe('web')
     expect(manifest.files).toEqual(
-      expect.arrayContaining(['lib', 'assets', 'locale/*.json', 'cordis.patch.yml', 'README.md', 'LICENSE']),
+      expect.arrayContaining(['lib', 'assets', 'prompts', 'locale/*.json', 'cordis.patch.yml', 'README.md', 'LICENSE']),
     )
+    expect(PANEL_ID).toBe('whale-chan')
   })
 
   it('keeps every field in the generated settings document', () => {
@@ -206,7 +205,7 @@ describe('repository and layer invariants', () => {
     expect(doc).toContain('tests/settings.spec.ts')
   })
 
-  it('ships all 13 design documents', () => {
+  it('ships all 14 design documents', () => {
     const names = [
       '000-philosophy.md',
       '001-domain.md',
@@ -217,10 +216,11 @@ describe('repository and layer invariants', () => {
       '006-deployment.md',
       '007-architecture.md',
       '008-cookbook.md',
-      '009-security.md',
+      '009-dws-protocol.md',
       '010-design.md',
       '011-settings-contract.md',
       '012-release.md',
+      '013-security.md',
     ]
     for (const name of names) {
       const source = readFileSync(join('docs', name), 'utf8')

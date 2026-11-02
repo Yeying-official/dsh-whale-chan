@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, fetchState, isStateView } from '../src/client/api.ts'
+import { API_REQUEST_HEADER, API_REQUEST_HEADER_VALUE, apiUrl } from '../src/shared/api.ts'
 
 const valid = {
   ok: true,
@@ -21,12 +22,19 @@ describe('client state API', () => {
     expect(isStateView(null)).toBe(false)
   })
 
-  it('returns the state from a same-origin response', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response(JSON.stringify(valid), { status: 200 })),
-    )
+  it('returns the state from a same-origin response with the request guard header', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(valid), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
     await expect(fetchState(new AbortController().signal)).resolves.toEqual(valid)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(apiUrl('GET state'))
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: 'GET',
+      headers: expect.objectContaining({
+        accept: 'application/json',
+        [API_REQUEST_HEADER]: API_REQUEST_HEADER_VALUE,
+      }),
+    })
   })
 
   it('reports HTTP failures with their status and server code', async () => {

@@ -1,8 +1,9 @@
 /** Same-origin client for the read-only WS0 management route and its polling hook. */
 import { useCallback, useEffect, useState } from 'react'
+import { API_REQUEST_HEADER, API_REQUEST_HEADER_VALUE, apiUrl } from '../shared/api.ts'
 import type { StateView } from '../shared/models.ts'
 
-const STATE_URL = '/whale-chan/api/state'
+const STATE_URL = apiUrl('GET state')
 
 export class ApiError extends Error {
   constructor(
@@ -30,13 +31,16 @@ export function isStateView(value: unknown): value is StateView {
   )
 }
 
-/** Read `GET /whale-chan/api/state`; all failures become `ApiError` with a status. */
+/** Read the state route; all failures become `ApiError` with a status. */
 export async function fetchState(signal: AbortSignal): Promise<StateView> {
   let response: Response
   try {
     response = await fetch(STATE_URL, {
       method: 'GET',
-      headers: { accept: 'application/json' },
+      headers: {
+        accept: 'application/json',
+        [API_REQUEST_HEADER]: API_REQUEST_HEADER_VALUE,
+      },
       signal,
     })
   } catch (error) {

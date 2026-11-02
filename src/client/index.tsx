@@ -10,9 +10,9 @@ import type { SidebarPanelIconOwnerProps } from '@deepseek-ai/dsh-client-ui-side
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { App } from './app.tsx'
-import { PANEL_ID } from './constants.ts'
 import { NS, dictionaries, type T } from './locale.ts'
 import { PanelProvider } from './provider.tsx'
+import { PANEL_ID } from '../shared/limits.ts'
 
 type WhalePanelId = MainPanelId
 

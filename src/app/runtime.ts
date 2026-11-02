@@ -17,8 +17,13 @@ export function resolveStateDir(raw: string, home = homedir()): string {
   const value = raw.trim()
   if (!value) throw new Error('stateDir must not be empty')
   if (value === '~') return resolve(home)
-  if (value.startsWith('~/') || value.startsWith('~\\')) return resolve(join(home, value.slice(2)))
-  if (!isAbsolute(value)) return resolve(value)
+  // Match exactly one separator after `~`: `~/x` and the Windows form.
+  // `String.fromCharCode(92)` is one backslash, with no escape ambiguity.
+  const homePrefixes = ['~/', `~${String.fromCharCode(92)}`] as const
+  if (homePrefixes.some((prefix) => value.startsWith(prefix))) {
+    return resolve(join(home, value.slice(2)))
+  }
+  if (!isAbsolute(value)) throw new Error('stateDir must be an absolute path or start with ~')
   return resolve(value)
 }
 

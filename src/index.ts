@@ -1,8 +1,9 @@
 /**
  * Cordis host entry of 鲸鱼酱 · 钉钉助理.
  *
- * WS0 mounts the runtime and the read-only state route. No DingTalk event
- * subscription, sender, task executor or model call is started here.
+ * WS0 mounts the runtime, the state route, and in-memory settings/persona
+ * contract routes. No DingTalk event subscription, sender, task executor or
+ * model call is started here.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
@@ -13,7 +14,7 @@ import { Runtime } from './app/runtime.ts'
 import { PLUGIN_NAME } from './shared/limits.ts'
 
 export const name = PLUGIN_NAME
-export const inject = ['webServer', 'settings'] as const
+export const inject = ['webServer', 'settings']
 
 export { Config }
 export type { DeploymentConfig }
@@ -32,6 +33,14 @@ export async function apply(ctx: Context, config: DeploymentConfig): Promise<voi
   const settings = ctx.get('settings')
   if (settings) ctx.effect(() => settings.configure({ auto: false }, ctx.fiber))
 
-  await runtime.ready
+  try {
+    await runtime.ready
+  } catch (error) {
+    ctx.logger.error(
+      'dsh-whale-chan-assistant failed to start: %s',
+      error instanceof Error ? error.message : String(error),
+    )
+    throw error
+  }
   ctx.logger.info('dsh-whale-chan-assistant ready; state directory: %s', runtime.stateDir)
 }

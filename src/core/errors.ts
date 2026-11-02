@@ -35,6 +35,7 @@ export const USER_ERRORS = {
   assignmentNotPending: ['refused', 'The assignment is not pending'],
   assignmentNotRunning: ['refused', 'The assignment is not running'],
   outboundMissing: ['refused', 'The decision has no outbound message to update'],
+  invalidTime: ['refused', 'The supplied time is not a valid ISO-8601 instant'],
 } as const satisfies Record<string, readonly ['missing' | 'refused', string]>
 
 /** Stable code of a refused or missing command. */

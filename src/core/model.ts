@@ -6,12 +6,14 @@
  * by the injected clock, so a snapshot of the domain survives a restart and
  * sorts lexicographically.
  *
- * Two fields extend the WS1 review sketch for traceability, and neither changes
+ * Three fields extend the WS1 review sketch for traceability, and none changes
  * the meaning of the states described in `docs/001-domain.md`:
  *
  * - `Decision.confidence` records the classifier's certainty for one message.
  * - `Task.reason` records why a person cancelled a task, so the panel does not
  *   have to reconstruct it from an event log.
+ * - `InboundMessage.title` carries the channel's conversation title, which the
+ *   thread uses when present and falls back from otherwise.
  */
 
 /** ISO-8601 instant (`new Date().toISOString()` shape). */
@@ -32,6 +34,8 @@ export interface InboundMessage {
   readonly kind: 'at-me' | 'group' | 'dm'
   readonly conversationId: string
   readonly conversationType: 'group' | 'direct'
+  /** Title the channel reports for the conversation, such as a group name. */
+  readonly title?: string
   readonly sender: Sender
   readonly text: string
   /** Whether the message names the assistant, as the channel reported it. */

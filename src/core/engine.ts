@@ -89,6 +89,14 @@ export interface EndAssignmentOptions {
   readonly result?: TaskResult
 }
 
+export interface AssignmentStartOptions {
+  /**
+   * Session the executor started for this assignment. Omitted (or blank) keeps
+   * `sessionId` null; a bound session survives the end of the assignment.
+   */
+  readonly sessionId?: string
+}
+
 export class Engine {
   private readonly repos: Repositories
 
@@ -110,7 +118,7 @@ export class Engine {
       const at = this.now()
       this.repos.messages.save(message)
       const thread = this.repos.threads.get(message.threadKey)
-      this.repos.threads.save(thread ? advanceThread(thread, message.at) : newThread(message, at))
+      this.repos.threads.save(thread ? advanceThread(thread, message) : newThread(message, at))
       const decision: Decision = {
         id: this.options.ids.next('decision'),
         messageId: message.id,
@@ -306,7 +314,12 @@ export class Engine {
     })
   }
 
-  /** Delivery may or may not have happened; the decision stays retryable by a later pass. */
+  /**
+   * The channel could not confirm delivery: the decision and its outbound
+   * message stay `send_unknown`/`unknown`, which is terminal. Nothing resends
+   * them automatically; a person must reconcile the channel, and only an
+   * explicit retry command (added by WS4/WS5) may try again.
+   */
   replyUnknown(decisionId: string, error: string): Decision {
     return this.command((emit) => {
       const at = this.now()
@@ -372,7 +385,7 @@ export class Engine {
       const approval = this.requireApprovalOf(task)
       if (approval.status !== 'pending') throw new UserError('alreadyDecided')
       if (task.status !== 'awaiting-approval') throw new UserError('notAwaitingApproval')
-      if (options.at >= approval.expiresAt) throw new UserError('approvalExpired')
+      if (this.instant(options.at) >= this.instant(approval.expiresAt)) throw new UserError('approvalExpired')
       if (options.workspace.trim().length === 0) throw new UserError('missingWorkspace')
       const decided: Approval = {
         ...approval,
@@ -482,10 +495,11 @@ export class Engine {
   expireTasks(now: IsoTime | Date): readonly string[] {
     return this.command((emit) => {
       const at = this.now()
-      const cutoff = this.iso(now)
+      const cutoff = this.instant(now)
       const expired: string[] = []
       for (const approval of this.repos.approvals.listPending()) {
-        if (approval.expiresAt > cutoff) continue
+        const expiresAt = this.storedInstant(approval.expiresAt)
+        if (expiresAt === null || expiresAt > cutoff) continue
         const task = this.repos.tasks.get(approval.taskId)
         if (!task || task.status !== 'awaiting-approval') continue
         this.repos.approvals.save({ ...approval, status: 'expired' })
@@ -499,15 +513,20 @@ export class Engine {
 
   // Execution
 
-  /** The executor started the pending assignment of an approved task. */
-  assignmentStarted(taskId: string, assignmentId: string): Assignment {
+  /**
+   * The executor started the pending assignment of an approved task, optionally
+   * binding the session it runs. The session is kept when the assignment ends,
+   * so the panel can still find the conversation that did the work.
+   */
+  assignmentStarted(taskId: string, assignmentId: string, options: AssignmentStartOptions = {}): Assignment {
     return this.command((emit) => {
       const at = this.now()
       const task = this.requireTask(taskId)
       if (task.status !== 'approved') throw new UserError('notApproved')
       const assignment = this.requireAssignmentOf(task, assignmentId)
       if (assignment.state !== 'pending') throw new UserError('assignmentNotPending')
-      const running: Assignment = { ...assignment, state: 'running', startedAt: at }
+      const sessionId = options.sessionId?.trim() ? options.sessionId.trim() : null
+      const running: Assignment = { ...assignment, state: 'running', sessionId, startedAt: at }
       const started: Task = { ...task, status: 'running', updatedAt: at }
       this.repos.assignments.save(running)
       this.repos.tasks.save(started)
@@ -573,8 +592,11 @@ export class Engine {
 
   /** Approvals that are pending and still actionable at `now`. */
   pendingApprovals(now: IsoTime | Date): readonly Approval[] {
-    const cutoff = this.iso(now)
-    return this.repos.approvals.listPending().filter((approval) => approval.expiresAt > cutoff)
+    const cutoff = this.instant(now)
+    return this.repos.approvals.listPending().filter((approval) => {
+      const expiresAt = this.storedInstant(approval.expiresAt)
+      return expiresAt !== null && expiresAt > cutoff
+    })
   }
 
   // Helpers
@@ -583,8 +605,21 @@ export class Engine {
     return this.options.clock.now().toISOString()
   }
 
-  private iso(value: IsoTime | Date): IsoTime {
-    return value instanceof Date ? value.toISOString() : value
+  /**
+   * Compare instants as epoch milliseconds, never as ISO strings: callers may
+   * send an offset such as `+08:00`, which does not sort against `Z` text.
+   * A caller-supplied time that does not parse is refused.
+   */
+  private instant(value: IsoTime | Date): number {
+    const time = value instanceof Date ? value.getTime() : Date.parse(value)
+    if (!Number.isFinite(time)) throw new UserError('invalidTime')
+    return time
+  }
+
+  /** A stored instant that a sweep skips instead of trusting when it cannot parse. */
+  private storedInstant(value: IsoTime): number | null {
+    const time = Date.parse(value)
+    return Number.isFinite(time) ? time : null
   }
 
   private command<T>(work: (emit: Emit) => T): T {
@@ -640,11 +675,12 @@ export class Engine {
 
 /** A thread created by the first message of a conversation. */
 function newThread(message: InboundMessage, createdAt: IsoTime): Thread {
+  const title = message.title?.trim()
   return {
     key: message.threadKey,
     targetId: message.targetId,
     kind: message.kind,
-    title: message.kind === 'dm' ? message.sender.nick : message.targetId,
+    title: title && title.length > 0 ? title : message.kind === 'dm' ? message.sender.nick : message.targetId,
     peer: message.kind === 'dm' ? message.sender : null,
     lastMessageAt: message.at,
     createdAt,
@@ -652,11 +688,13 @@ function newThread(message: InboundMessage, createdAt: IsoTime): Thread {
   }
 }
 
-/** An existing thread that just received another message. */
-function advanceThread(thread: Thread, at: IsoTime): Thread {
+/** An existing thread that received another message, including a renamed conversation. */
+function advanceThread(thread: Thread, message: InboundMessage): Thread {
+  const title = message.title?.trim()
   return {
     ...thread,
-    lastMessageAt: at > thread.lastMessageAt ? at : thread.lastMessageAt,
+    ...(title && title.length > 0 && title !== thread.title ? { title } : {}),
+    lastMessageAt: message.at > thread.lastMessageAt ? message.at : thread.lastMessageAt,
     counts: { ...thread.counts, inbound: thread.counts.inbound + 1 },
   }
 }

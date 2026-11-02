@@ -80,6 +80,7 @@ export function decodeNullableJson<T>(
 export function messageFromRow(row: Row): InboundMessage {
   const id = text(row['id'])
   const openDingTalkId = nullableText(row['sender_open_id'])
+  const title = nullableText(row['title'])
   const sender: Sender = {
     userId: text(row['sender_id']),
     nick: text(row['sender_nick']),
@@ -92,6 +93,7 @@ export function messageFromRow(row: Row): InboundMessage {
     kind: text(row['kind']) as InboundMessage['kind'],
     conversationId: text(row['conversation_id']),
     conversationType: text(row['conversation_type']) as InboundMessage['conversationType'],
+    ...(title === null ? {} : { title }),
     sender,
     text: text(row['text']),
     addressed: integer(row['addressed']) === 1,

@@ -38,6 +38,7 @@ const schema1: Migration = (db) => {
       kind TEXT NOT NULL,
       conversation_id TEXT NOT NULL,
       conversation_type TEXT NOT NULL,
+      title TEXT,
       sender_id TEXT NOT NULL,
       sender_nick TEXT NOT NULL,
       sender_open_id TEXT,

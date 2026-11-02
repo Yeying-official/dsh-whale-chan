@@ -98,9 +98,9 @@ export class Store implements Repositories {
       get: (id) => maybe(this.row('SELECT * FROM messages WHERE id = ?', id), messageFromRow),
       save: (message) => {
         this.statement(
-          `INSERT INTO messages (id, thread_key, target_id, kind, conversation_id, conversation_type,
+          `INSERT INTO messages (id, thread_key, target_id, kind, conversation_id, conversation_type, title,
             sender_id, sender_nick, sender_open_id, text, addressed, at, received_at, mentions_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           message.id,
           message.threadKey,
@@ -108,6 +108,7 @@ export class Store implements Repositories {
           message.kind,
           message.conversationId,
           message.conversationType,
+          message.title ?? null,
           message.sender.userId,
           message.sender.nick,
           message.sender.openDingTalkId ?? null,

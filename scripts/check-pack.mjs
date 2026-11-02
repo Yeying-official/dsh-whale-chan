@@ -6,8 +6,7 @@
  * `npm pack --dry-run --json`.
  */
 import { execSync } from 'node:child_process'
-import { existsSync, readFileSync, statSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 
 const problems = []
 const check = (condition, message) => {
@@ -45,7 +44,7 @@ for (const packageName of [
   check(manifest.dsh?.client?.inject?.includes(packageName), `dsh.client.inject is missing ${packageName}`)
 }
 
-const expectedFiles = ['lib', 'assets', 'locale/*.json', 'cordis.patch.yml', 'README.md', 'LICENSE']
+const expectedFiles = ['lib', 'assets', 'prompts', 'locale/*.json', 'cordis.patch.yml', 'README.md', 'LICENSE']
 for (const entry of expectedFiles) check(manifest.files?.includes(entry), `files whitelist is missing ${entry}`)
 check(!manifest.files?.includes('src'), 'files whitelist must not publish src')
 
@@ -106,6 +105,17 @@ if (packed) {
   for (const path of paths) {
     if (path.startsWith('src/') || path.startsWith('tests/') || path.startsWith('node_modules/')) {
       problems.push(`npm pack artifact unexpectedly contains ${path}`)
+    }
+  }
+  if (existsSync('prompts')) {
+    const hasPromptFiles = readdirSync('prompts', { recursive: true, withFileTypes: true }).some((entry) =>
+      entry.isFile(),
+    )
+    if (hasPromptFiles) {
+      check(
+        [...paths].some((path) => path.startsWith('prompts/')),
+        'npm pack artifact is missing prompts/',
+      )
     }
   }
   check(packed.name === manifest.name, 'npm pack name does not match the manifest')

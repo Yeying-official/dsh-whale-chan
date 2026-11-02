@@ -21,6 +21,7 @@
   "files": [
     "lib",
     "assets",
+    "prompts",
     "locale/*.json",
     "cordis.patch.yml",
     "README.md",

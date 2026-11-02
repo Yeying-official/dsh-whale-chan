@@ -1,0 +1,6 @@
+node_modules/
+lib/
+coverage/
+.artifacts/
+pnpm-lock.yaml
+docs/011-settings-contract.md

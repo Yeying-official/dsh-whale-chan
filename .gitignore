@@ -1,0 +1,11 @@
+node_modules/
+lib/
+coverage/
+.artifacts/
+*.tgz
+*.log
+.dsh-whale-chan/
+.DS_Store
+.env
+.env.*
+!.env.example

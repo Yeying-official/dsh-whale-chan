@@ -247,12 +247,8 @@ export interface ValidateTargetsRequest {
 
 export interface SettingsUpdateRequest {
   readonly value: Record<string, unknown>
-  readonly revision?: number
-}
-
-export interface PersonaUpdateRequest {
-  readonly value: PersonaSettings
-  readonly revision?: number
+  /** Required optimistic-concurrency token; missing revisions are rejected. */
+  readonly revision: number
 }
 
 export interface PermissionPresetView {

@@ -4,7 +4,8 @@
  * `ApiContract` is the type-level source of method, path, request and response
  * for every endpoint. `API_ROUTES` is the runtime table used by tests and by a
  * future router; the contract test proves the two agree and that no route is
- * duplicated. WS0 implements only `GET state`.
+ * duplicated. WS0 implements the state route plus in-memory settings/persona
+ * contract canaries; the remaining routes are frozen for later workstreams.
  */
 import type {
   ApproveTaskRequest,
@@ -14,10 +15,10 @@ import type {
   Health,
   MonitorPauseResult,
   Overview,
-  PersonaUpdateRequest,
   PersonaView,
   SettingsUpdateRequest,
   SettingsUpdateResult,
+  SettingsView,
   StateView,
   TargetsView,
   TaskActionRequest,
@@ -29,9 +30,15 @@ import type {
   ValidateTargetsResult,
 } from './models.ts'
 import type { TargetKind } from './limits.ts'
-import type { Settings, SettingsBlock } from './settings.ts'
+import type { SettingsBlock } from './settings.ts'
 
 export const API_PREFIX = '/whale-chan/api/' as const
+
+/** Custom header required on every management request. A cross-origin page cannot
+ * set it without a successful CORS preflight, and this server sends no CORS
+ * allow headers, so it also acts as a same-origin guard. */
+export const API_REQUEST_HEADER = 'x-whale-chan-request' as const
+export const API_REQUEST_HEADER_VALUE = '1' as const
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT'
 
@@ -146,7 +153,7 @@ export interface ApiContract {
     method: 'GET'
     path: 'settings'
     request: Empty
-    response: Settings
+    response: SettingsView
   }
   'PUT settings/:block': {
     method: 'PUT'
@@ -161,12 +168,6 @@ export interface ApiContract {
     method: 'GET'
     path: 'persona'
     request: Empty
-    response: PersonaView
-  }
-  'PUT persona': {
-    method: 'PUT'
-    path: 'persona'
-    request: { body: PersonaUpdateRequest }
     response: PersonaView
   }
   'GET health': {
@@ -217,7 +218,6 @@ export const API_ROUTES = [
   { key: 'GET settings', method: 'GET', path: 'settings' },
   { key: 'PUT settings/:block', method: 'PUT', path: 'settings/:block' },
   { key: 'GET persona', method: 'GET', path: 'persona' },
-  { key: 'PUT persona', method: 'PUT', path: 'persona' },
   { key: 'GET health', method: 'GET', path: 'health' },
   { key: 'POST monitor/pause', method: 'POST', path: 'monitor/pause' },
   { key: 'GET audit', method: 'GET', path: 'audit' },
@@ -242,5 +242,3 @@ export function routeTargets(path: string): readonly TargetKind[] | undefined {
   }
   return undefined
 }
-
-export type { Settings }

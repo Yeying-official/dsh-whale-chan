@@ -1,0 +1,20 @@
+# 鲸鱼酱 · 钉钉助理 bundle layer。
+#
+# WS0 只插入宿主机行，不携带 config：状态目录使用默认的 ~/.dsh-whale-chan。
+# 安装后的状态目录与日志级别由 DSH profile 或未来的面板设置接管。
+- insert:
+    - id: dsh-whale-chan-assistant
+      name: dsh-whale-chan-assistant
+
+    # WS4 将在此加入两个 agent preset：
+    # - id: dsh-whale-chan-replier
+    #   name: '@deepseek-ai/dsh-agent-preset'
+    #   config:
+    #     id: dsh-whale-chan-replier
+    #     name: 鲸鱼酱 · 回复器
+    # - id: dsh-whale-chan-worker
+    #   name: '@deepseek-ai/dsh-agent-preset'
+    #   config:
+    #     id: dsh-whale-chan-worker
+    #     name: 鲸鱼酱 · 任务执行器
+    # 这两个 preset 的 !!js 条件、工具集与人设绑定在 WS4 实测后再冻结。

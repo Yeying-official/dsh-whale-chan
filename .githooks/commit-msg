@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Validate Conventional Commits subject lines. Merge and revert commits are
+# handled by Git and do not need to match the repository's feature convention.
+set -euo pipefail
+
+message_file="${1:-}"
+if [[ -z "${message_file}" || ! -f "${message_file}" ]]; then
+  echo "commit-msg: expected a commit message file" >&2
+  exit 1
+fi
+
+subject="$(sed -n '1p' "${message_file}")"
+if [[ -z "${subject}" || "${subject}" == \#* ]]; then
+  echo "commit-msg: empty commit message" >&2
+  exit 1
+fi
+if [[ "${subject}" =~ ^(Merge|Revert)\  ]]; then
+  exit 0
+fi
+
+pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: .{1,72}$'
+if [[ ! "${subject}" =~ ${pattern} ]]; then
+  cat >&2 <<'EOF'
+commit-msg: subject must follow Conventional Commits, for example:
+  feat(host): mount runtime and state route
+  test: freeze shared settings and api contract
+Allowed types: feat fix docs style refactor perf test build ci chore revert
+Use a lowercase scope, optional !, a colon and a space; keep it to 72 chars.
+EOF
+  exit 1
+fi

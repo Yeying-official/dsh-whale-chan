@@ -1,0 +1,87 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`settings defaults > matches the committed default snapshot 1`] = `
+{
+  "advanced": {
+    "auditRetentionDays": 30,
+    "debugPayloads": false,
+    "dryRun": false,
+    "logLevel": "info",
+  },
+  "dws": {
+    "binaryPath": "dws",
+    "debug": false,
+    "eventTtlHours": 24,
+    "profile": "",
+    "restartBackoffMaxSeconds": 60,
+  },
+  "models": {
+    "reply": {
+      "effort": "",
+      "model": "",
+      "provider": "",
+    },
+    "worker": {
+      "effort": "",
+      "model": "",
+      "provider": "",
+    },
+  },
+  "monitor": {
+    "catchUpMinutes": 10,
+    "enabled": true,
+    "intervalSeconds": 45,
+    "maxTargets": 10,
+    "paused": false,
+    "quietHours": {
+      "enabled": true,
+      "end": "08:00",
+      "start": "22:00",
+    },
+    "replyDuringQuiet": false,
+  },
+  "persona": {
+    "allowEmoji": true,
+    "identity": "",
+    "knowledge": "",
+    "language": "auto",
+    "maxReplyChars": 300,
+    "name": "鲸鱼酱",
+    "rules": [],
+    "samples": [],
+    "signature": "",
+    "tone": "二次元助理",
+  },
+  "reply": {
+    "ackOnTaskCapture": true,
+    "allowedSenders": [],
+    "autoReply": true,
+    "blockedSenders": [],
+    "declineOnReject": false,
+    "ignoreBroadcast": true,
+    "maxPerConversationPerHour": 20,
+    "minGapSeconds": 8,
+    "requireMentionInGroups": true,
+  },
+  "research": {
+    "cacheMinutes": 30,
+    "enabled": true,
+    "includeCitations": true,
+    "maxResults": 5,
+    "onQuestionsOnly": true,
+    "timeoutMs": 8000,
+  },
+  "targets": {
+    "rows": [],
+  },
+  "tasks": {
+    "approvalTtlHours": 24,
+    "enabled": true,
+    "maxConcurrent": 2,
+    "maxOpen": 10,
+    "permissionPreset": "workspace-write",
+    "timeoutMinutes": 20,
+    "workspaceRoot": "",
+  },
+}
+`;

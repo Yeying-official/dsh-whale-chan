@@ -84,6 +84,13 @@ pnpm docs:settings
 - `models.reply` 与 `models.worker` 的 `provider`、`model`、`effort` 为空字符串时表示使用 DSH 默认值。
 - 所有对象块均为 strict：未知键会被拒绝，而不是静默保留。
 
+## 管理 API 变更（Review round 1）
+
+- `GET settings` 返回 `SettingsView`（blocks + revision），不再是裸 `Settings`。
+- `PUT settings/:block` 必须带非负整数 `revision`；缺失为 400 `revision_required`，过期 revision 为 409 `settings_conflict`。
+- 人设唯一写入口是 `PUT settings/persona`；`GET persona` 只读；原 `PUT persona` 已删除。
+- 所有管理请求要求 `x-whale-chan-request: 1`，缺失为 403 且不回传 `stateDir`。
+
 ## 契约测试
 
 `tests/contract.spec.ts` 证明：
@@ -91,7 +98,7 @@ pnpm docs:settings
 1. schema 的全部叶子路径与 field registry 一一对应，没有遗漏或多余字段；
 2. 每个字段声明的默认值与 `SettingsSchema.parse({})` 的结果一致；
 3. 每个 block 至少有一个字段，且不存在未知 block；
-4. 20 个管理 API 端点唯一，方法/路径符合冻结前缀，URL 编码和必填路径参数正确；
+4. 19 个管理 API 端点唯一，方法/路径符合冻结前缀，URL 编码和必填路径参数正确；
 5. 所有 labelKey/hintKey 在中文和英文字典中都存在且非空，两个字典 key 集合一致；
 6. package 版本、engines、manifest、files 白名单与共享常量一致；
 7. 本文档包含每一个字段路径；
@@ -104,3 +111,9 @@ pnpm docs:settings
 3. 每个数值字段的 min/max 可解析、越界与小数被拒绝；
 4. 枚举只接受声明值，错误标量类型和非法时间格式被拒绝；
 5. 目标行缺少 ID、未知字段或非法枚举被拒绝。
+
+## 相关文档
+
+- [009 DWS 协议](009-dws-protocol.md)
+- [010 设计摘要](010-design.md)
+- [013 安全](013-security.md)

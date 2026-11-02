@@ -31,6 +31,8 @@
 
 `Engine` 构造参数是 `{ repos, ids, clock, emit? }`。它不持有数据库、定时器或日志器，所以可以在纯内存实现上完整测试。
 
+对外签名中与后续工作流直接相关的两个细节：`assignmentStarted(taskId, assignmentId, { sessionId? })` 在启动派工时绑定执行器会话；`InboundMessage.title` 是通道提供的会话标题，领域只在非空且与现值不同时更新 Thread 标题。
+
 ## 3. app：持久化
 
 ### 3.1 `Store`
@@ -44,18 +46,18 @@
 
 ### 3.2 表与索引
 
-| 表            | 关键列                                                                                                                          | 索引                                   |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| `messages`    | `id` PK、`thread_key`、`kind`、`sender_*`、`text`、`addressed`、`at`、`received_at`、`mentions_json`；WS1 增列 `sender_open_id` | `messages(thread_key, at)`             |
-| `threads`     | `key` PK、`peer_json`、`last_message_at`、`counts_json`                                                                         | —                                      |
-| `decisions`   | `id` PK、`message_id UNIQUE`、`status`、`draft_json`、`outbound_id`、`task_id`、`confidence`（WS1 增列）、`updated_at`          | `decisions(thread_key, at)`            |
-| `tasks`       | `id` PK、`status`、`approval_id`、`assignment_id`、`result_json`、`reason`（WS1 增列）、`updated_at`                            | `tasks(status, updated_at)`            |
-| `approvals`   | `id` PK、`task_id UNIQUE`、`status`、`expires_at`                                                                               | `approvals(status, expires_at)`        |
-| `assignments` | `id` PK、`task_id`、`state`、`session_id`、`workspace`、`outcome`                                                               | —                                      |
-| `outbound`    | `id` PK、`idempotency_key UNIQUE`、`status`、`attempts`                                                                         | `outbound(status)`                     |
-| `events`      | `seq` 自增 PK、`type`、`at`、`data_json`                                                                                        | `events(at)`                           |
-| `kv`          | `k` PK、`v_json`                                                                                                                | —                                      |
-| `effects`     | 见 §4                                                                                                                           | `effects(state, due_at)`、部分唯一索引 |
+| 表            | 关键列                                                                                                                                   | 索引                                   |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `messages`    | `id` PK、`thread_key`、`kind`、`sender_*`、`text`、`addressed`、`at`、`received_at`、`mentions_json`；WS1 增列 `sender_open_id`、`title` | `messages(thread_key, at)`             |
+| `threads`     | `key` PK、`peer_json`、`last_message_at`、`counts_json`                                                                                  | —                                      |
+| `decisions`   | `id` PK、`message_id UNIQUE`、`status`、`draft_json`、`outbound_id`、`task_id`、`confidence`（WS1 增列）、`updated_at`                   | `decisions(thread_key, at)`            |
+| `tasks`       | `id` PK、`status`、`approval_id`、`assignment_id`、`result_json`、`reason`（WS1 增列）、`updated_at`                                     | `tasks(status, updated_at)`            |
+| `approvals`   | `id` PK、`task_id UNIQUE`、`status`、`expires_at`                                                                                        | `approvals(status, expires_at)`        |
+| `assignments` | `id` PK、`task_id`、`state`、`session_id`、`workspace`、`outcome`                                                                        | —                                      |
+| `outbound`    | `id` PK、`idempotency_key UNIQUE`、`status`、`attempts`                                                                                  | `outbound(status)`                     |
+| `events`      | `seq` 自增 PK、`type`、`at`、`data_json`                                                                                                 | `events(at)`                           |
+| `kv`          | `k` PK、`v_json`                                                                                                                         | —                                      |
+| `effects`     | 见 §4                                                                                                                                    | `effects(state, due_at)`、部分唯一索引 |
 
 标量列只用于索引与筛选，聚合的嵌套值以 JSON 列为准；写入时由 Store 同时维护两者。
 
@@ -80,6 +82,8 @@ UNIQUE INDEX effects_active ON effects(kind, key) WHERE state IN ('waiting','run
 语义：
 
 - `enqueue(kind, key, payload)`：同键的 `waiting` 行直接覆盖为最新载荷并立即到期；同键 `running` 行被覆盖载荷、`generation + 1`，当前尝试结束后该行回到 `waiting` 并以新载荷重跑；否则插入新行。**运行中的重排不会丢任务**，也不会让当前尝试误删新载荷。
+- **为什么不是“插入新的 waiting 行”**：部分唯一索引保持 `UNIQUE(kind, key) WHERE state IN ('waiting','running')`，SQLite 不允许同键同时存在一条 `running` 与一条 `waiting`。在运行中 enqueue 时，覆盖该活动行的载荷并递增 `generation`，让结束时的尝试发现代际变化并把行放回 `waiting`，语义上等价于新排队一条任务，同时保留唯一约束与崩溃安全；当前尝试按自己开始时读到的载荷执行，不会读到半更新的数据。
+- **attempts 规则**：`waiting` 行被覆盖、或 `running` 行被覆盖时都重置为 0；一次失败 `attempts + 1` 并按 `attempts` 计算退避；`Later` 不计数；成功删除行；达到 `maxAttempts` 转 `dead` 并记录最后一次错误。
 - `handle(kind, run, { maxAttempts, baseDelayMs })`：每种 kind 只能注册一个处理器。
 - `start({ concurrency })`：并发上限为全局上限；按 `due_at`、行序取到期行。
 - 失败退避：`min(5 分钟, baseDelayMs × 2^(attempts-1))` 再加不超过 10% 的抖动；`Later` 延后 1 秒且不计失败次数；达到 `maxAttempts` 置 `dead` 并保留错误。
@@ -99,19 +103,19 @@ Effects 不感知领域事务：调用方必须在命令事务提交后入队。
 
 ## 6. 与其它工作流的边界
 
-| 工作流          | 交界                                                                                                                                           |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| WS2 通道/执行器 | 调用 `Engine` 命令与 `openTasks`/`pendingApprovals`；注册 Effects handler；不直接写 Store，不 import core 内部文件（只经 `src/core/index.ts`） |
-| WS3 人设与检索  | 由 app 生成 Draft 文本后调用 `engine.draft`；领域不读设置                                                                                      |
-| WS4 面板        | 通过 app 的只读查询（`store-read`）与 HTTP 路由读状态；批准/拒绝/取消走 `Engine` 命令                                                          |
-| WS5 设置持久化  | 使用 `Kv` 或新增表；不得改动 WS1 的领域状态机与 schema v1 语义，只能追加迁移                                                                   |
+| 工作流          | 交界                                                                                                                                                                                                          |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| WS2 通道/执行器 | 调用 `Engine` 命令与 `openTasks`/`pendingApprovals`；启动派工时用 `assignmentStarted(..., { sessionId })` 绑定会话；注册 Effects handler；不直接写 Store，不 import core 内部文件（只经 `src/core/index.ts`） |
+| WS3 人设与检索  | 由 app 生成 Draft 文本后调用 `engine.draft`；领域不读设置                                                                                                                                                     |
+| WS4 面板        | 通过 app 的只读查询（`store-read`）与 HTTP 路由读状态；批准/拒绝/取消走 `Engine` 命令                                                                                                                         |
+| WS5 设置持久化  | 使用 `Kv` 或新增表；不得改动 WS1 的领域状态机与 schema v1 语义，只能追加迁移                                                                                                                                  |
 
 ## 7. 测试索引
 
 | 文件                            | 覆盖                                                                  |
 | ------------------------------- | --------------------------------------------------------------------- |
-| `tests/core-engine.spec.ts`     | 领域命令与事件（21 条）                                               |
-| `tests/core-invariants.spec.ts` | 10 条硬不变量 + 中途失败回滚 + 迟到批准（13 条）                      |
+| `tests/core-engine.spec.ts`     | 领域命令、事件、会话绑定与标题（23 条）                               |
+| `tests/core-invariants.spec.ts` | 10 条硬不变量 + 中途失败回滚 + 迟到批准 + 偏移时间与非法时间（15 条） |
 | `tests/store.spec.ts`           | 打开/迁移/索引/往返/回滚/唯一约束/损坏 JSON/分页/裁剪/KV（13 条）     |
 | `tests/effects.spec.ts`         | 顺序、并发、覆盖、运行中重排、退避、上限、Later、dead、drain（10 条） |
 | `tests/passes.spec.ts`          | 间隔、runAtStart、单飞、异常隔离、stop、重复注册（6 条）              |

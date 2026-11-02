@@ -12,9 +12,9 @@ $ tsc --noEmit
 （无输出，退出码 0）
 
 $ pnpm test
- ✓ tests/core-invariants.spec.ts (13 tests) 66ms
+ ✓ tests/core-invariants.spec.ts (15 tests) 66ms
  ✓ tests/client-api.spec.ts (4 tests) 79ms
- ✓ tests/core-engine.spec.ts (21 tests) 74ms
+ ✓ tests/core-engine.spec.ts (23 tests) 74ms
  ✓ tests/passes.spec.ts (6 tests) 14ms
  ✓ tests/contract.spec.ts (13 tests) 67ms
  ✓ tests/settings.spec.ts (7 tests) 37ms
@@ -23,8 +23,8 @@ $ pnpm test
  ✓ tests/store.spec.ts (13 tests) 383ms
 
  Test Files  9 passed (9)
-      Tests  103 passed (103)
-   Duration  1.48s
+      Tests  107 passed (107)
+   Duration  1.53s
 
 $ pnpm build
 ℹ Cleaning 4 files
@@ -42,20 +42,23 @@ $ git status --porcelain
 （空）
 ```
 
-`pnpm check`（typecheck + test + build）通过。新增测试：**63 条**（engine 21、invariants 13、store 13、effects 10、passes 6），另有 `contract.spec.ts` 新增 1 条分层检查。测试总数从 39 条增加到 103 条。
+`pnpm check`（typecheck + test + build）通过。新增测试：**67 条**（engine 23、invariants 15、store 13、effects 10、passes 6），另有 `contract.spec.ts` 新增 1 条分层检查。测试总数从 39 条增加到 107 条。
 
 ### 1.1 逐提交验证
 
-用临时 worktree（复用本仓依赖）对 6 个提交分别执行 `tsc --noEmit` 与 `vitest run`，确认历史可独立构建：
+用临时 worktree（复用本仓依赖）对 9 个提交分别执行 `tsc --noEmit` 与 `vitest run`，确认历史可独立构建：
 
-| 提交                                                | typecheck | tests      |
-| --------------------------------------------------- | --------- | ---------- |
-| `feat(core): domain model and engine`               | OK        | 39 passed  |
-| `feat(core): invariants and errors`                 | OK        | 52 passed  |
-| `feat(store): sqlite repositories and migration`    | OK        | 52 passed  |
-| `feat(app): durable effects and passes`             | OK        | 52 passed  |
-| `test: cover engine, store, effects and passes`     | OK        | 103 passed |
-| `docs: document domain, execution and architecture` | OK        | 103 passed |
+| 提交                                                         | typecheck | tests      |
+| ------------------------------------------------------------ | --------- | ---------- |
+| `feat(core): domain model and engine`                        | OK        | 39 passed  |
+| `feat(core): invariants and errors`                          | OK        | 52 passed  |
+| `feat(store): sqlite repositories and migration`             | OK        | 52 passed  |
+| `feat(app): durable effects and passes`                      | OK        | 52 passed  |
+| `test: cover engine, store, effects and passes`              | OK        | 103 passed |
+| `docs: document domain, execution and architecture`          | OK        | 103 passed |
+| `fix(core): bind assignment session and numeric expiry`      | OK        | 103 passed |
+| `test: cover session binding, titles and offset times`       | OK        | 107 passed |
+| `docs: record session binding, titles and effects semantics` | OK        | 107 passed |
 
 临时 worktree 在验证后已删除；`git worktree list` 只保留主工作区。
 
@@ -76,37 +79,45 @@ $ git status --porcelain
 | 10   | 每个命令 `updatedAt` 由注入 clock 决定                                                       | `core-invariants.spec.ts` :: `10. stamps every command with the injected clock`                            |
 | 补充 | 缺任务标题也回滚                                                                             | `core-invariants.spec.ts` :: `refuses a task classification without task detail and leaves nothing behind` |
 | 补充 | 迟到批准被拒绝                                                                               | `core-invariants.spec.ts` :: `refuses a late approval once its deadline passed`                            |
+| 补充 | 偏移时间按数值比较                                                                           | `core-invariants.spec.ts` :: `compares approval deadlines numerically across UTC offsets`                  |
+| 补充 | 非法时间抛 `invalidTime`                                                                     | `core-invariants.spec.ts` :: `refuses a malformed time with invalidTime`                                   |
+| 补充 | 启动时绑定会话，结束后保留                                                                   | `core-engine.spec.ts` :: `binds the executor session to the assignment and keeps it after the end`         |
+| 补充 | 通道标题、改名与空白回退                                                                     | `core-engine.spec.ts` :: `uses the title the channel reports and follows a rename`                         |
 
 ## 3. 测试能否失败：变异实验
 
-每个变异都临时改坏实现，运行对应测试，确认测试失败，然后从备份还原（还原后完整套件仍 103 条通过）。
+每个变异都临时改坏实现，运行对应测试，确认测试失败，然后从备份还原（还原后完整套件仍 107 条通过）。
 
-| 变异 | 改动                                                  | 预期失败的测试     | 实测结果                                                             |
-| ---- | ----------------------------------------------------- | ------------------ | -------------------------------------------------------------------- |
-| M1   | `expireTasks` 的边界由 `expiresAt > cutoff` 改为 `>=` | 不变量 7           | `× 7. expires only overdue pending approvals and stays idempotent`   |
-| M2   | `receive` 不再把 `inbound` 计数加一                   | 不变量 9           | `× 9. increments every thread counter exactly once per domain event` |
-| M3   | `Engine.command` 去掉 `repos.atomic` 包装             | 6b 中途失败回滚    | `× 6b. rolls back the writes of a command that fails in the middle`  |
-| M4   | effects 成功回执始终删除行（丢弃运行中重排的新载荷）  | 运行中重复 enqueue | `× keeps a re-enqueue that arrives while the effect is running`      |
-| M5   | 去掉 pass 的单飞判断                                  | passes 单飞        | `× never overlaps one pass with itself`                              |
+| 变异 | 改动                                                  | 预期失败的测试     | 实测结果                                                                    |
+| ---- | ----------------------------------------------------- | ------------------ | --------------------------------------------------------------------------- |
+| M1   | `expireTasks` 的边界由 `expiresAt > cutoff` 改为 `>=` | 不变量 7           | `× 7. expires only overdue pending approvals and stays idempotent`          |
+| M2   | `receive` 不再把 `inbound` 计数加一                   | 不变量 9           | `× 9. increments every thread counter exactly once per domain event`        |
+| M3   | `Engine.command` 去掉 `repos.atomic` 包装             | 6b 中途失败回滚    | `× 6b. rolls back the writes of a command that fails in the middle`         |
+| M4   | effects 成功回执始终删除行（丢弃运行中重排的新载荷）  | 运行中重复 enqueue | `× keeps a re-enqueue that arrives while the effect is running`             |
+| M5   | 去掉 pass 的单飞判断                                  | passes 单飞        | `× never overlaps one pass with itself`                                     |
+| M6   | 审批时间退回 ISO 字符串比较                           | 偏移时间           | `× compares approval deadlines numerically across UTC offsets`              |
+| M7   | `assignmentStarted` 不写入 `sessionId`                | 会话绑定           | `× binds the executor session to the assignment and keeps it after the end` |
+| M8   | 建 Thread 时忽略通道标题                              | 标题               | `× uses the title the channel reports and follows a rename`                 |
 
-结论：不变量测试、事务测试、effects 重排测试与 passes 单飞测试都不是空跑。
+结论：不变量测试、事务测试、effects 重排测试、passes 单飞测试以及第二轮的三项修复都不是空跑。
 
-## 4. 已知缺口
+## 4. 已知缺口与设计取舍
 
-1. **运行中重排与索引字面描述**：评审要求「部分唯一索引 `UNIQUE(kind,key) WHERE state IN ('waiting','running')`」与「运行中再次 enqueue 会插入新的 waiting 行」。两者在 SQLite 下不能同时成立；实现选择保留索引、以 `generation` 覆盖载荷并在当前尝试结束后重新排队，行为上不丢任务。若要求字面「新行」，需要把索引改为 `WHERE state = 'waiting'` 或引入独立的运行记录列——请评审确认。
-2. **`sessionId` 未写入**：`assignmentStarted` 按评审签名只有两个参数，WS1 无法得知执行器会话 ID；`assignmentEnded` 的 `result.sessionId` 会随结果落库。若 WS2 需要在启动时绑定会话，应新增命令或参数。
-3. **事件持久化未接线**：`Engine.emit` 的订阅者与 `Store.appendEvent` 的连接属于组合根（WS2），WS1 只提供两者和 `audit` 查询。
-4. **目录锁缺失**：按计划留给 WS5；当前依赖 WAL + `busy_timeout`。
-5. **只支持 schema v1**：迁移框架已就绪，但没有历史版本可测；`migrate()` 的幂等与新版本拒绝有测试。
-6. **Effects 的排序粒度**：`pending()` 以 `due_at`、rowid 排序；未实现「同 kind 严格串行」语义（评审未要求），并发由全局 `concurrency` 限制。
-7. **`Thread.title` 推导**：群聊用 targetId、私聊用发送者昵称；真实标题需要通道提供，WS2 可新增更新命令。
+1. **运行中重排的索引取舍**：部分唯一索引保持 `UNIQUE(kind,key) WHERE state IN ('waiting','running')`；运行中 enqueue 覆盖 payload 并 `generation + 1`，当前尝试结束后回到 `waiting` 重跑。按审核要求在 007 文档化了原因与 attempts 重置规则；行为上不丢任务。若未来要求字面「新 waiting 行」，需要改索引或引入独立的运行记录列。
+2. **事件持久化未接线**：`Engine.emit` 的订阅者与 `Store.appendEvent` 的连接属于组合根（WS2）；WS1 只提供两者与 `audit` 查询。
+3. **目录锁缺失**：按计划留给 WS5；当前依赖 WAL + `busy_timeout`。
+4. **只支持 schema v1**：迁移框架已就绪，但没有历史版本可测；`migrate()` 的幂等与新版本拒绝有测试。`messages.title` 直接加入首版 schema（v1 尚未合并发布）。
+5. **Effects 的排序粒度**：`pending()` 以 `due_at`、rowid 排序；未实现「同 kind 严格串行」语义（评审未要求），并发由全局 `concurrency` 限制。
+6. **标题来源依赖通道**：`InboundMessage.title` 由 WS2 提供；缺失时领域仍回退 targetId / sender.nick，WS1 不猜测真实群名。
+7. **发送 unknown 的显式重试**：WS1 只把状态落到终态，retry 命令由 WS4/WS5 实现。
 
 ## 5. 自评
 
 - 依赖方向：core 无 I/O、无 `node:*`、无 DSH/app 层引用；契约测试对每个 core 文件逐一检查 import，并新增 app 持久化模块的禁用依赖检查。
 - 事务边界：每个写命令一个 `atomic`；内存仓储用全量快照验证回滚；真实 SQLite 有回滚、嵌套拒绝与唯一约束测试。
-- 存储：schema/索引/迁移/损坏 JSON/分页/裁剪/KV 均有测试；`StoreCorruptionError` 消息不含 SQL 与路径。
+- 存储：schema/索引/迁移/损坏 JSON/分页/裁剪/KV 均有测试；`StoreCorruptionError` 消息不含 SQL 与路径；`messages.title` 与 `assignments.session_id` 往返有断言。
 - Effects：顺序、并发、覆盖等待行、运行中重排、退避与上限、Later、dead、drain 均有测试；`drain` 后 `waiting` 行保留并在下次 `start` 继续。
 - Passes：间隔、`runAtStart`、单飞、异常隔离、`stop` 收敛、重复注册/非法间隔均有测试。
-- 与评审文字的差异已在 PR 文档 §2.6 列出，未改动 `src/shared`、`package.json`、`src/index.ts`、`http.ts`、client。
-- 需要评审决策的问题：§4 第 1 条（重排语义与索引字面定义）、第 2 条（`sessionId` 绑定时机）。
+- 第二轮审核修复已落地：会话绑定、通道标题、数值时间比较与 `invalidTime`，均有新增测试与变异实验（M6–M8）。
+- 与评审文字的差异已在 PR 文档 §2.6 与 §6 列出，未改动 `src/shared`、`package.json`、`src/index.ts`、`http.ts`、client。
+- 待决问题：无。effects 语义已按要求在 007 文档化；会话绑定与标题已在领域内落地。

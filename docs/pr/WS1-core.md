@@ -31,7 +31,9 @@
 
 - Decision：`queued → classified → drafted → sending → sent|send_unknown|send_failed`；`queued → ignored`；`queued → task_created`；`queued|classified → deferred`。
 - Task：`awaiting-approval → approved → running → succeeded|failed`；`rejected`、`cancelled`、`expired` 为终态。
-- 批准必须同时得到 pending Approval、`at < expiresAt` 和非空 workspace；三张表的写入共享一个事务。
+- 批准必须同时得到 pending Approval、`at < expiresAt`（按 `Date.parse` 数值比较）和非空 workspace；三张表的写入共享一个事务。
+- `assignmentStarted(taskId, assignmentId, { sessionId? })` 在启动时绑定执行器会话；`assignmentEnded` 后仍保留。
+- `InboundMessage.title` 由通道提供：首次建 Thread 使用它，后续非空新标题会更新；缺失时群聊回退 targetId、私聊回退 sender.nick。
 - `assignmentEnded` 只接受匹配的 `assignmentId` 与 `running` 状态，迟到的成功上报不能复活已取消任务。
 
 ### 2.3 存储
@@ -55,30 +57,31 @@
 
 ### 2.6 与 WS0 共享合约的偏差（均为内部细化）
 
-- `Decision` 增加 `confidence`，`Task` 增加 `reason`，`Assignment` 去掉占位字段并采用评审定义；数据库相应增加 `decisions.confidence`、`tasks.reason`、`messages.sender_open_id` 三列。
+- `Decision` 增加 `confidence`，`Task` 增加 `reason`，`InboundMessage` 增加可选 `title`；数据库相应增加 `decisions.confidence`、`tasks.reason`、`messages.sender_open_id`、`messages.title` 列（schema v1 尚未合并发布，直接扩展为首版形状）。
 - `approveTask` 的选项包含 `workspace`（评审文字中「workspace 由调用方给」）。
+- `assignmentStarted` 增加可选 `{ sessionId }`（第二轮审核 P0），空白或省略保持 `null`，结束后保留。
 - `classify(task)` 在缺少标题或 TTL 时抛 `UserError`（`missingTaskDetail` / `missingApprovalTtl`），事务回滚。
-- 迟到批准（`at >= expiresAt`）拒绝为 `approvalExpired`，与 [010 设计摘要](../010-design.md) §4.2「迟到批准无效」一致。
+- 迟到批准（`at >= expiresAt`，数值比较）拒绝为 `approvalExpired`，与 [010 设计摘要](../010-design.md) §4.2「迟到批准无效」一致；非法时间抛 `invalidTime`。
 - 取消待批准任务时，其 pending Approval 记为 `expired`（请求失效），已批准的派工结束为 `cancelled`。
+- `replyUnknown` 的 `send_unknown` 是终态：不自动重发，需主人核对，后续只能由显式 retry 命令（WS4/WS5）重新发起。
 - `src/core/index.ts` 从「零 import」放宽为「只 import 本层与 `../shared` 纯类型」，契约测试相应改写并说明原因。
 
 ## 3. 风险
 
-| 风险                                   | 说明                                                          | 缓解                                                                                     |
-| -------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | --- | ----------------------------- |
-| 运行中重排与部分唯一索引的张力         | 索引不允许同键两条活动行，「插入新 waiting 行」与索引定义冲突 | 采用 generation 覆盖 + 结束后回到 waiting，语义上等价且可测；已在代码注释与 007 文档说明 |
-| `node:sqlite` 在 Node 22/24 的实验状态 | API 稳定但仍有实验告警/未来微调                               | 只使用 `DatabaseSync`/`StatementSync` 基本 API；`engines` 已限 `^22.19                   |     | >=24`；测试在 Node 24.15 通过 |
-| 无目录锁                               | 两个进程同开同一 stateDir 会竞争 WAL 写锁                     | 锁按计划留给 WS5；`busy_timeout` 提供短时重试                                            |
-| 迁移只有 v1                            | 尚无历史数据                                                  | 迁移框架按版本数组实现，后续只需追加一步                                                 |
-| 事件持久化未接线                       | `Engine.emit` 目前无人订阅                                    | `Store.appendEvent` 已提供，WS2 组合根接线；默认仅测试使用                               |
-| `assignmentEnded` 不写 `sessionId`     | WS1 的派工在启动时没有会话 ID                                 | 由 WS2 在会话创建后扩展命令或写回，当前 `sessionId` 保留 null                            |
+| 风险                                   | 说明                                                          | 缓解                                                                                                      |
+| -------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| 运行中重排与部分唯一索引的张力         | 索引不允许同键两条活动行，「插入新 waiting 行」与索引定义冲突 | 按评审要求保留索引，并在 007 文档化 generation 覆盖与 attempts 重置规则；重排不丢任务有测试               |
+| `node:sqlite` 在 Node 22/24 的实验状态 | API 稳定但仍有实验告警/未来微调                               | 只使用 `DatabaseSync`/`StatementSync` 基本 API；`engines` 已限 `^22.19 \|\| >=24`；测试在 Node 24.15 通过 |
+| 无目录锁                               | 两个进程同开同一 stateDir 会竞争 WAL 写锁                     | 锁按计划留给 WS5；`busy_timeout` 提供短时重试                                                             |
+| 迁移只有 v1                            | 尚无历史数据                                                  | 迁移框架按版本数组实现，后续只需追加一步                                                                  |
+| 事件持久化未接线                       | `Engine.emit` 目前无人订阅                                    | `Store.appendEvent` 已提供，WS2 组合根接线；默认仅测试使用                                                |
 
 ## 4. 测试证据
 
-- `pnpm check` 全绿：typecheck、103 个测试、build。
-- 新增 63 条测试：engine 21、invariants 13、store 13、effects 10、passes 6（另有 `contract.spec.ts` 新增 1 条分层检查）。
-- 5 个变异实验均被对应测试杀死（详见 [WS1 测试报告](../test-reports/WS1.md) §3）。
-- 覆盖：幂等、批准门、回滚、过期、取消、计数、时钟注入、schema/索引/迁移、损坏 JSON、分页/裁剪/KV、effects 顺序/并发/重排/退避/Later/dead/drain、passes 间隔/单飞/隔离/停止。
+- `pnpm check` 全绿：typecheck、107 个测试、build。
+- 新增 67 条测试：engine 23、invariants 15、store 13、effects 10、passes 6（另有 `contract.spec.ts` 新增 1 条分层检查）。
+- 8 个变异实验均被对应测试杀死（详见 [WS1 测试报告](../test-reports/WS1.md) §3）。
+- 覆盖：幂等、批准门、回滚、过期、取消、计数、时钟注入、会话绑定、标题、偏移时间、schema/索引/迁移、损坏 JSON、分页/裁剪/KV、effects 顺序/并发/重排/退避/Later/dead/drain、passes 间隔/单飞/隔离/停止。
 
 ## 5. 影响面
 
@@ -96,3 +99,13 @@
 - WS2 通过 `src/core/index.ts` 使用 `Engine`、`Repositories`、`Clock`、`Ids`；用 `Store.open` 与 `Effects`/`Passes` 组合运行时；不直接写表。
 - WS4 通过 `store-read` 查询，通过 `Engine` 命令改变任务状态；不接受 HTTP handler 直接改库。
 - WS5 使用 `Kv` 或新增迁移；不得改变 WS1 状态机与 schema v1 语义。
+
+## 6. 第二轮审核修复（P0）
+
+| 项                                                                    | 落点                                                                                                              |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `assignmentStarted(taskId, assignmentId, { sessionId? })`，结束后保留 | `src/core/engine.ts`、`src/core/model.ts`、`src/app/store.ts`、`tests/core-engine.spec.ts`、`tests/store.spec.ts` |
+| `InboundMessage.title` 建标题、改名与回退；`messages.title` 持久化    | `src/core/model.ts`、`src/core/engine.ts`、`src/app/migration.ts`、`tests/core-engine.spec.ts`                    |
+| 审批时间改用 `Date.parse` 数值比较，非法时间 `invalidTime`            | `src/core/errors.ts`、`src/core/engine.ts`、`tests/core-invariants.spec.ts`                                       |
+| `replyUnknown` 终态说明                                               | `src/core/engine.ts`、`docs/003-execution.md`                                                                     |
+| effects 真实语义：保留唯一索引、generation 覆盖、attempts 重置        | `docs/007-architecture.md`                                                                                        |

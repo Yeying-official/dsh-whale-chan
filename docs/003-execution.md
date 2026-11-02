@@ -29,7 +29,7 @@ awaiting-approval ──────────> approved ───────
 
 1. 任务存在且状态为 `awaiting-approval`；
 2. 任务的 Approval 状态为 `pending`（否则 `already_decided`）；
-3. 批准时间 `at < expiresAt`（否则 `approvalExpired`，任务保持等待，交给过期扫描）；
+3. 批准时间 `at < expiresAt`（按 `Date.parse` 数值比较，允许 `+08:00` 等偏移；否则 `approvalExpired`，任务保持等待，交给过期扫描；无法解析的时间抛 `invalidTime`）；
 4. 调用方给出非空 `workspace`（否则 `missing_workspace`）。
 
 批准的**一个事务**写入三件事：
@@ -43,7 +43,7 @@ awaiting-approval ──────────> approved ───────
 ## 3. Assignment
 
 - 一个任务同一时刻最多一个未结束的 Assignment；`task.assignmentId` 是唯一权威指针。
-- `assignmentStarted(taskId, assignmentId)` 只接受 `approved` 任务与 `pending` 派工，写入 `running` 与 `startedAt`。
+- `assignmentStarted(taskId, assignmentId, { sessionId? })` 只接受 `approved` 任务与 `pending` 派工，写入 `running` 与 `startedAt`；非空 `sessionId` 同时绑定到派工，空白或省略保持 `null`。绑定在 `assignmentEnded` 之后仍保留，供面板查询执行会话。
 - `assignmentEnded(taskId, assignmentId, { outcome, result? })` 只接受 `running` 任务与 `running` 派工：
   - `succeeded` → 任务 `succeeded`；
   - `failed`、`timeout` → 任务 `failed`；
@@ -56,7 +56,7 @@ awaiting-approval ──────────> approved ───────
 
 | 情况            | 领域行为                                                                                                                                                 |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 回复投递未知    | Decision → `send_unknown`，Outbound → `unknown`、`attempts + 1`；等待通道对账，不重复计数                                                                |
+| 回复投递未知    | Decision → `send_unknown`，Outbound → `unknown`、`attempts + 1`；这是终态，不自动重发，需主人核对通道，只有显式 retry 命令（WS4/WS5 实现）才会再次尝试   |
 | 回复投递失败    | Decision → `send_failed`，Outbound → `failed`、`attempts + 1`、记录 `lastError`                                                                          |
 | 人取消任务      | 允许 `awaiting-approval` / `approved` / `running` → `cancelled`，记录 `reason`；待批准的 Approval 记为 `expired`；未结束的 Assignment 结束为 `cancelled` |
 | 批准过期        | `expireTasks(now)` 把 `expiresAt <= now` 的 pending Approval 与仍等待的任务一起置为 `expired`，返回 taskId 列表；重复扫描幂等                            |
@@ -72,6 +72,7 @@ awaiting-approval ──────────> approved ───────
 - **领域事件在提交后投递**：事件先收集，`COMMIT` 成功后同步派发；监听器异常不会撤销已提交状态。
 - **副作用在提交后入队**：调用方先完成命令事务，再把 `Effects.enqueue` 当作独立写入调用。Effects 不感知领域事务，回调失败按退避重试。
 - **执行器回调是独立命令**：WS2 在自己的进程里调用 `assignmentStarted` / `assignmentEnded`，每次都是新的领域事务；崩溃后恢复以任务与派工状态为准。
+- **时间以数值比较**：`approveTask`、`expireTasks`、`pendingApprovals` 都先 `Date.parse` 成毫秒再比较，因此调用方传 `+08:00` 偏移不会误判；非法时间抛 `invalidTime`，存储仍统一为 `toISOString()`。
 
 ## 6. 与执行器的边界（WS2）
 
@@ -79,10 +80,10 @@ awaiting-approval ──────────> approved ───────
 
 - `openTasks()`、`pendingApprovals(now)`、`task(id)` 读取待办；
 - `approveTask` / `rejectTask` / `cancelTask` 由面板路由调用；
-- `assignmentStarted` / `assignmentEnded` 由执行器在真实会话启动/结束时调用；
+- `assignmentStarted` / `assignmentEnded` 由执行器在真实会话启动/结束时调用；启动时用 `sessionId` 绑定会话，结束后仍可从派工查询。
 - `Effects` 与 `Passes` 由 app 组合根启动，执行器只注册自己的 effect handler。
 
-领域不提供：启动 DSH 会话、写文件、发钉钉消息、读设置。执行器的会话 ID 通过 `assignmentEnded` 的结果或后续 WS2 的会话绑定写入，不在 WS1 猜测。
+领域不提供：启动 DSH 会话、写文件、发钉钉消息、读设置。会话 ID 由执行器在 `assignmentStarted` 时给出；任务结果里的 `result.sessionId` 是可选的重复记录，不是唯一来源。
 
 ## 相关文档
 

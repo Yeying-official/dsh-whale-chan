@@ -6,18 +6,18 @@
 
 领域只描述「一条消息如何变成一次经过批准的回复或任务」。它不接触 `dws`、子进程、HTTP、DSH 会话或任何 I/O。
 
-| 概念       | 定义                                  | 关键规则                                                                                                              | 代码             |
-| ---------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ---------------- |
-| Message    | 通道接受的一条入站消息，带稳定事件 ID | 按 `id` 幂等：同一 id 最多产生一条 Decision；保存发送者、正文、会话与时间，不做内容改写                               | `InboundMessage` |
-| Thread     | 一个可追踪会话                        | 键由目标与会话推导，由调用方给出；`counts.inbound/replied/tasks` 各只在对应事件上加一次；`lastMessageAt` 只前进不后退 | `Thread`         |
-| Decision   | 对一条消息的判断与其后续动作          | `queued` 是唯一入口；`task_created` 与回复链路互斥；同一消息只有一条                                                  | `Decision`       |
-| Draft      | 待发送的回复草稿                      | 只由 `draft` 命令写入；`sources` 保留检索引用                                                                         | `Draft`          |
-| Task       | 从消息捕获、需要人批准的可执行单元    | 只能由 `classify(task)` 创建，创建时必须同时有 Approval；终态不可复活                                                 | `Task`           |
-| Approval   | 人对一个任务的明确授权                | 每个任务至多一条；`pending` 才可被批准或拒绝；过期后迟到批准无效                                                      | `Approval`       |
-| Assignment | 已批准任务到执行器的派工              | 每个任务同一时刻最多一个未结束派工；只有匹配的 `assignmentId` 与 `running` 状态能结束任务                             | `Assignment`     |
-| Outbound   | 已排队的对外消息                      | `idempotencyKey` 唯一，同一键最多产生一条外部消息；状态由通道回执推进                                                 | `Outbound`       |
+| 概念       | 定义                                  | 关键规则                                                                                                                                                                                                                                    | 代码             |
+| ---------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| Message    | 通道接受的一条入站消息，带稳定事件 ID | 按 `id` 幂等：同一 id 最多产生一条 Decision；保存发送者、正文、会话与时间，不做内容改写                                                                                                                                                     | `InboundMessage` |
+| Thread     | 一个可追踪会话                        | 键由目标与会话推导，由调用方给出；`counts.inbound/replied/tasks` 各只在对应事件上加一次；`lastMessageAt` 只前进不后退；标题来自 `InboundMessage.title`（WS2 提供），缺失时群聊回退 `targetId`、私聊回退 `sender.nick`，后续非空新标题会更新 | `Thread`         |
+| Decision   | 对一条消息的判断与其后续动作          | `queued` 是唯一入口；`task_created` 与回复链路互斥；同一消息只有一条                                                                                                                                                                        | `Decision`       |
+| Draft      | 待发送的回复草稿                      | 只由 `draft` 命令写入；`sources` 保留检索引用                                                                                                                                                                                               | `Draft`          |
+| Task       | 从消息捕获、需要人批准的可执行单元    | 只能由 `classify(task)` 创建，创建时必须同时有 Approval；终态不可复活                                                                                                                                                                       | `Task`           |
+| Approval   | 人对一个任务的明确授权                | 每个任务至多一条；`pending` 才可被批准或拒绝；过期后迟到批准无效                                                                                                                                                                            | `Approval`       |
+| Assignment | 已批准任务到执行器的派工              | 每个任务同一时刻最多一个未结束派工；只有匹配的 `assignmentId` 与 `running` 状态能结束任务；`sessionId` 在 `assignmentStarted` 时可选绑定，未绑定为 `null`，结束/取消后保留                                                                  | `Assignment`     |
+| Outbound   | 已排队的对外消息                      | `idempotencyKey` 唯一，同一键最多产生一条外部消息；状态由通道回执推进                                                                                                                                                                       | `Outbound`       |
 
-`Decision.confidence` 与 `Task.reason` 是 WS1 为可解释性补充的字段：前者记录分类置信度，后者记录人工取消的原因；它们不引入新的状态。
+`Decision.confidence` 与 `Task.reason` 是 WS1 为可解释性补充的字段：前者记录分类置信度，后者记录人工取消的原因；它们不引入新的状态。`InboundMessage.title` 是通道提供的会话标题，只影响 Thread 展示，不参与任何判断。
 
 ## 2. 状态机
 
@@ -34,6 +34,7 @@ queued ──classify(task)──> task_created
 ```
 
 - `sending → *` 只由通道回执推进；`sent` 之后不再改变。
+- `send_unknown` 是终态：不自动重发，需主人核对通道；后续只能由显式的 retry 命令（WS4/WS5 实现）重新发起。
 - `deferred` 与终态都不能再被分类或排队。
 - `task_created` 只表示任务已捕获，回复要等任务执行结束后由新的 Decision 产生（WS2 起）。
 
@@ -73,7 +74,9 @@ awaiting-approval ──expire──> expired
 补充规则（各有测试）：
 
 - 迟到批准（`at >= expiresAt`）被拒绝为 `approvalExpired`，任务保持 `awaiting-approval`，等过期扫描处理。
-- `receive` 的 Thread `lastMessageAt` 取消息时间与既有值的较大者。
+- 所有时间比较按 `Date.parse` 的数值进行，接受带时区偏移的 ISO 时间；非法时间抛 `invalidTime`。`expiresAt` 仍以 `toISOString()` 存储。
+- `assignmentStarted(taskId, assignmentId, { sessionId? })` 在启动时绑定执行器会话；空字符串按未绑定处理，结束后仍可查询。
+- `receive` 的 Thread `lastMessageAt` 取消息时间与既有值的较大者；标题只在非空且不同时更新。
 - 领域事件在事务提交后同步投递；监听器抛错不会回滚已提交命令。
 
 ## 4. 幂等与显式 ID

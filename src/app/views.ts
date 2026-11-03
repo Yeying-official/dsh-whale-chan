@@ -29,6 +29,7 @@ import type {
   Overview,
   StateView,
   Target,
+  TargetWorkspace,
   TargetsView,
   Task as TaskView,
   TaskDetail,
@@ -162,8 +163,26 @@ function toThreadSummary(thread: Thread): ThreadSummary {
   }
 }
 
-/** One target row as the panel edits it. */
-export function targetsView(settings: SettingsService): TargetsView {
+/** The target fields a workspace projection reads; the row itself is not exposed here. */
+export interface TargetWorkspaceInput {
+  readonly kind: TargetKind
+  readonly id: string
+  readonly label: string
+}
+
+/** Fills the read-only workspace field of a target row. */
+export type TargetWorkspaceResolver = (target: TargetWorkspaceInput) => TargetWorkspace
+
+/**
+ * One target row as the panel edits it.
+ *
+ * The workspace field is read-only and derived, never stored: `ready` targets
+ * have one concrete directory, while a global subscription or a send-only open
+ * id reports `per-conversation` because its directory is created by the first
+ * message. Without a resolver (an older composition) the field is omitted
+ * rather than guessed.
+ */
+export function targetsView(settings: SettingsService, resolveWorkspace?: TargetWorkspaceResolver): TargetsView {
   const rows = settings.current().targets.rows
   return {
     targets: rows.map(
@@ -174,6 +193,7 @@ export function targetsView(settings: SettingsService): TargetsView {
         enabled: row.enabled,
         mentionOnly: row.mentionOnly,
         replyMode: row.replyMode,
+        ...(resolveWorkspace === undefined ? {} : { workspace: resolveWorkspace(row) }),
       }),
     ),
     supportedKinds: TARGET_KINDS,

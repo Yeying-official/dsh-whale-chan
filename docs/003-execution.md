@@ -90,8 +90,8 @@ interface ExecutorResult {
 
 1. 批准门（§2）。
 2. `runs` 里已存在同一 `taskId` → 抛 `ExecutorError('alreadyRunning')`，不碰会话。
-3. 工作区：批准人选择的 `Assignment.workspace` 优先（展开 `~`，必须是绝对路径，否则抛 `UserError('invalidWorkspace')`（领域错误码，API 按用户可纠正错误映射）且不建任何东西）；没有选择时才回退到 `tasks.workspaceRoot`（展开 `~`）或 `<stateDir>/tasks` 拼上 `task.id`。然后 `mkdir -p`。回退路径里 `task.id` 必须是单一安全路径段，含 `/`、`\`、`..` 时抛 `ExecutorError('unsafeTaskId')`。
-4. `ensureSession`：会话 id `whale-task-<taskId>-<assignmentId 后 8 位>`、preset `dsh-whale-chan-worker`、权限 `settings.tasks.permissionPreset`（默认 `workspace-write`）、标题 `任务 · <title>`、系统提示与模型路由（见 §5）。
+3. 工作区：批准人选择的 `Assignment.workspace` 优先（展开 `~`，必须是绝对路径，否则抛 `UserError('invalidWorkspace')`（领域错误码，API 按用户可纠正错误映射）且不建任何东西）。没有选择时用组合根注入的会话工作区解析器：根为 `tasks.workspaceRoot`（展开 `~`）或 `<stateDir>/workspaces`，目录为 `<root>/conversation-<sha256(threadKey) 前 16 位>`，与该会话的回复器**同一个目录**。没有注入解析器（旧调用方）时才回退 `<root>/<taskId>`，此时 `task.id` 必须是单一安全路径段，含 `/`、`\`、`..` 时抛 `ExecutorError('unsafeTaskId')`。解析出路径后统一 `mkdir -p`；目录名永远由哈希生成，领域 id 不会成为路径段。
+4. `ensureSession`：会话 id `whale-task-<taskId>-<assignmentId 后 8 位>`、preset `dsh-whale-chan-worker`、权限 `settings.tasks.permissionPreset`（默认 `workspace-write`）、标题 `任务 · <title>`、工作区标题为会话工作区的 `钉钉 · <会话标题>`（显式批准目录则不指定，沿用会话标题）、系统提示与模型路由（见 §5）。
 5. 投递任务消息，`requestId = task:<taskId>:<assignmentId|initial>`；同一个派工重复投递不会产生第二条消息（§6）。`task.result.summary` 非空时，消息里追加「上一轮结果（供参考）」段落——重试是全新会话，这是它唯一能看到上次结论的途径。
 6. `awaitTurnEnd`，预算 `max(settings.tasks.timeoutMinutes 分钟, 90 秒)`：`tasks.timeoutMinutes` 是任务总预算，
    但单回合永远至少给 90 秒（`MODEL_TURN_TIMEOUT_MS`），否则 1 分钟的任务会在本地模型吐出首 token 前就被掐断。
@@ -100,23 +100,23 @@ interface ExecutorResult {
 
 ## 5. 会话、工作区与权限
 
-| 项       | 任务执行会话                                                    | 回复器                                                 |
-| -------- | --------------------------------------------------------------- | ------------------------------------------------------ |
-| 会话 id  | `whale-task-<taskId>-<assignmentId 后 8 位>`                    | `whale-reply-<threadDigest 前 12 位>`（可见 DSH 会话） |
-| 工作区   | `Assignment.workspace`，缺省用 `<tasks.workspaceRoot>/<taskId>` | `~/.dsh-whale-chan/workspace`                          |
-| preset   | `dsh-whale-chan-worker`                                         | `dsh-whale-chan-replier`                               |
-| 权限预设 | `settings.tasks.permissionPreset`（默认窄）                     | `workspace-write`                                      |
-| 模型     | `settings.models.worker`                                        | `settings.models.reply`                                |
-| 标题     | `任务 · <title>`                                                | `钉钉 · <thread 标题>`                                 |
-| 系统提示 | 人设 + 任务 brief/要求/发起人 + 安全规则 + 汇报（面向发起人）   | preset 的 persona 段；完整指示随消息投递               |
+| 项       | 任务执行会话                                                                      | 回复器                                                 |
+| -------- | --------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| 会话 id  | `whale-task-<taskId>-<assignmentId 后 8 位>`                                      | `whale-reply-<threadDigest 前 12 位>`（可见 DSH 会话） |
+| 工作区   | `Assignment.workspace`；批准未指定目录时为该会话的 `<root>/conversation-<digest>` | 与该会话任务共用同一个 `<root>/conversation-<digest>`  |
+| preset   | `dsh-whale-chan-worker`                                                           | `dsh-whale-chan-replier`                               |
+| 权限预设 | `settings.tasks.permissionPreset`（默认窄）                                       | `workspace-write`                                      |
+| 模型     | `settings.models.worker`                                                          | `settings.models.reply`                                |
+| 标题     | `任务 · <title>`                                                                  | `钉钉 · <thread 标题>`                                 |
+| 系统提示 | 人设 + 任务 brief/要求/发起人 + 安全规则 + 汇报（面向发起人）                     | preset 的 persona 段；完整指示随消息投递               |
 
 - **系统提示**由 `renderPersona(persona, …)` 渲染的人设块加任务段组成，通过 `agent.ctx.systemPrompt.section({ name: 'dsh-whale-chan-task', order: 900, interpolate: false })` 注册。它不是 `complete` 段：preset 自带的 persona 与指令段落保留，本段追加在后。`interpolate: false` 保证主人写进人设的字面 `{{…}}` 不会被 DSH 变量替换。
 - **汇报是给人看的**：`## 汇报` 段要求 worker 只写结果摘要（做了什么、改了哪些文件、怎么验证、还有什么没做完），并明确禁止 `Route:`/`Aegis` 等内部分类、会话 id（`whale-task-…`）、工作区绝对路径、工具名/函数名、推理旁白与 emoji。这段汇报会原样进群回复，模板层脱敏只是第二道防线。
 - **权限**只取设置里的两个值；其它值一律按 `workspace-write` 处理。
-- **工作区以批准为准**：`ExecutorRequest.workspace` 由 WS5 从 `Assignment.workspace` 传入，优先于 `tasks.workspaceRoot`；两者都没有配置时用 `<stateDir>/tasks/<taskId>`。相对路径一律拒绝（`UserError('invalidWorkspace')`，属领域 `refused` 组），因为 DSH 会按宿主工作目录解析它，主人无法预测任务落在哪里。
+- **工作区按会话共享**：批准人选择的目录仍然最优先（人工逃生口）；批准没选目录时，任务跑在该会话的工作区 `<root>/conversation-<sha256(threadKey) 前 16 位>`，根 `tasks.workspaceRoot` 或 `<stateDir>/workspaces`。同一个会话的回复器会话与任务会话因此共用一个目录，文件可以被后续回复和下一次任务直接看到。相对路径一律拒绝（`UserError('invalidWorkspace')`，属领域 `refused` 组），因为 DSH 会按宿主工作目录解析它，主人无法预测任务落在哪里；`tasks.workspaceRoot` 写成相对路径时，工作区服务记录 warning 并回退到默认根。
 - **模型**来自设置的两个独立路由：worker 用 `settings.models.worker`（会话创建后、首个回合前写入 `model/selection`，只注入第一次请求）；回复器用 `settings.models.reply`（`SessionModel` 在 `ensureSession` 时传入，会话内沿用）。两者都不**修改** DSH 的全局默认模型。
-- 任务会话按需创建：`whale-task-*` 的 id 带派工后缀，因此**重试是新会话**，不会复用上次失败的对话。
-- **回复器使用可见的 DSH 会话**：每个线程一个 `whale-reply-<digest>` 会话，preset 为 `dsh-whale-chan-replier`，工作区 `<stateDir>/workspace`，标题 `钉钉 · <thread 标题>`；交互过程留在 DSH 会话里，主人可查看，工具集也保留（回复器没有 shell/文件/job，只带 persona、指令、时间与 `tool-web`）。
+- 任务会话按需创建：`whale-task-*` 的 id 带派工后缀，因此**重试是新会话**，不会复用上次失败的对话；派工记录里保存的是解析后的实际工作区路径（`Assignment.workspace`）。
+- **回复器使用可见的 DSH 会话**：每个线程一个 `whale-reply-<digest>` 会话，preset 为 `dsh-whale-chan-replier`，工作区与任务共用 `<root>/conversation-<digest>`，工作区标题 `钉钉 · <thread 标题>`（`@我` 或标题缺失时追加 8 位短哈希），会话标题同样是 `钉钉 · <thread 标题>`；交互过程留在 DSH 会话里，主人可查看，工具集也保留（回复器没有 shell/文件/job，只带 persona、指令、时间与 `tool-web`）。会话 id 的哈希输入是 `<threadKey>\0v2`，因此 v2 布局第一次运行会新建会话而不是复用旧的共享工作区会话；旧会话与其历史原样保留。
 - **T3 超时的根因是 TurnTracker，不是工具 schema**：DSH 先写 inbox 的 `user/message`、再发 `turn/start`；未认领的消息若被上一轮 `turn/end` 结算，就会把 7–12 秒完成的回复误判为超时。会话跟踪器已改为“先记待认领、由下一个 `turn/start` 认领”（`05762fa`），因此保留会话与工具不会牺牲结算正确性。
 - `LlmModel`（`src/executor/llm-model.ts`）是**未接线的直连实验**：它不建会话、不注册工具，只保留作为对照/将来需要无会话回复时的参考；当前运行时不用它。
 
@@ -162,7 +162,7 @@ interface ExecutorResult {
 4. 发出 `task.retried`（`{ taskId, assignmentId }`）。
 5. 旧派工保留在 `assignments` 表里（`ended`、`failed`），审计链不丢。
 
-HTTP `POST tasks/:id/retry` 在命令提交后 `effects.enqueue('launch', taskId, { assignmentId, workspace })`；`launch` 处理器由 WS5b 注册并执行（见 §8.2）。工作区缺省规则与批准相同：`tasks.workspaceRoot` 或 `<stateDir>/tasks` 加 `<taskId>`，`~` 展开且必须为绝对路径。
+HTTP `POST tasks/:id/retry` 在命令提交后 `effects.enqueue('launch', taskId, { assignmentId, workspace })`；`launch` 处理器由 WS5b 注册并执行（见 §8.2）。工作区分三种来源，优先顺序与批准相同：请求体里的显式目录（`~` 展开，必须是绝对路径）→ 该任务会话的工作区 `<root>/conversation-<digest>` → 没有工作区解析器时回退 `<stateDir>/tasks/<taskId>`。`<root>` 为 `tasks.workspaceRoot` 或 `<stateDir>/workspaces`。
 
 ### 8.2 任务结果回报链路（WS5b）
 

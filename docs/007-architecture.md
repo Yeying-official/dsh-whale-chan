@@ -4,15 +4,15 @@
 
 ## 1. 分层与依赖方向
 
-| 层                    | 职责                                                                     | 允许依赖                                                            | 禁止                                                                                            |
-| --------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `src/shared`          | 设置 schema、API 合约、字段表、边界常量                                  | 浏览器与 Node 通用的纯模块                                          | Node 内置模块、宿主实现、DSH 包                                                                 |
-| `src/core`            | 领域类型与规则（`Engine`）                                               | 本层、`src/shared` 的纯类型                                         | I/O、`node:*`、`@deepseek-ai/*`、app/channel/executor/client                                    |
-| `src/app`             | 存储、迁移、effect 队列、pass 调度、KV、只读查询、组合根（`runtime.ts`） | core、shared、Node 本地能力；**仅组合根**可 import channel/executor | 除 `runtime.ts`/`dingtalk-channel.ts` 外，app 模块不得依赖 channel、executor、client、HTTP 宿主 |
-| `src/channel`（WS2）  | dws 子进程、事件解码、发送参数、目标发现                                 | shared、core 类型                                                   | 领域决策、绕过 sender 直接写库                                                                  |
-| `src/brain`（WS3）    | 人设/提示渲染、分类、回复策略与生成、检索预算、限流                      | shared 设置类型、自有端口                                           | I/O 直连、DSH 包、core                                                                          |
-| `src/executor`（WS4） | DSH 会话与任务执行、回复器模型、检索适配、preset                         | core/brain 的端口类型、DSH 服务、Node                               | 直接发钉钉消息、写领域存储                                                                      |
-| `src/client`          | Web 面板                                                                 | shared 类型与字段表                                                 | 宿主实现、Node 模块、发送层                                                                     |
+| 层                    | 职责                                                                                     | 允许依赖                                                                                                                            | 禁止                                                              |
+| --------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `src/shared`          | 设置 schema、API 合约、字段表、边界常量                                                  | 浏览器与 Node 通用的纯模块                                                                                                          | Node 内置模块、宿主实现、DSH 包                                   |
+| `src/core`            | 领域类型与规则（`Engine`）                                                               | 本层、`src/shared` 的纯类型                                                                                                         | I/O、`node:*`、`@deepseek-ai/*`、app/channel/executor/client      |
+| `src/app`             | 存储、迁移、effect 队列、pass 调度、KV、只读查询、会话工作区服务、组合根（`runtime.ts`） | core、shared、Node 本地能力；**仅组合根**可 import channel/executor；`workspaces.ts` 可 import `executor/workspace.ts` 的纯命名函数 | 除上述例外，app 模块不得依赖 channel、executor、client、HTTP 宿主 |
+| `src/channel`（WS2）  | dws 子进程、事件解码、发送参数、目标发现                                                 | shared、core 类型                                                                                                                   | 领域决策、绕过 sender 直接写库                                    |
+| `src/brain`（WS3）    | 人设/提示渲染、分类、回复策略与生成、检索预算、限流                                      | shared 设置类型、自有端口                                                                                                           | I/O 直连、DSH 包、core                                            |
+| `src/executor`（WS4） | DSH 会话与任务执行、回复器模型、检索适配、preset                                         | core/brain 的端口类型、DSH 服务、Node                                                                                               | 直接发钉钉消息、写领域存储                                        |
+| `src/client`          | Web 面板                                                                                 | shared 类型与字段表                                                                                                                 | 宿主实现、Node 模块、发送层                                       |
 
 ```text
                               ┌────────────────────────────────────────────────┐
@@ -45,7 +45,7 @@
 
 更准确地说，`effects` 是唯一的异步驱动者：`classify → research → compose → send` 与 `launch → finish → send` 都是持久 effect；`passes` 只负责「到期」与「启动恢复」，不解释业务。`channel` 不知道领域，`engine` 不做 I/O，`brain` 与 `executor` 只经端口看见彼此。
 
-依赖方向固定为 `client → shared`、`channel / brain / executor → core → shared`，`src/app` 的存储与调度模块只依赖 core/shared/Node，**只有组合根** `runtime.ts`（及其 `dingtalk-channel.ts` 适配器）可以 import `src/channel` 与 `src/executor`。`brain` 与 `executor` 只通过端口互相看见（`executor` 复用 `brain` 的 `ModelPort`/`ResearchPort` 类型，`brain` 不认识 `executor`）。`tests/contract.spec.ts` 强制检查：
+依赖方向固定为 `client → shared`、`channel / brain / executor → core → shared`，`src/app` 的存储与调度模块只依赖 core/shared/Node，**只有组合根** `runtime.ts`（及其 `dingtalk-channel.ts` 适配器）可以 import `src/channel` 与 `src/executor`。唯一额外例外是 `src/app/workspaces.ts`：它复用 `src/executor/workspace.ts` 的纯命名函数（`crypto` + `path`，不碰 DSH 服务、HTTP 或会话），否则「路径怎么算」会在 app 与 executor 各写一份。`brain` 与 `executor` 只通过端口互相看见（`executor` 复用 `brain` 的 `ModelPort`/`ResearchPort` 类型，`brain` 不认识 `executor`）。`tests/contract.spec.ts` 强制检查：
 
 - core 不包含 `require`；每个 import 只能是 `./…` 或 `../shared/…`，不得是 `node:*`、`@deepseek-ai/*` 或 `../app|channel|executor|client`；
 - `store`、`store-read`、`migration`、`effects`、`passes`、`kv` 不依赖 channel、executor、client 或 HTTP 宿主；
@@ -194,17 +194,21 @@ brain 不开 socket、不 spawn 进程、不 import DSH 包：所有外部能力
 
 ### 6.3 executor（WS4）
 
-| 端口/类型                                                                     | 作用                                                                                               |
-| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `TaskExecutor.execute/cancel`                                                 | 执行一个已批准任务；`onStarted`/`onFinished` 对应领域两个命令                                      |
-| `SessionHost.ensureSession/deliver/awaitTurnEnd/readFinalText/cancel/dispose` | 所有 DSH 调用的唯一入口，按 `SessionRef` 寻址，无跨任务状态                                        |
-| `DshSessionHost`                                                              | 真实实现：`sessionController`、`workspaceRegistry`、`permissionPresets`、`agents`、`session/event` |
-| `DshTaskExecutor`                                                             | worker 会话生命周期、系统提示、超时（单回合 90 秒 / 任务总预算 `timeoutMinutes`）、取消、结果映射  |
-| `SessionModel`（`implements ModelPort`）                                      | 每个线程一个可见 DSH 会话（`whale-reply-*`），带 replier preset 与工具；串行、限轮、限时、限长     |
-| `DshResearch`（`implements ResearchPort`）                                    | `ctx.web.search` 适配，空结果/异常/中止一律降级为空                                                |
-| `seedRoleModel` / `routeSelection`                                            | 把 `settings.models.*` 播种到新会话（`model/selection` + 首次请求注入），不改全局默认              |
+| 端口/类型                                                                     | 作用                                                                                                                                                                    |
+| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TaskExecutor.execute/cancel`                                                 | 执行一个已批准任务；`onStarted`/`onFinished` 对应领域两个命令                                                                                                           |
+| `SessionHost.ensureSession/deliver/awaitTurnEnd/readFinalText/cancel/dispose` | 所有 DSH 调用的唯一入口，按 `SessionRef` 寻址，无跨任务状态                                                                                                             |
+| `DshSessionHost`                                                              | 真实实现：`sessionController`、`workspaceRegistry`、`permissionPresets`、`agents`、`session/event`；`ensureSession` 用 `workspaceTitle` 注册目录，标题变化时 `setTitle` |
+| `DshTaskExecutor`                                                             | worker 会话生命周期、系统提示、超时（单回合 90 秒 / 任务总预算 `timeoutMinutes`）、取消、结果映射；批准未指定目录时使用注入的会话工作区                                 |
+| `SessionModel`（`implements ModelPort`）                                      | 每个线程一个可见 DSH 会话（`whale-reply-*`），带 replier preset 与工具；串行、限轮、限时、限长；工作区由注入的 `workspaceFor` 按会话解析                                |
+| `conversationWorkspace` / `conversationWorkspaceTitle`（`workspace.ts`）      | 纯函数：`<root>/conversation-<sha256(threadKey) 前 16 位>` 与 `钉钉 · <标题>`；`WORKSPACE_LAYOUT_VERSION` 只参与会话 id                                                 |
+| `WorkspaceService`（`src/app/workspaces.ts`）                                 | 根解析（`tasks.workspaceRoot` → `<stateDir>/workspaces`）、目标投影、启用群/单聊的 best-effort 预建与标题更新                                                           |
+| `DshResearch`（`implements ResearchPort`）                                    | `ctx.web.search` 适配，空结果/异常/中止一律降级为空                                                                                                                     |
+| `seedRoleModel` / `routeSelection`                                            | 把 `settings.models.*` 播种到新会话（`model/selection` + 首次请求注入），不改全局默认                                                                                   |
 
 执行器不写领域存储、不发钉钉消息；它把任务结果交给 app，由 app 写 `assignmentEnded` 并把摘要转成 Outbound。
+
+**工作区归属**：一个会话一个目录，名字由 `threadKey` 的 SHA-256 前 16 位决定，回复器与任务共用。纯命名规则在 `src/executor/workspace.ts`（无宿主依赖），根、目标预建和注册表写在 `src/app/workspaces.ts`；`Runtime` 把同一个解析器注入 `SessionModelPool` 与 `DshTaskExecutor`，HTTP 批准/重试的缺省目录也走它，因此三条路径不可能算出不同目录。`at-me` 与 `open:` 目标没有单一会话，只在首条消息时惰性创建。
 
 回复器使用真实 DSH 会话，因此回合结算必须经过 TurnTracker：DSH 先写 inbox 的 `user/message`、再发 `turn/start`；未认领的消息只能由下一个 `turn/start` 认领，不能用上一轮 `turn/end` 结算。T3 真机“7–12 秒完成却超时”的根因就在这里（`05762fa` 修复），与 replier preset 的工具 schema 无关。`LlmModel`（`src/executor/llm-model.ts`）是未接线的直连实验，仅保留作对照。
 
@@ -233,7 +237,7 @@ Outbound 有两条入口，共用同一个发送处理器：
 
 `createHttpHandler(HttpDeps)` 实现 19 条冻结路由；`httpDeps(runtime)` 用 getter 惰性取 `settings`/`store`/`engine`/`effects`/`clock`，因此路由可以在启动完成前挂载，未就绪时统一返回 503。`Runtime` 打开 `<stateDir>/state.db`、`SettingsService`、`Engine`、`Effects`，并持有 `<stateDir>/.lock`（proper-lockfile，stale 10 s）。通道端口 `ChannelPort` 来自组合根；没有通道时 `targets/discover|validate` 返回 503 `channel_unavailable`。任务动作只 `enqueue('launch', …)`，实际执行由 `launch` handler 负责。
 
-视图全部由 `src/app/views.ts` 从领域对象投影到 `src/shared/models.ts`：domain `approved` → 面板 `queued`，审计行来自 `events` 表（引擎事件由 Runtime 的 `emit` 写入）。
+视图全部由 `src/app/views.ts` 从领域对象投影到 `src/shared/models.ts`：domain `approved` → 面板 `queued`，审计行来自 `events` 表（引擎事件由 Runtime 的 `emit` 写入）。`targetsView` 额外填充只读的 `workspace` 投影（`ready` 带具体目录，`per-conversation` 的 `path` 为 `null`），字段来自 `WorkspaceService`，不落库、不可写。
 
 ### 6.6 组合根（WS5b，`src/app/runtime.ts`）
 
@@ -242,10 +246,10 @@ Outbound 有两条入口，共用同一个发送处理器：
 1. **存储先行**：`mkdir` → 锁 → `Store.open` → `SettingsService` → `Engine` → `Effects` → 持久计数器（KV）。
 2. **提示词预载**：`PromptStore.preload()`；缺失/空白模板记为 health `prompts: error`，且**通道、流水线与 effect 队列都不装配**。模板属于包完整性的一部分，半运行只会让 classify/compose 反复失败；修复需要重新安装完整 bundle。
 3. **授权探测**：构造探测用的 `DingTalkChannel`（无 owner），调用 `probeAuth()`。`available && authenticated && tokenValid && userId` 缺一不可；缺失时 health 红、**不启动订阅**。探测返回的可选 `userName`（auth 的 `user_name`）在启动运行通道时作为 `ownerNick` 传入——群事件没有 `staffId`/`atUsers`，正文里的 `@昵称` 是唯一的 addressed 信号；该值只在内存中，不落库、不记日志。
-4. **服务装配**：`DshSessionHost` → `SessionModelPool`（每线程一个可见 `whale-reply-*` 会话，工作区 `<stateDir>/workspace`，persona/models 变更时重建）→ `DshResearch` → `DshTaskExecutor`；注册全部 effect handler；`Passes` 注册 `expire`（60 s，启动即跑）与 `probe`（5 min）。
+4. **服务装配**：`WorkspaceService`（根 + 目标预建）→ `DshSessionHost` → `SessionModelPool`（每线程一个可见 `whale-reply-*` 会话，工作区为该会话的 `conversation-<digest>`，persona/models 变更时重建）→ `DshResearch` → `DshTaskExecutor`（注入同一工作区解析器）；注册全部 effect handler；`Passes` 注册 `expire`（60 s，启动即跑）与 `probe`（5 min）。
 5. **启动**：`Effects.start({concurrency: 8})` → `Passes.start()` → 有 owner 时 `channel.start(sink)`；`sink` 调 `engine.receive` 并对新 decision enqueue `classify`。
 6. **崩溃恢复**：通道启动后 `resumeOutbox()` 把所有 `pending` Outbound 重新 enqueue `send`。
-7. **设置热应用**：`persona` 变 → 重建回复器会话；`models` 变 → 更新路由并重建 `SessionModel`；`monitor` 变 → 立即 reconcile（暂停即停通道）；`targets`/`dws` 变 → 500 ms 防抖后重启订阅。
+7. **设置热应用**：`persona` 变 → 重建回复器会话；`models` 变 → 更新路由并重建 `SessionModel`；`monitor` 变 → 立即 reconcile（暂停即停通道）；`targets` 变 → 立即 best-effort 预建新启用目标的工作区，再 500 ms 防抖重启订阅；`tasks` 变 → 重新预建（`workspaceRoot` 可能移动了根，旧目录保留）；`dws` 变 → 500 ms 防抖后重启订阅。
 8. **停止顺序**（可重复调用）：取消生命周期信号 → `effects.drain()`（不再领取新行，等待运行中的尝试）→ `channel.stop()` → `executor.dispose()` → `model.dispose()` → `passes.stop()` → `sessionHost.dispose()` → 释放锁、关闭数据库。
 
 健康字段（`GET health` 的 `checks`；`dws` 汇总在顶层）：
@@ -292,16 +296,17 @@ Outbound 有两条入口，共用同一个发送处理器：
 | `tests/passes.spec.ts`              | 间隔、runAtStart、单飞、异常隔离、stop、重复注册（6 条）                                                |
 | `tests/channel-*.spec.ts`           | dws 参数、解码、发送结果、重启退避、目标发现与授权（WS2）                                               |
 | `tests/brain-*.spec.ts`             | 分类、闸门、回复清洗、检索预算、人设与提示（WS3）                                                       |
-| `tests/executor-task.spec.ts`       | 批准门、工作区（批准目录优先）、模型路由、四种结局、回调次数、并发、重试（28 条）                       |
-| `tests/executor-model.spec.ts`      | 提示组装与截断、串行、模型路由、轮数/空闲重建、超时与异常、dispose（19 条）                             |
+| `tests/executor-task.spec.ts`       | 批准门、工作区（批准目录优先、会话工作区缺省）、模型路由、四种结局、回调次数、并发、重试（37 条）       |
+| `tests/executor-model.spec.ts`      | 提示组装与截断、串行、模型路由、轮数/空闲重建、超时与异常、dispose（25 条）                             |
+| `tests/workspaces.spec.ts`          | 会话目录命名/哈希/路径安全、标题、根解析、目标 ready/per-conversation、预建幂等/去重/失败隔离（25 条）  |
 | `tests/executor-research.spec.ts`   | 映射、上限、非 http(s) 过滤、空结果、异常与中止降级（10 条）                                            |
 | `tests/executor-session.spec.ts`    | 回合匹配、订阅/扫描竞态、超时、中止（13 条）                                                            |
 | `tests/executor-role-model.spec.ts` | 模型路由映射、空配置不注入、已有选择不覆盖、解析失败回退（12 条）                                       |
 | `tests/presets.spec.ts`             | 宿主行仍在、两套 preset 的字段与工具集、中性人设前缀、无重复 id（17 条）                                |
 | `tests/contract.spec.ts`            | 分层依赖规则、共享合约、文档数量                                                                        |
 | `tests/settings-service.spec.ts`    | 默认值、持久化、revision、冲突、深合并、损坏降级、v1→v2、history（16 条）                               |
-| `tests/api-routes.spec.ts`          | 19 条路由、分页、错误码、audit、channel 503/400（22 条）                                                |
-| `tests/task-actions.spec.ts`        | 批准/拒绝/取消/重试、默认工作区、launch effect（9 条）                                                  |
+| `tests/api-routes.spec.ts`          | 19 条路由、分页、错误码、audit、channel 503/400（23 条）                                                |
+| `tests/task-actions.spec.ts`        | 批准/拒绝/取消/重试、会话工作区缺省、launch effect（10 条）                                             |
 | `tests/runtime-lock.spec.ts`        | 打开/持久化/锁冲突/释放/启动失败（6 条）                                                                |
 | `tests/core-outbound.spec.ts`       | `queueFollowup` 幂等/目标匹配/空值；outbound 终态与重复上报（10 条）                                    |
 | `tests/rate-counters.spec.ts`       | 窗口滚动、裁剪、跨重启、gap、损坏恢复、消息窗口与回环状态（11 条）                                      |

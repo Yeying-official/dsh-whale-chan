@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { conversationWorkspace } from '../src/executor/workspace.ts'
 import { inboundMessage } from './fixtures/domain.ts'
 import { jsonBody, request } from './fixtures/http.ts'
 import {
@@ -77,8 +78,12 @@ describe('capturing and approving a task', () => {
     await h.runtime.effects.idle()
 
     expect(h.executor.executed).toHaveLength(1)
-    expect(h.executor.executed[0]?.workspace).toBe(join(h.runtime.stateDir, 'tasks', taskId))
     const task = h.runtime.engine.task(taskId)
+    // A task without an explicitly chosen directory runs where its conversation
+    // lives, which is the same directory the replier uses.
+    expect(h.executor.executed[0]?.workspace).toBe(
+      conversationWorkspace(join(h.runtime.stateDir, 'workspaces'), task?.threadKey ?? ''),
+    )
     expect(task?.status).toBe('succeeded')
     expect(task?.result).toMatchObject({ summary: '已经整理好了。', sessionId: 'session-1' })
     expect(h.runtime.store.assignments.get(task?.assignmentId as string)?.state).toBe('ended')

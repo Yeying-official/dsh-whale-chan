@@ -12,6 +12,7 @@
 export const EXECUTOR_ERRORS = {
   alreadyRunning: 'The task is already running',
   unsafeTaskId: 'The task id is not a single safe path segment',
+  unsafeWorkspacePath: 'The conversation workspace path cannot be derived safely',
   missingWorkspace: 'The task has no usable workspace directory',
   sessionUnavailable: 'The worker session could not be created',
   /** Neither settings nor the host default names a route the LLM service accepts. */

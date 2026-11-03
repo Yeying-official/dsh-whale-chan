@@ -336,8 +336,13 @@ export class DshSessionHost implements SessionHost {
       await this.makeDirectory(options.workspace)
       options.signal.throwIfAborted()
       // `workspaceRegistry.create` rejects a path that is not an existing
-      // directory, which is why the directory is made first.
-      const workspace = await this.ctx.workspaceRegistry.create(options.workspace, options.title)
+      // directory, which is why the directory is made first. A conversation
+      // workspace may already exist (its replier was created first), in which
+      // case `create` returns that record unchanged and only a stale title is
+      // rewritten.
+      const workspaceTitle = options.workspaceTitle ?? options.title
+      const workspace = await this.ctx.workspaceRegistry.create(options.workspace, workspaceTitle)
+      if (workspace.title !== workspaceTitle) await workspace.setTitle(workspaceTitle)
       const created = await this.ctx.sessionController.create({
         sessionId: requested,
         workspaceId: workspace.id,

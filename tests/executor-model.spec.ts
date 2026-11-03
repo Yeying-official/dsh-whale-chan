@@ -25,7 +25,13 @@ import {
   assemblePrompt,
   threadDigest,
 } from '../src/executor/model.ts'
+import { WORKSPACE_LAYOUT_VERSION } from '../src/executor/workspace.ts'
 import { FakeSessionHost, RecordingLogger } from './fixtures/executor.ts'
+
+/** Session id of the current workspace layout; v2 forced a new session id. */
+function layoutSessionId(threadKey: string): string {
+  return `whale-reply-${threadDigest(`${threadKey}\u0000${WORKSPACE_LAYOUT_VERSION}`)}`
+}
 
 function learning(): { host: FakeSessionHost; model: SessionModel; logger: RecordingLogger } {
   const host = new FakeSessionHost()
@@ -110,7 +116,7 @@ describe('session identity', () => {
     const ensured = host.ensured[0]
     expect(ensured?.preset).toBe(REPLIER_PRESET)
     expect(ensured?.permission).toBe('workspace-write')
-    expect(ensured?.sessionId).toBe(`whale-reply-${threadDigest('dm:u1')}`)
+    expect(ensured?.sessionId).toBe(layoutSessionId('dm:u1'))
     expect(ensured?.sessionId).toMatch(/^whale-reply-[0-9a-f]{12}$/)
     expect(ensured?.title).toBe('钉钉 · 小明')
     expect(ensured?.workspace).toBe(join('/home/owner', '.dsh-whale-chan', 'workspace'))
@@ -140,6 +146,52 @@ describe('session identity', () => {
       host.ensured[0]?.sessionId,
       host.ensured[1]?.sessionId,
     ])
+  })
+})
+
+describe('per-conversation workspaces', () => {
+  /** A resolver shaped like the app layer's, so the assertions name the contract. */
+  const workspaceFor = (threadKey: string, title?: string): { path: string; title: string } => ({
+    path: `/srv/conversations/${threadKey}`,
+    title: `钉钉 · ${title ?? threadKey}`,
+  })
+
+  it('runs the replier in the resolved conversation workspace and passes its title', async () => {
+    const host = new FakeSessionHost()
+    const model = new SessionModel({
+      host,
+      threadKey: 'dm:u1',
+      title: '小明',
+      homeDir: '/home/owner',
+      workspaceFor,
+    })
+    await model.complete(request(), new AbortController().signal)
+    expect(host.ensured[0]?.workspace).toBe('/srv/conversations/dm:u1')
+    expect(host.ensured[0]?.workspaceTitle).toBe('钉钉 · 小明')
+    // The session title stays the conversation title; only the registry row is
+    // retitled, so the DSH session list still shows one session per thread.
+    expect(host.ensured[0]?.title).toBe('钉钉 · 小明')
+  })
+
+  it('resolves a separate workspace for each thread', async () => {
+    const host = new FakeSessionHost()
+    const model = new SessionModel({ host, homeDir: '/home/owner', workspaceFor })
+    const signal = new AbortController().signal
+    await model.forThread('group:g1', '项目群').complete(request(), signal)
+    await model.forThread('group:g2', '另一个群').complete(request(), signal)
+    expect(host.ensured.map((ensured) => ensured.workspace)).toEqual([
+      '/srv/conversations/group:g1',
+      '/srv/conversations/group:g2',
+    ])
+    expect(host.ensured.map((ensured) => ensured.workspaceTitle)).toEqual(['钉钉 · 项目群', '钉钉 · 另一个群'])
+  })
+
+  it('uses a layout-specific session id that cannot resume a v1 session', async () => {
+    const { host, model } = learning()
+    await model.complete(request(), new AbortController().signal)
+    const legacy = `whale-reply-${threadDigest('dm:u1')}`
+    expect(host.ensured[0]?.sessionId).toBe(layoutSessionId('dm:u1'))
+    expect(host.ensured[0]?.sessionId).not.toBe(legacy)
   })
 })
 
@@ -248,7 +300,7 @@ describe('reuse limits', () => {
     expect(host.ensured[0]?.fresh).toBe(false)
     expect(host.ensured[1]?.fresh).toBe(true)
     // The rotated session is closed before the rebuild.
-    expect(host.cancellations[0]?.sessionId).toBe(`whale-reply-${threadDigest('dm:u1')}`)
+    expect(host.cancellations[0]?.sessionId).toBe(layoutSessionId('dm:u1'))
     // Deliveries after the rebuild use the id the host returned.
     expect(host.deliveries.at(-1)?.sessionId).toBe('whale-reply-fresh000001')
   })

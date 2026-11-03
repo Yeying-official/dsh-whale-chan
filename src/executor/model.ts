@@ -27,6 +27,7 @@ import { clip, codePointLength } from '../brain/format.ts'
 import type { ModelMessage, ModelPort, ModelRequest } from '../brain/types.ts'
 import type { ModelRoute } from '../shared/settings.ts'
 import { ExecutorError, ModelAbortedError, ModelFailedError, ModelTimeoutError } from './errors.ts'
+import { WORKSPACE_LAYOUT_VERSION } from './workspace.ts'
 import {
   MODEL_TURN_TIMEOUT_MS,
   REPLIER_PRESET,
@@ -156,10 +157,21 @@ export interface SessionModelOptions {
   readonly threadKey?: string
   /** Conversation title used in the DSH session title. */
   readonly title?: string
-  /** State directory used for the shared replier workspace; defaults to `~/.dsh-whale-chan`. */
+  /** State directory used for the fallback replier workspace; defaults to `~/.dsh-whale-chan`. */
   readonly stateDir?: string
-  /** Workspace override, when the composition root wants one shared directory. */
+  /**
+   * Workspace override shared by every conversation. Ignored when
+   * `workspaceFor` is supplied; kept for a composition root (and for tests)
+   * that deliberately runs every replier in one directory.
+   */
   readonly workspace?: string
+  /**
+   * Per-conversation workspace resolver, supplied by the app layer.
+   *
+   * It is the only place the workspace path and title are decided, so the
+   * replier and every task of one conversation agree on the directory.
+   */
+  readonly workspaceFor?: (threadKey: string, title?: string) => { readonly path: string; readonly title: string }
   /** Route from `settings.models.reply`; an empty route uses the deployment default. */
   readonly model?: ModelRoute
   readonly homeDir?: string
@@ -183,6 +195,7 @@ export class SessionModel implements ModelPort {
   private readonly host: SessionHost
   private readonly logger: ExecutorLogger | undefined
   private readonly workspace: string
+  private readonly workspaceFor: SessionModelOptions['workspaceFor']
   private readonly timeoutMs: number
   private readonly maxTurns: number
   private readonly idleResetMs: number
@@ -200,6 +213,7 @@ export class SessionModel implements ModelPort {
     const home = options.homeDir ?? homedir()
     const stateDir = options.stateDir ?? '~/.dsh-whale-chan'
     this.workspace = options.workspace ?? join(expandStateDir(stateDir, home), REPLY_WORKSPACE)
+    this.workspaceFor = options.workspaceFor
     this.timeoutMs = options.timeoutMs ?? REPLY_TIMEOUT_MS
     this.maxTurns = options.maxTurns ?? MAX_TURNS
     this.idleResetMs = options.idleResetMs ?? IDLE_RESET_MS
@@ -319,9 +333,14 @@ export class SessionModel implements ModelPort {
       await this.host.cancel(state.session, 'replier session rotated')
       state.session = undefined
     }
+    const workspace = this.workspaceFor?.(state.key, state.title)
     const session = await this.host.ensureSession({
-      sessionId: replySessionId(threadDigest(state.key)),
-      workspace: this.workspace,
+      // The layout version is part of the digest so this build starts a new
+      // session in the per-conversation workspace; earlier sessions stay as
+      // history instead of being renamed or deleted.
+      sessionId: replySessionId(threadDigest(`${state.key}\u0000${WORKSPACE_LAYOUT_VERSION}`)),
+      workspace: workspace?.path ?? this.workspace,
+      ...(workspace === undefined ? {} : { workspaceTitle: workspace.title }),
       title: `钉钉 · ${state.title}`,
       preset: REPLIER_PRESET,
       permission: 'workspace-write',

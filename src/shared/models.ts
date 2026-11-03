@@ -10,6 +10,20 @@ import type { PermissionPreset, ReplyMode, TargetKind } from './limits.ts'
 
 export type HealthStatus = 'ok' | 'degraded' | 'error'
 
+/**
+ * The directory one target's conversations use.
+ *
+ * `ready` means one concrete directory exists (or is about to be provisioned)
+ * for the target itself; `per-conversation` means the target is a global
+ * subscription (`at-me`) or a send-only open id, so each conversation creates
+ * its own workspace on its first message and there is no single path yet.
+ */
+export interface TargetWorkspace {
+  readonly path: string | null
+  readonly title: string
+  readonly mode: 'ready' | 'per-conversation'
+}
+
 /** One configured channel target. */
 export interface Target {
   readonly id: string
@@ -18,6 +32,8 @@ export interface Target {
   readonly enabled: boolean
   readonly mentionOnly: boolean
   readonly replyMode: ReplyMode
+  /** Read-only workspace projection; the panel never edits it. */
+  readonly workspace?: TargetWorkspace
   readonly discoveredAt?: string
   readonly validatedAt?: string
 }

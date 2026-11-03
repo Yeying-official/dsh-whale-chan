@@ -14,6 +14,8 @@ export const EXECUTOR_ERRORS = {
   unsafeTaskId: 'The task id is not a single safe path segment',
   missingWorkspace: 'The task has no usable workspace directory',
   sessionUnavailable: 'The worker session could not be created',
+  /** Neither settings nor the host default names a route the LLM service accepts. */
+  modelUnavailable: 'No model route is configured for this call',
   modelTimeout: 'The session did not end its turn in time',
   modelAborted: 'The session turn was aborted',
   modelFailed: 'The session turn failed',

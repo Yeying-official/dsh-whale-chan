@@ -5,6 +5,10 @@
  * No monitor, channel, database, lock or network client is started in this
  * workstream. Later work extends this class behind the same `ready`/`stop`
  * lifecycle instead of adding work to the plugin entry.
+ *
+ * Reply-path policy: a reply is a direct model call (`replyModelFor` in
+ * `src/executor/llm-model.ts`), never a DSH session — a session carries its
+ * preset's whole tool schema (measured 141k tokens) and needs no place here.
  */
 import { mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'

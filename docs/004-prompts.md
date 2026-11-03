@@ -193,8 +193,14 @@ AI 角标和任务批准。
   含 `prompts/`。
 - 模板缺失时 `PromptStore.get` 立即抛错；宿主应在启动时调用 `preload()`，把“包损坏”
   暴露在第一轮监听之前。
-- WS3 只提供 `src/brain`；把 `src/brain/index.ts` 接进 `src/index.ts`（导出或构造
-  `PromptStore` / `ModelPort` / `ResearchPort`）由 WS4 完成，`src/index.ts` 未改动。
+- WS3 只提供 `src/brain`；`src/brain/index.ts` 没有被 `src/index.ts` 接出（宿主入口保持零副作用），
+  WS5 的组合根显式 import 并构造 `PromptStore` / `ModelPort` / `ResearchPort`。
+- **`ModelPort` 的回复实现是直接 LLM 调用**（`src/executor/llm-model.ts` 的 `LlmModel`）：
+  `system` 走 `system` 字段，`messages` 拼成一条 user 消息，调用一次 `ctx.llm.stream`，
+  不注册工具、不建会话、不建工作区。会话实现（`SessionModel`）会让 preset 的工具 schema
+  （实测 141k token）进入每次 classification/draft 的 prefill，T3 真机因此超时。
+- 单次调用的时间预算由 brain 的 `withDeadline`（`timeoutMs`，默认 15s）控制；`LlmModel`
+  不自带超时，只把调用方的 `AbortSignal` 传给 `ctx.llm.stream`。
 
 ## 相关文档
 

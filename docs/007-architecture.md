@@ -1,6 +1,6 @@
 # 007 架构
 
-> 当前状态：WS1 建立 core 领域层、SQLite 存储、持久 effect 队列与 pass 调度器；WS2 实现 dws 通道；WS3 实现人设、提示、分类、检索与回复策略；WS4 实现 DSH 任务执行器、回复器会话模型与两套 agent preset。HTTP 路由、设置持久化与组合根接线仍属 WS5。**本文是各层整合的统一入口**：每层对外提供什么端口、依赖允许指向哪里，以本文为准。
+> 当前状态：WS1 建立 core 领域层、SQLite 存储、持久 effect 队列与 pass 调度器；WS2 实现 dws 通道；WS3 实现人设、提示、分类、检索与回复策略；WS4 实现 DSH 任务执行器、直接调用模型的回复端口与两套 agent preset。HTTP 路由、设置持久化与组合根接线仍属 WS5。**本文是各层整合的统一入口**：每层对外提供什么端口、依赖允许指向哪里，以本文为准。
 
 ## 1. 分层与依赖方向
 
@@ -158,15 +158,15 @@ brain 不开 socket、不 spawn 进程、不 import DSH 包：所有外部能力
 
 ### 6.3 executor（WS4）
 
-| 端口/类型                                                                     | 作用                                                                                               |
-| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `TaskExecutor.execute/cancel`                                                 | 执行一个已批准任务；`onStarted`/`onFinished` 对应领域两个命令                                      |
-| `SessionHost.ensureSession/deliver/awaitTurnEnd/readFinalText/cancel/dispose` | 所有 DSH 调用的唯一入口，按 `SessionRef` 寻址，无跨任务状态                                        |
-| `DshSessionHost`                                                              | 真实实现：`sessionController`、`workspaceRegistry`、`permissionPresets`、`agents`、`session/event` |
-| `DshTaskExecutor`                                                             | worker 会话生命周期、系统提示、超时（单回合 90 秒 / 任务总预算 `timeoutMinutes`）、取消、结果映射  |
-| `SessionModel`（`implements ModelPort`）                                      | 每个会话线程一个 replier 会话，串行、限轮、限时、限长                                              |
-| `DshResearch`（`implements ResearchPort`）                                    | `ctx.web.search` 适配，空结果/异常/中止一律降级为空                                                |
-| `seedRoleModel` / `routeSelection`                                            | 把 `settings.models.*` 播种到新会话（`model/selection` + 首次请求注入），不改全局默认              |
+| 端口/类型                                                                     | 作用                                                                                                         |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `TaskExecutor.execute/cancel`                                                 | 执行一个已批准任务；`onStarted`/`onFinished` 对应领域两个命令                                                |
+| `SessionHost.ensureSession/deliver/awaitTurnEnd/readFinalText/cancel/dispose` | 所有 DSH 调用的唯一入口，按 `SessionRef` 寻址，无跨任务状态                                                  |
+| `DshSessionHost`                                                              | 真实实现：`sessionController`、`workspaceRegistry`、`permissionPresets`、`agents`、`session/event`           |
+| `DshTaskExecutor`                                                             | worker 会话生命周期、系统提示、超时（单回合 90 秒 / 任务总预算 `timeoutMinutes`）、取消、结果映射            |
+| `LlmModel`（`implements ModelPort`）                                          | 回复路径：一次 `ctx.llm.stream`，只带 `system` + 一条 user 消息，无工具/无会话/无工作区（T3 后取代会话实现） |
+| `DshResearch`（`implements ResearchPort`）                                    | `ctx.web.search` 适配，空结果/异常/中止一律降级为空                                                          |
+| `seedRoleModel` / `routeSelection`                                            | 把 `settings.models.*` 播种到新会话（`model/selection` + 首次请求注入），不改全局默认                        |
 
 执行器不写领域存储、不发钉钉消息；它把任务结果交给 app，由 app 写 `assignmentEnded` 并把摘要转成 Outbound。
 
@@ -184,13 +184,13 @@ brain 不开 socket、不 spawn 进程、不 import DSH 包：所有外部能力
 
 ## 7. 与其它工作流的边界
 
-| 工作流          | 交界                                                                                                                                                                                                          |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| WS2 通道/执行器 | 调用 `Engine` 命令与 `openTasks`/`pendingApprovals`；启动派工时用 `assignmentStarted(..., { sessionId })` 绑定会话；注册 Effects handler；不直接写 Store，不 import core 内部文件（只经 `src/core/index.ts`） |
-| WS3 人设与检索  | 由 app 生成 Draft 文本后调用 `engine.draft`；领域不读设置                                                                                                                                                     |
-| WS4 执行器      | 只经 `TaskExecutor` 与 app 交互；复用 brain 的端口类型；preset 由 `cordis.patch.yml` 声明                                                                                                                     |
-| WS5 设置/HTTP   | 通过 `store-read` 提供只读视图，通过 `Engine` 提供命令；组合根用 `DshSessionHost` 同时构建执行器与 `SessionModel`；不得改动领域状态机                                                                         |
-| WS6 面板        | 只经 WS5 的 HTTP 合约读状态与发命令                                                                                                                                                                           |
+| 工作流          | 交界                                                                                                                                                                                                           |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| WS2 通道/执行器 | 调用 `Engine` 命令与 `openTasks`/`pendingApprovals`；启动派工时用 `assignmentStarted(..., { sessionId })` 绑定会话；注册 Effects handler；不直接写 Store，不 import core 内部文件（只经 `src/core/index.ts`）  |
+| WS3 人设与检索  | 由 app 生成 Draft 文本后调用 `engine.draft`；领域不读设置                                                                                                                                                      |
+| WS4 执行器      | 只经 `TaskExecutor` 与 app 交互；复用 brain 的端口类型；preset 由 `cordis.patch.yml` 声明                                                                                                                      |
+| WS5 设置/HTTP   | 通过 `store-read` 提供只读视图，通过 `Engine` 提供命令；组合根用 `DshSessionHost` 构建任务执行器，用 `replyModelFor(ctx, settings.models.reply)` 构建回复端口（**不要**用 `SessionModel`）；不得改动领域状态机 |
+| WS6 面板        | 只经 WS5 的 HTTP 合约读状态与发命令                                                                                                                                                                            |
 
 ## 8. 测试索引
 

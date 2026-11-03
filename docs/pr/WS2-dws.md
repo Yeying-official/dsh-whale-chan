@@ -44,13 +44,14 @@
 5. **supervisor 无重叠**：每目标一个进程；重启定时器或活动进程存在时拒绝二次 launch；退避 `1s → 2s → … → restartBackoffMaxSeconds`。
 6. **facade 无 Cordis 依赖**：`DingTalkChannel` 接受 `settingsProvider` 与 `logger`，`src/app` 可直接组合；`monitor.enabled=false` 或 `paused=true` 时不订阅。
 7. **dryRun 不发消息**：`advanced.dryRun` 时 facade 返回 `skipped` 且不 spawn；`skipped` 不是失败，上层不得改变 Outbound 状态或按失败重试。
+8. **Windows 命令解析**：`resolveDwsCommand` 在没有路径、没有已知扩展名时，按 `PATH` → `%APPDATA%\npm` → `%ProgramFiles%\nodejs` → `%LOCALAPPDATA%\Programs\nodejs` 搜索 `.cmd`/`.exe`/`.bat`/原文件，命中后统一用绝对路径 spawn（`createRunner`/`runOnce` 与 `DwsProcess` 共享）；解析失败保留原命令，路径写入日志与 health。
 
 ## 4. 测试证据
 
 ```text
 pnpm install --frozen-lockfile   -> Done, exit 0
 pnpm typecheck                   -> tsc --noEmit, exit 0
-pnpm test                        -> 18 files, 216 tests passed (WS2: 9 files / 109 tests)
+pnpm test                        -> 44 files, 572 tests passed (WS2: 10 files / 119 tests)
 pnpm build                       -> lib/index.js, lib/index.d.ts, lib/client.js, exit 0
 node scripts/check-pack.mjs      -> pack check passed: 10 artifacts, icon 711 bytes
 pnpm format:check                -> All matched files use Prettier code style!
@@ -58,17 +59,18 @@ pnpm format:check                -> All matched files use Prettier code style!
 
 WS2 用例分布：
 
-| 文件                            | 数量 | 覆盖                                                                                          |
-| ------------------------------- | ---- | --------------------------------------------------------------------------------------------- |
-| `channel-normalize.spec.ts`     | 22   | at/group/dm、self、broadcast、empty、纯媒体跳过、图文、坏行、别名、时间、调试摘要             |
-| `channel-targets.spec.ts`       | 11   | 事件键、群/单聊/open 参数、TTL、profile、去重、owner 无回退                                   |
-| `channel-process.spec.ts`       | 11   | 就绪行、行切分、stdin 停止、SIGTERM、orphaned、dry-run、超时、spawn 失败                      |
-| `channel-supervisor.spec.ts`    | 9    | 双目标、顺序、sink 抛错、坏行、退避重启、无重叠、非法目标、stop 收敛、孤儿清理、无 owner 拒绝 |
-| `channel-send.spec.ts`          | 15   | 四种结果、幂等键、ledger、超时 unknown、回执分类                                              |
-| `channel-discover-auth.spec.ts` | 16   | 发现容错/上限/去重、dry-run 校验、auth 降级、owner userId 与脱敏                              |
-| `channel-log.spec.ts`           | 9    | token/secret/query/JSON 脱敏、单行错误、截断                                                  |
-| `channel-facade.spec.ts`        | 8    | paused/disabled 不订阅、无目标空闲、重复 start、dryRun skipped、owner 拒绝                    |
-| `channel-review.spec.ts`        | 8    | owner userId 与脱敏、owner 拒绝启动、dryRun skipped、纯媒体、JSON 脱敏                        |
+| 文件                            | 数量 | 覆盖                                                                                                   |
+| ------------------------------- | ---- | ------------------------------------------------------------------------------------------------------ |
+| `channel-normalize.spec.ts`     | 22   | at/group/dm、self、broadcast、empty、纯媒体跳过、图文、坏行、别名、时间、调试摘要                      |
+| `channel-targets.spec.ts`       | 11   | 事件键、群/单聊/open 参数、TTL、profile、去重、owner 无回退                                            |
+| `channel-process.spec.ts`       | 11   | 就绪行、行切分、stdin 停止、SIGTERM、orphaned、dry-run、超时、spawn 失败                               |
+| `channel-supervisor.spec.ts`    | 9    | 双目标、顺序、sink 抛错、坏行、退避重启、无重叠、非法目标、stop 收敛、孤儿清理、无 owner 拒绝          |
+| `channel-send.spec.ts`          | 15   | 四种结果、幂等键、ledger、超时 unknown、回执分类                                                       |
+| `channel-discover-auth.spec.ts` | 16   | 发现容错/上限/去重、dry-run 校验、auth 降级、owner userId 与脱敏                                       |
+| `channel-log.spec.ts`           | 9    | token/secret/query/JSON 脱敏、单行错误、截断                                                           |
+| `channel-facade.spec.ts`        | 8    | paused/disabled 不订阅、无目标空闲、重复 start、dryRun skipped、owner 拒绝                             |
+| `channel-review.spec.ts`        | 8    | owner userId 与脱敏、owner 拒绝启动、dryRun skipped、纯媒体、JSON 脱敏                                 |
+| `channel-command.spec.ts`       | 10   | win32 解析顺序、APPDATA/ProgramFiles/LOCALAPPDATA 回退、路径/扩展名原样、无命中、非 win32、shim 端到端 |
 
 ### 4.1 Review round 1 修复（REQUEST_CHANGES）
 
@@ -80,6 +82,17 @@ WS2 用例分布：
 | 决策 | group `mentionOnly` 归 WS3；at-me 行 id 作为 `targetId`；owner 不回退；PROGRESS.md 格式由整合方在 main 修复                                                                               | —                                                                        |
 
 review 同步：已 merge `main` `b69177d`（仅 `docs/PROGRESS.md` 格式修复），整仓 `pnpm format:check` 现为绿；review 修复提交为 `fix(channel): require owner identity and skip dry-run sends`、`test(channel): cover owner identity, skipped sends and media-only`、`docs: record ws2 review decisions`。
+
+### 4.2 Review round 2：Windows shim 解析
+
+现网 `available=false` 而终端 `dws --version` 正常，根因是宿主 `PATH` 不含 `%APPDATA%\npm`，`cross-spawn` 无法解析裸 `dws`。修复：
+
+- 新增 `src/channel/command.ts`：`resolveDwsCommand(command, env, platform)`，规则与测试见 009 §3.1；
+- `runOnce` 与 `DwsProcess.start` 在实际 spawn 前解析，`probeAuth`/`send`/`discover`/`validate`/supervisor 全部共享，不在各处重复；
+- supervisor 解析一次、日志打印一次，`TargetHealth.command` 暴露解析后的路径（仅路径）；
+- `channel-command.spec.ts` 10 条：PATH `.cmd`、`%APPDATA%` 回退、`%ProgramFiles%` 与 `.cmd` 优先、`%LOCALAPPDATA%` 存在性、`Path` 拼写、绝对路径、已带扩展名、无命中、非 win32、以及通过 `.cmd` shim 端到端 `probeAuth`（win32）。
+
+现网复核（由整合方执行）：`available=true`、`authenticated=true`、`ownerKnown=true`、channel idle。
 
 ## 5. 风险与未验证项
 
@@ -110,15 +123,17 @@ review 同步：已 merge `main` `b69177d`（仅 `docs/PROGRESS.md` 格式修复
 | ⑧    | 依赖方向干净、无 `@deepseek-ai/*`      | 通过：`grep` 确认 `src/channel` 无该 import；只 import core 模型与 shared 设置                           |
 | ⑨    | Windows 可运行                         | 通过：cross-spawn、参数数组、UTF-8 `setEncoding`、`windowsHide`；本机 Windows 跑通全部门禁               |
 | ⑩    | 提交规范、工作区干净                   | 通过：全部提交遵循 Conventional Commits；最终 `git status --porcelain` 为空                              |
+| ⑪    | Windows 命令解析                       | 通过：`resolveDwsCommand` 10 条测试（临时目录 + 注入 env/platform），`.cmd` shim 端到端可 probeAuth      |
 
 ## 7. 已决事项与遗留
 
-review round 1 已决定，不再需要额外决策：
+review round 1/2 已决定，不再需要额外决策：
 
 1. **owner 身份**：来源为 `probeAuth().userId`，由宿主注入；缺失时 `start` 抛 `owner-unknown` 并拒绝订阅，没有 at-me 行回退。
 2. **group `mentionOnly`**：通道如实输出 `addressed`，是否回复由 WS3 策略层决定；通道不丢弃未 @ 的群消息。
 3. **`at-me` 目标 id**：保留 `target.id` 作为消息 `targetId`；WS5 会把该行初始化为 `at-me`。
 4. **dryRun 发送**：`skipped`，不改变 Outbound 状态、不按失败重试。
 5. **`format:check`**：整合方已在 `main` `b69177d` 修复 `docs/PROGRESS.md`，本分支 merge 后整仓通过。
+6. **Windows `dws` 解析**：自动解析 npm shim；找不到时保留原命令或由 `dws.binaryPath` 绝对路径覆盖，不再要求宿主 `PATH` 与交互 shell 一致。
 
 遗留只有真机验证：§5 列出的 provisional 项需要在 T1–T2 逐项核对；不一致时先改 009 与测试，再改实现。

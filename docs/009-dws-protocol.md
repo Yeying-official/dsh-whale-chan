@@ -50,6 +50,23 @@ dws event consume <event_key> --flatten -f ndjson --ttl <hours>
 - **`--dry-run`** 只打印计划并退出，不创建订阅。`validateTarget` 用它做非破坏校验；非零退出、超时、`not logged in`/`未登录` 之类的授权错误都判为无效。
 - **`group` 目标接收群内全部消息**，`mentionOnly` 与 `addressed` 由归一化/决策层处理，订阅参数不承担该过滤。
 
+### 3.1 Windows 命令解析
+
+DSH 宿主进程不保证继承交互 shell 的 `PATH`。Windows 上 npm 全局安装的 `dws` 实际是 `%APPDATA%\npm\dws.cmd`；`cross-spawn` 对裸命令只按 `PATH` 找 `.exe`/`.cmd`，宿主 `PATH` 缺少 npm 全局目录时就会解析失败（现象：health `available=false`，而终端里 `dws --version` 正常）。
+
+`src/channel/command.ts` 的 `resolveDwsCommand(command, env, platform)` 统一处理：
+
+1. 非 `win32`、命令含 `/` 或 `\`、或已带 `.exe`/`.cmd`/`.bat`/`.ps1` 扩展名 → **原样返回**；
+2. `win32` 裸命令按顺序在以下目录查找 `<command>.cmd` → `<command>.exe` → `<command>.bat` → 无扩展名原文件：
+   - `PATH`（兼容 `Path` 键）的每个目录；
+   - `%APPDATA%\npm`；
+   - `%ProgramFiles%\nodejs`；
+   - `%LOCALAPPDATA%\Programs\nodejs`（目录存在时）；
+3. 命中第一个存在的文件 → 返回绝对路径，并按 command + 相关环境变量缓存；
+4. 全部未命中 → 返回原命令，让 spawn 错误保持可见，而不是伪造路径。
+
+所有实际 spawn 的入口共享这一条规则：`createRunner` → `runOnce`（`probeAuth`、`send`、`discover`、`validate`）与 `DwsProcess.start`（supervisor）都会在启动前解析，调用方不需要各自重复处理。`settings.dws.binaryPath` 可以是绝对路径；一旦配置成路径，解析直接原样返回，等于显式覆盖。通道日志会打印一次解析后的 `dws command`，health 的每个目标带 `command` 字段（仅路径，不含账号/token）。
+
 ## 4. NDJSON 归一化
 
 一行一个 JSON 对象，允许浅层包封 `data` / `event` / `message` / `payload`（最多两层）。字段名在 dws 各版本间出现过 snake_case 与 camelCase 混用，因此按别名表解析。

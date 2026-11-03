@@ -19,6 +19,11 @@ export const inject = ['webServer', 'settings']
 export { Config }
 export type { DeploymentConfig }
 
+// The executor layer is exported so the app composition root (WS5) can build a
+// task executor, the replier model and the retrieval adapter from this package
+// without a second entry point. Exporting it changes no host behaviour.
+export * from './executor/index.ts'
+
 export async function apply(ctx: Context, config: DeploymentConfig): Promise<void> {
   const runtime = new Runtime(config)
 

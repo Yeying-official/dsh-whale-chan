@@ -37,6 +37,16 @@ function readBoolean(record: Record<string, unknown>, fields: readonly string[])
   return undefined
 }
 
+/** Read the first non-empty string among several spellings. */
+function readString(record: Record<string, unknown>, fields: readonly string[]): string | undefined {
+  for (const field of fields) {
+    const value = record[field]
+    if (typeof value === 'string' && value.trim() !== '') return value.trim()
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  }
+  return undefined
+}
+
 function parseJsonDocument(text: string): unknown {
   const trimmed = text.trim()
   if (trimmed === '') return undefined
@@ -88,6 +98,15 @@ export async function probeAuth(settings: Settings, io: AuthIo = {}): Promise<Au
       readBoolean(payload, ['authenticated', 'isAuthenticated', 'is_authenticated', 'loggedIn', 'logged_in']) ?? false
     const tokenValid = readBoolean(payload, ['token_valid', 'tokenValid', 'accessTokenValid']) ?? false
     const expiresAt = toIsoTime(payload.expires_at ?? payload.expiresAt ?? payload.tokenExpiresAt)
+    // Returned to the host only; it becomes `ownerUserId` for self-detection.
+    const userId = readString(payload, [
+      'user_id',
+      'userId',
+      'staff_id',
+      'staffId',
+      'open_dingtalk_id',
+      'openDingTalkId',
+    ])
 
     return {
       available: true,
@@ -95,6 +114,7 @@ export async function probeAuth(settings: Settings, io: AuthIo = {}): Promise<Au
       authenticated,
       tokenValid,
       ...(expiresAt ? { expiresAt } : {}),
+      ...(userId ? { userId } : {}),
     }
   } catch {
     // A throwing runner is still "not available" for the caller: the probe is a

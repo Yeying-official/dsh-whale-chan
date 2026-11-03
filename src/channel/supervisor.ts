@@ -12,6 +12,7 @@
  */
 import type { InboundMessage } from '../core/model.ts'
 import type { Settings } from '../shared/settings.ts'
+import { ChannelError } from './errors.ts'
 import { describeError, describeExit, redact } from './log.ts'
 import { normalizeEvent, summarizeRawEvent } from './normalize.ts'
 import { DwsProcess, runOnce, type DwsExitInfo, type ReadyInfo, type SpawnFn } from './process.ts'
@@ -91,7 +92,7 @@ export class ChannelSupervisor {
   constructor(options: SupervisorOptions) {
     this.#settings = options.settings
     this.#logger = options.logger
-    this.#ownerUserId = resolveOwnerUserId(options.settings, options.ownerUserId)
+    this.#ownerUserId = resolveOwnerUserId(options.ownerUserId)
     this.#ownerNick = options.ownerNick
     this.#command = options.command ?? options.settings.dws.binaryPath
     this.#baseArgs = options.baseArgs ?? []
@@ -117,11 +118,17 @@ export class ChannelSupervisor {
    * through `health()` or awaited with `whenReady`.
    */
   start(targets: readonly DwsTarget[], sink: EventSink): void {
-    if (this.#running) throw new Error('channel supervisor is already started')
+    const selected = dedupeTargets(targets)
+    // Fail closed: without the owner id, a message written by the assistant
+    // itself cannot be recognized as `self`, which risks a reply loop.
+    if (selected.length > 0 && this.#ownerUserId === '') {
+      throw new ChannelError('owner-unknown', 'owner identity is required before subscribing')
+    }
+    if (this.#running) throw new ChannelError('invalid-state', 'channel supervisor is already started')
     this.#sink = sink
     this.#running = true
     this.#stopping = false
-    for (const target of dedupeTargets(targets)) {
+    for (const target of selected) {
       const runtime: TargetRuntime = {
         target,
         key: targetKey(target),

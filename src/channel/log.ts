@@ -28,6 +28,9 @@ const QUERY = /([?&])([^=&\s#]+)=([^&\s#]*)/g
  * whitespace, quotes, commas and closing braces so a pair inside JSON is masked
  * without swallowing the rest of the line.
  */
+/** Quoted JSON pairs such as `"clientSecret":"x"`, whose key is wrapped in quotes. */
+const JSON_PAIR = /"([A-Za-z0-9_.-]+)"(\s*:\s*)"([^"]*)"/g
+
 const PAIR = /([A-Za-z0-9_.-]+)(\s*[=:]\s*)("?)([^"&\s,}]+)\3/g
 
 /** Truncate to `maxLength` characters, marking that bytes were dropped. */
@@ -46,6 +49,9 @@ export function redact(text: string): string {
   return text
     .replace(QUERY, (_all, separator: string, key: string) => `${separator}${key}=${MASK}`)
     .replace(AUTHORIZATION, (_all, scheme: string) => `${scheme} ${MASK}`)
+    .replace(JSON_PAIR, (all, key: string, separator: string) =>
+      SENSITIVE_KEY.test(key) ? `"${key}"${separator}"${MASK}"` : all,
+    )
     .replace(PAIR, (all, key: string, separator: string, quote: string) =>
       SENSITIVE_KEY.test(key) ? `${key}${separator}${quote}${MASK}${quote}` : all,
     )

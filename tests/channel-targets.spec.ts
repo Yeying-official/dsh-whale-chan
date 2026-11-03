@@ -122,15 +122,11 @@ describe('target selection', () => {
     })
   })
 
-  it('resolves the owner id from an explicit value or the at-me row, never a placeholder', () => {
-    const withAtMe = settings({
-      targets: { rows: [{ kind: 'at-me', id: 'u-owner', label: '', mentionOnly: true, enabled: true }] },
-    })
-    expect(resolveOwnerUserId(withAtMe)).toBe('u-owner')
-    expect(resolveOwnerUserId(withAtMe, 'u-supplied')).toBe('u-supplied')
-    const placeholder = settings({
-      targets: { rows: [{ kind: 'at-me', id: 'at-me', label: '', mentionOnly: true, enabled: true }] },
-    })
-    expect(resolveOwnerUserId(placeholder)).toBe('')
+  it('uses only the supplied owner id and never falls back to a target row', () => {
+    expect(resolveOwnerUserId(' u-supplied ')).toBe('u-supplied')
+    // There is no settings/row fallback: an empty value stays empty, so the
+    // facade and the supervisor can fail closed instead of guessing.
+    expect(resolveOwnerUserId()).toBe('')
+    expect(resolveOwnerUserId('   ')).toBe('')
   })
 })

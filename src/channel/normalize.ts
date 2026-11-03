@@ -200,9 +200,9 @@ function unsupportedType(record: Record<string, unknown>): string | undefined {
 /**
  * Normalize one parsed line.
  *
- * Skip order is fixed: unsupported → malformed → self → broadcast → empty. The
- * first two reject the line's shape; the last three describe a real message the
- * assistant must not answer.
+ * Skip order is fixed: unsupported → malformed → self → broadcast → media-only
+ * → empty. The first two reject the line's shape; the rest describe a real
+ * message the assistant must not answer.
  */
 export function normalizeEvent(raw: unknown, context: NormalizeContext): NormalizeResult {
   if (!isRecord(raw)) return { skip: 'malformed', detail: 'not-an-object' }
@@ -250,7 +250,12 @@ export function normalizeEvent(raw: unknown, context: NormalizeContext): Normali
     return { skip: 'broadcast', detail: 'broadcast-mention' }
   }
 
-  if (text.trim() === '' && !media) return { skip: 'empty', detail: 'empty-text' }
+  if (text.trim() === '') {
+    // v1 does not answer a media-only event: the core message has no attachment
+    // slot, and replying to an image with no caption is not useful.
+    if (media) return { skip: 'unsupported', detail: 'media-only' }
+    return { skip: 'empty', detail: 'empty-text' }
+  }
 
   const now = context.now?.() ?? new Date()
   const receivedAt = now.toISOString()

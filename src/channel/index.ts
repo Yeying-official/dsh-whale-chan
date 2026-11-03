@@ -13,7 +13,7 @@ import { ChannelError } from './errors.ts'
 import { createRunner, type SpawnFn } from './process.ts'
 import { sendDetailed, type SendDetail } from './sender.ts'
 import { ChannelSupervisor, type EventSink } from './supervisor.ts'
-import { resolveOwnerUserId, targetsFromSettings } from './targets.ts'
+import { dedupeTargets, resolveOwnerUserId, targetsFromSettings } from './targets.ts'
 import { validateTarget } from './validate.ts'
 import type {
   AuthState,
@@ -68,19 +68,28 @@ export class DingTalkChannel {
   /**
    * Subscribe every enabled target.
    *
-   * A paused or disabled monitor starts nothing: pause is a first-class product
-   * action, and an empty target list stays an authorization-only idle.
+   * The owner identity must be known before any subscription starts: without it
+   * a message written by the assistant itself is not recognized as `self`, and
+   * the assistant could answer its own reply. A paused or disabled monitor still
+   * validates that precondition, then starts nothing.
    */
   async start(targets?: readonly DwsTarget[], sink?: EventSink): Promise<ChannelHealth> {
     if (this.#supervisor) throw new ChannelError('invalid-state', 'channel is already started')
     const settings = await this.#options.settingsProvider()
     const eventSink = sink ?? this.#options.sink
     if (!eventSink) throw new ChannelError('invalid-state', 'channel has no event sink')
+    const selected = targets ? dedupeTargets([...targets]) : targetsFromSettings(settings)
+    const ownerUserId = this.ownerUserId()
+    if (selected.length > 0 && ownerUserId === '') {
+      throw new ChannelError(
+        'owner-unknown',
+        'owner identity is required before subscribing; pass the userId returned by probeAuth()',
+      )
+    }
     if (!settings.monitor.enabled || settings.monitor.paused) {
       this.#options.logger.info('channel: monitor is disabled or paused; no subscription started')
       return STOPPED
     }
-    const selected = targets ? [...targets] : targetsFromSettings(settings)
     if (selected.length === 0) {
       this.#options.logger.info('channel: no enabled target; monitoring is idle')
       return STOPPED
@@ -89,7 +98,7 @@ export class DingTalkChannel {
     const supervisor = new ChannelSupervisor({
       settings,
       logger: this.#options.logger,
-      ownerUserId: this.#options.ownerUserId,
+      ownerUserId,
       ownerNick: this.#options.ownerNick,
       command: this.#options.command,
       baseArgs: this.#options.baseArgs,
@@ -118,12 +127,17 @@ export class DingTalkChannel {
     return (await this.sendWithReceipt(outbound)).result
   }
 
-  /** Send and keep the receipt/error detail for the Outbox record. */
+  /**
+   * Send and keep the receipt/error detail for the Outbox record.
+   *
+   * In dry-run mode the call is skipped, not failed: the caller must leave the
+   * Outbox record untouched instead of retrying or marking it failed.
+   */
   async sendWithReceipt(outbound: Outbound): Promise<SendDetail> {
     const settings = await this.#options.settingsProvider()
     if (settings.advanced.dryRun) {
-      this.#options.logger.warn('channel: dry run is enabled; outbound message was not sent')
-      return { result: 'failed', error: 'dry run: outbound message was not sent' }
+      this.#options.logger.info('channel: dry run is enabled; outbound message was skipped')
+      return { result: 'skipped' }
     }
     return sendDetailed(outbound, settings, { runner: await this.#runner() })
   }
@@ -152,9 +166,14 @@ export class DingTalkChannel {
     return this.#supervisor?.health() ?? STOPPED
   }
 
-  /** Owner id the channel uses for self-detection, resolved from settings when unset. */
-  async ownerUserId(): Promise<string> {
-    return resolveOwnerUserId(await this.#options.settingsProvider(), this.#options.ownerUserId)
+  /**
+   * Owner id the channel uses for self-detection.
+   *
+   * It is resolved once by the host from `probeAuth().userId`; there is no
+   * fallback because a guessed id would defeat the self-message filter.
+   */
+  ownerUserId(): string {
+    return resolveOwnerUserId(this.#options.ownerUserId)
   }
 
   async #runner(): Promise<CommandRunner> {

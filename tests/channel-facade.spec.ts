@@ -127,7 +127,7 @@ describe('DingTalkChannel lifecycle and operations', () => {
       sentAt: null,
       receipt: null,
     }
-    await expect(instance.send(outbound)).resolves.toBe('failed')
+    await expect(instance.send(outbound)).resolves.toBe('skipped')
     expect(existsSync(ledger)).toBe(false)
   })
 
@@ -164,6 +164,6 @@ describe('DingTalkChannel lifecycle and operations', () => {
     ])
     await expect(instance.validateTarget(atMe)).resolves.toEqual({ valid: true })
     await expect(instance.probeAuth()).resolves.toMatchObject({ available: true, authenticated: true })
-    await expect(instance.ownerUserId()).resolves.toBe('u-owner')
+    expect(instance.ownerUserId()).toBe('u-owner')
   })
 })

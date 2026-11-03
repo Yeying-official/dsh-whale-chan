@@ -134,10 +134,9 @@ describe('normalizeEvent: skips', () => {
     expect(skipOf(result)).toBe('empty')
   })
 
-  it('keeps a media-only message with an empty body instead of dropping it', () => {
-    const message = asMessage(normalize({ ...atEvent, msgtype: 'picture', text: undefined }, groupTarget))
-    expect(message.text).toBe('')
-    expect(message.addressed).toBe(true)
+  it('skips a media-only message as unsupported', () => {
+    const result = normalize({ ...atEvent, msgtype: 'picture', text: undefined }, groupTarget)
+    expect(result).toMatchObject({ skip: 'unsupported', detail: 'media-only' })
   })
 
   it('rejects a line without a stable message id', () => {

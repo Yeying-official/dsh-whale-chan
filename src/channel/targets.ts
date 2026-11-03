@@ -123,14 +123,11 @@ export function targetsFromSettings(settings: Settings): DwsTarget[] {
 /**
  * The owner identity used for self-detection and mention matching.
  *
- * Settings carry no account id on purpose, so the host supplies it. When it does
- * not, the at-me row's id is the only explicit value available; it is used only
- * when it is not the literal placeholder.
+ * Settings carry no account id on purpose: the host resolves it once from
+ * `probeAuth().userId` and passes it in. There is deliberately **no fallback** —
+ * guessing the owner from a target id would disable the self-message filter and
+ * could make the assistant answer its own messages.
  */
-export function resolveOwnerUserId(settings: Settings, supplied?: string): string {
-  const explicit = supplied?.trim() ?? ''
-  if (explicit !== '') return explicit
-  const atMe = settings.targets.rows.find((row) => row.kind === 'at-me' && row.id.trim() !== '')
-  const candidate = atMe?.id.trim() ?? ''
-  return candidate === 'at-me' || candidate === 'self' || candidate === 'me' ? '' : candidate
+export function resolveOwnerUserId(supplied?: string): string {
+  return supplied?.trim() ?? ''
 }

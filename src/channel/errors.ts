@@ -12,6 +12,7 @@ export type ChannelErrorCode =
   | 'auth-missing'
   | 'invalid-target'
   | 'invalid-outbound'
+  | 'owner-unknown'
   | 'invalid-state'
 
 export class ChannelError extends Error {

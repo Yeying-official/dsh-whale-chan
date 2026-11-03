@@ -29,13 +29,8 @@ export interface DwsTarget {
 /** One accepted inbound message; the channel emits exactly the core model. */
 export type ChannelEvent = InboundMessage
 
-/**
- * Outcome of one delivery attempt.
- *
- * `unknown` means the channel cannot prove whether the message was delivered,
- * so the caller must never retry it; `gone` means the target no longer exists.
- */
-export type SendResult = 'sent' | 'unknown' | 'failed' | 'gone'
+/** Outcome of one delivery attempt: `sent`, `failed`, `gone`, `unknown` or `skipped`. */
+export type SendResult = 'sent' | 'unknown' | 'failed' | 'gone' | 'skipped'
 
 /** Lifecycle of one per-target subscription process. */
 export type ProcessState = 'starting' | 'ready' | 'stopped' | 'failed' | 'orphaned'
@@ -86,6 +81,14 @@ export interface AuthState {
   readonly authenticated: boolean
   readonly tokenValid: boolean
   readonly expiresAt?: string
+  /**
+   * The authorized account id, when `auth status` reports one.
+   *
+   * This is the only value in this module that identifies a person. It is
+   * returned to the host so it can be passed back as `ownerUserId`; it is never
+   * logged, persisted by the channel, or written into documentation.
+   */
+  readonly userId?: string
 }
 
 /** Minimal logger seam; every message is expected to be already redacted. */

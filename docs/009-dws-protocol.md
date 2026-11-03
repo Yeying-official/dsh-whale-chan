@@ -131,6 +131,7 @@ DSH 宿主进程不保证继承交互 shell 的 `PATH`。Windows 上 npm 全局�
 
 ```text
 dws chat +messages-send --as user --ai-tag --idempotency-key <key> --wait-delivery -f json
+    --yes
     [--chat-id <openConversationId>]
     [--user <userId> | --open-dingtalk-id <openDingTalkId>]
     --markdown <正文>
@@ -140,20 +141,23 @@ dws chat +messages-send --as user --ai-tag --idempotency-key <key> --wait-delive
 - `--ai-tag` 由代码固定追加，模型输出无法移除。
 - 群与 `at-me` 回复都用 `--chat-id <conversationId>`；单聊用 `--user`；`open:` 前缀的目标用 `--open-dingtalk-id`。
 - 没有 `idempotencyKey`、正文为空、目标会话 id 为空时**不 spawn**，直接判 `failed`。
+- **非交互确认 `--yes`**：dws 在非交互环境要求显式确认，缺失时 exit 3 并返回 `{"error":{"category":"validation","reason":"confirmation_required",...}}`。发送总是发生在主人已配置/已批准的流程里，不能等待 stdin，因此 `buildSendArgs` 固定追加 `--yes`；`event stop` 同样使用 `--yes`。**T2 实测**：不带 `--yes` 的发送被 dws 拒绝（exit 3，`confirmation_required`），修复后通过。
 
 ### 5.1 回执语义 **[F]**
 
-| 情况                                                                              | 结果                               | 上层动作                       |
-| --------------------------------------------------------------------------------- | ---------------------------------- | ------------------------------ |
-| 退出 0 + `success:true` / `ok:true` / `errcode:0` / 有 messageId、processQueryKey | `sent`                             | 记录回执，Outbox 置 sent       |
-| 退出 0 但没有任何确认回执                                                         | `unknown`                          | **禁止重发**，等待人工/对账    |
-| 退出 0 + 明确失败（`success:false`、非零 errcode）                                | `failed` 或 `gone`                 | 写审计；`gone` 标记目标失效    |
-| 退出非 0 + 明确“目标不存在/不是成员/群不存在”                                     | `gone`                             | 标记目标失效，停止向该目标发送 |
-| 退出非 0 + 明确拒绝（invalid/denied/forbidden/无权限…）                           | `failed`                           | 记录错误，不自动重试           |
-| 退出非 0 但无法分类                                                               | `unknown`                          | **禁止重发**                   |
-| 超时、无输出、spawn 失败前的信号中断                                              | `unknown`（spawn 失败为 `failed`） | 超时禁止重发                   |
-| 进程无法启动（ENOENT 等）                                                         | `failed`                           | 明确未发出，允许按幂等键重试   |
-| `advanced.dryRun` 打开                                                            | `skipped`                          | 不 spawn、不改变 Outbound 状态 |
+| 情况                                                                                               | 结果                               | 上层动作                                                               |
+| -------------------------------------------------------------------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------- |
+| 退出 0 + `deliveryStatus` 为 `delivered`/`sent`/`ok`（或缺失但 `success:true`/`errcode:0`/有回执） | `sent`                             | 记录 `openMessageId`（优先）/messageId/processQueryKey，Outbox 置 sent |
+| 退出 0 + `deliveryStatus` 为非白名单值（如 `unknown`/`pending`/`failed`）                          | `unknown`                          | **禁止重发**，detail 记录 `deliveryStatus`                             |
+| 退出 0 但没有任何确认回执                                                                          | `unknown`                          | **禁止重发**，等待人工/对账                                            |
+| 退出 0 + 明确失败（`success:false`、非零 errcode）                                                 | `failed` 或 `gone`                 | 写审计；`gone` 标记目标失效                                            |
+| 退出非 0 + 明确“目标不存在/不是成员/群不存在”                                                      | `gone`                             | 标记目标失效，停止向该目标发送                                         |
+| 退出非 0 + 重复幂等键（`CONFLICT_ERROR` / `Request is repeated with uuid`）                        | `unknown`                          | **禁止重发**，detail 记录 duplicate idempotency key                    |
+| 退出非 0 + 明确拒绝（invalid/denied/forbidden/无权限…）                                            | `failed`                           | 记录错误，不自动重试                                                   |
+| 退出非 0 但无法分类                                                                                | `unknown`                          | **禁止重发**                                                           |
+| 超时、无输出、spawn 失败前的信号中断                                                               | `unknown`（spawn 失败为 `failed`） | 超时禁止重发                                                           |
+| 进程无法启动（ENOENT 等）                                                                          | `failed`                           | 明确未发出，允许按幂等键重试                                           |
+| `advanced.dryRun` 打开                                                                             | `skipped`                          | 不 spawn、不改变 Outbound 状态                                         |
 
 **unknown 语义**：通道无法证明消息是否送达，调用方不得重发同一 `idempotencyKey`；只能落 `send_unknown` 并等待对账/人工处理。这是 Outbox 设计的硬约束。
 
@@ -162,6 +166,8 @@ dws chat +messages-send --as user --ai-tag --idempotency-key <key> --wait-delive
 ### 5.2 幂等键
 
 `Outbound.idempotencyKey` 是唯一外部去重键：同一键最多产生一条钉钉消息。键由 app 生成并持久化（WS5），通道只透传给 `--idempotency-key`，从不自行生成或替换。
+
+**重复 key 的语义（T2 实测）**：同一幂等键第二次发送时，dws 返回 exit 1 与 `{"error":{"category":"api","server_error_code":"CONFLICT_ERROR","reason":"business_error","message":"Request is repeated with uuid '<key>'"}}`。这证明第一次请求已被受理，不是失败也不是新的发送；通道映射为 `unknown`（detail=`duplicate idempotency key`），上层不得重发，应按 Outbox 记录对账。
 
 ## 6. 停止、信号与订阅生命周期
 
@@ -218,7 +224,7 @@ dws chat +chat-list --types p2p --page-size 50 --format json
 2. NDJSON 原始字段名：`senderStaffId` 是否总存在、`conversationType` 的取值集合、`atUsers` 的元素结构（字符串 vs 对象）、`createAt` 的单位、会话标题字段名。
 3. `+chat-list --types p2p` 的响应结构与分页语义；`+chat-search` 的 `--format json` 是否被接受。
 4. `auth status --format json` 的字段名、`expires_at` 格式与账号 id 字段（`user_id`/`userId`/`staff_id` 等别名）。
-5. `+messages-send` 的成功回执字段（messageId / processQueryKey / errcode）与 `--wait-delivery` 的行为。
+5. `+messages-send` 的成功回执字段已由 T2 证实为 `openMessageId` + `deliveryStatus` + `idempotencyKey`；其他失败码的分类与 `--wait-delivery` 的边界行为仍待补充。
 6. Windows：`stdin.end()` 是否能优雅结束订阅；`dws event stop <id> --yes` 的实际语法与权限。
 7. `--ttl` 的补收窗口语义（单位已由 T1 证实必须带 `h`，v1 固定整数小时）；断线后是否重复投递旧事件。
 8. `--profile` 在 `event consume` / `auth status` / `send` 上的位置与可接受性。

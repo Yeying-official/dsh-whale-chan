@@ -550,7 +550,7 @@ export class Runtime {
       prompts: this.require(this.promptsRef, 'prompts'),
       executor: this.require(this.executorRef, 'executor'),
       channel: () => this.runningChannel,
-      channelRunning: () => this.runningChannel !== undefined && this.runningChannel.health().running,
+      channelRunning: () => this.runningChannel !== undefined,
       ownerUserId: () => this.auth?.userId ?? '',
       lifetime: this.lifetimeController.signal,
       ids: this.idSource,
@@ -630,13 +630,15 @@ export class Runtime {
     if (this.pipelineRef === undefined) return
     await this.probe(false)
     if (this.closing) return
+    // The queue and the passes are ready before any subscription can deliver a
+    // message, so an inbound event never waits for the effect loop to start.
+    this.effectsRef?.start({ concurrency: EFFECT_CONCURRENCY })
+    this.passesRef?.start()
     if (this.promptsReady && this.authorized()) {
       await this.startChannel()
       this.channelSignature = this.signature()
+      if (this.runningChannel !== undefined) this.resumeOutbox()
     }
-    this.effectsRef?.start({ concurrency: EFFECT_CONCURRENCY })
-    this.passesRef?.start()
-    if (this.runningChannel !== undefined) this.resumeOutbox()
   }
 
   private authorized(): boolean {

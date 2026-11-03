@@ -41,6 +41,34 @@ export function Card({ title, children, actions, className, id, headingId }: Car
   )
 }
 
+/** Accessible binary switch built as a real `role="switch"` button. */
+export function Switch({
+  checked,
+  onChange,
+  label,
+  disabled,
+  id,
+}: {
+  checked: boolean
+  onChange: (next: boolean) => void
+  label: string
+  disabled?: boolean
+  id?: string
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      id={id}
+      className="wc-switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+    />
+  )
+}
+
 export type BadgeTone = 'neutral' | 'success' | 'warning' | 'error' | 'info'
 
 export function Badge({ tone = 'neutral', children }: { tone?: BadgeTone; children: ReactNode }) {

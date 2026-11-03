@@ -458,5 +458,8 @@
   "aria.pauseToggle": "Toggle monitor pause",
   "aria.loadMore": "Load more",
   "session.notReady": "The DSH session list is not ready. Try again shortly.",
-  "session.notListed": "That execution session is not in the current DSH session list."
+  "session.notListed": "That execution session is not in the current DSH session list.",
+  "overview.counts.title": "At a glance",
+  "threads.column.title": "Conversation",
+  "threads.column.kind": "Kind"
 }

@@ -458,5 +458,8 @@
   "aria.pauseToggle": "切换监控暂停状态",
   "aria.loadMore": "加载更多",
   "session.notReady": "DSH 会话列表尚未就绪，请稍后重试。",
-  "session.notListed": "该执行会话不在当前的 DSH 会话列表中。"
+  "session.notListed": "该执行会话不在当前的 DSH 会话列表中。",
+  "overview.counts.title": "数据概览",
+  "threads.column.title": "会话",
+  "threads.column.kind": "类型"
 }

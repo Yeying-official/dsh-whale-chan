@@ -4,13 +4,14 @@
  * The app layer composes:
  *
  * - `DshTaskExecutor` with `DshSessionHost` to run approved tasks;
- * - `LlmModel` to serve the brain's `ModelPort` — a direct `ctx.llm.stream`
- *   call with no session, no tools and no workspace;
+ * - `SessionModel` to serve the brain's `ModelPort` — one visible DSH session
+ *   per conversation, with the replier preset and its tools, so the exchange is
+ *   recorded in the session;
  * - `DshResearch` with `ctx.web` to serve the brain's `ResearchPort`.
  *
- * `SessionModel` is deliberately not re-exported: it is the session-based reply
- * path a session with a 141k-token tool schema made too slow, and it stays in
- * `model.ts` only as a reference for a future tool-using reply.
+ * `LlmModel` remains exported as an experimental direct `ctx.llm.stream` path
+ * (no session, no tools); the runtime does not wire it. The T3 timeout was a
+ * TurnTracker issue (inbox append before `turn/start`), not the tool schema.
  *
  * `initializeRoleModel`/`seedRoleModel` are part of the host implementation, not
  * something the app layer calls: the host seeds `settings.models.*` while it
@@ -26,3 +27,5 @@ export * from './task.ts'
 export * from './llm-model.ts'
 export * from './research.ts'
 export * from './role-model.ts'
+
+export { SessionModel } from './model.ts'

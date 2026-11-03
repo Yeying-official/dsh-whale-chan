@@ -36,10 +36,6 @@ export const inject = [
   'permissionPresets',
   'sessionPersistence',
   'llm',
-  // `LlmModel` reads the host default selection through this service; it is
-  // required even when `settings.models.reply` pins both provider and model,
-  // because the adapter resolves the call config through the same service.
-  'agentDefaultModel',
   'web',
 ]
 

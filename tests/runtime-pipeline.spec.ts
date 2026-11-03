@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -189,24 +188,10 @@ describe('pause, resume and settings changes', () => {
     expect(h.channel.startCalls).toBe(2)
   })
 
-  it('keeps the direct reply model stateless when the persona changes', async () => {
+  it('resets the replier session when the persona changes', async () => {
     const h = await start()
     h.runtime.settings.update('persona', { name: '新名字' }, 0)
-    // The persona is rendered into each request; there is no replier session
-    // whose prompt would have to be rebuilt.
-    expect(h.model.resetCalls).toBe(0)
-  })
-
-  it('does not construct the session-based reply model', () => {
-    const source = readFileSync(join(process.cwd(), 'src/app/runtime.ts'), 'utf8')
-    expect(source).not.toMatch(/SessionModel/)
-    expect(source).toContain('replyModelFor')
-  })
-
-  it('declares every service the direct reply model touches', () => {
-    const source = readFileSync(join(process.cwd(), 'src/index.ts'), 'utf8')
-    expect(source).toMatch(/'agentDefaultModel'/)
-    expect(source).toMatch(/'llm'/)
+    expect(h.model.resetCalls).toBe(1)
   })
 
   it('adopts a new reply model route', async () => {

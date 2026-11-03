@@ -100,23 +100,24 @@ interface ExecutorResult {
 
 ## 5. 会话、工作区与权限
 
-| 项       | 任务执行会话                                                    | 回复器                                   |
-| -------- | --------------------------------------------------------------- | ---------------------------------------- |
-| 会话 id  | `whale-task-<taskId>-<assignmentId 后 8 位>`                    | **无**（直接 LLM 调用，不建会话）        |
-| 工作区   | `Assignment.workspace`，缺省用 `<tasks.workspaceRoot>/<taskId>` | `~/.dsh-whale-chan/workspace`            |
-| preset   | `dsh-whale-chan-worker`                                         | `dsh-whale-chan-replier`                 |
-| 权限预设 | `settings.tasks.permissionPreset`（默认窄）                     | `workspace-write`                        |
-| 模型     | `settings.models.worker`                                        | `settings.models.reply`                  |
-| 标题     | `任务 · <title>`                                                | `钉钉 · <thread 标题>`                   |
-| 系统提示 | 人设 + 任务 brief/要求/发起人 + 安全规则 + 汇报                 | preset 的 persona 段；完整指示随消息投递 |
+| 项       | 任务执行会话                                                    | 回复器                                                 |
+| -------- | --------------------------------------------------------------- | ------------------------------------------------------ |
+| 会话 id  | `whale-task-<taskId>-<assignmentId 后 8 位>`                    | `whale-reply-<threadDigest 前 12 位>`（可见 DSH 会话） |
+| 工作区   | `Assignment.workspace`，缺省用 `<tasks.workspaceRoot>/<taskId>` | `~/.dsh-whale-chan/workspace`                          |
+| preset   | `dsh-whale-chan-worker`                                         | `dsh-whale-chan-replier`                               |
+| 权限预设 | `settings.tasks.permissionPreset`（默认窄）                     | `workspace-write`                                      |
+| 模型     | `settings.models.worker`                                        | `settings.models.reply`                                |
+| 标题     | `任务 · <title>`                                                | `钉钉 · <thread 标题>`                                 |
+| 系统提示 | 人设 + 任务 brief/要求/发起人 + 安全规则 + 汇报                 | preset 的 persona 段；完整指示随消息投递               |
 
 - **系统提示**由 `renderPersona(persona, …)` 渲染的人设块加任务段组成，通过 `agent.ctx.systemPrompt.section({ name: 'dsh-whale-chan-task', order: 900, interpolate: false })` 注册。它不是 `complete` 段：preset 自带的 persona 与指令段落保留，本段追加在后。`interpolate: false` 保证主人写进人设的字面 `{{…}}` 不会被 DSH 变量替换。
 - **权限**只取设置里的两个值；其它值一律按 `workspace-write` 处理。
 - **工作区以批准为准**：`ExecutorRequest.workspace` 由 WS5 从 `Assignment.workspace` 传入，优先于 `tasks.workspaceRoot`；两者都没有配置时用 `<stateDir>/tasks/<taskId>`。相对路径一律拒绝（`UserError('invalidWorkspace')`，属领域 `refused` 组），因为 DSH 会按宿主工作目录解析它，主人无法预测任务落在哪里。
-- **模型**来自设置的两个独立路由：worker 用 `settings.models.worker`（会话创建后、首个回合前写入 `model/selection`，只注入第一次请求）；回复器用 `settings.models.reply`（`LlmModel` 每次调用前用它解析路由；为空则用宿主默认 `agentDefaultModel`）。两者都不**修改** DSH 的全局默认模型。
+- **模型**来自设置的两个独立路由：worker 用 `settings.models.worker`（会话创建后、首个回合前写入 `model/selection`，只注入第一次请求）；回复器用 `settings.models.reply`（`SessionModel` 在 `ensureSession` 时传入，会话内沿用）。两者都不**修改** DSH 的全局默认模型。
 - 任务会话按需创建：`whale-task-*` 的 id 带派工后缀，因此**重试是新会话**，不会复用上次失败的对话。
-- **输出预算有下限**：`LlmModel` 把 brain 的 `maxChars` 换算成 `maxTokens = clamp(maxChars/4, 1024, 4096)`。下限 1024 是给 reasoning 模型留的：分类只要 800 字符、草稿只要 300 字符，若按 200/75 传，推理 token 会先耗尽预算，JSON 被截断或为空，表现成 `classify:invalid` 而模型其实答对了。
-- **回复器不建会话**（T3 真机结论）：回复曾经跑在一个 DSH 会话里，但会话会带上 preset 挂载的全部工具 schema，实测 141k token，prefill 超过 60 秒。分类与草稿不需要任何工具，所以回复路径改为 `LlmModel`：一次 `ctx.llm.stream`，只带 `system` 与一条 user 消息，不注册工具、不建工作区、不落 session。`SessionModel` 仍留在 `src/executor/model.ts`（不公开导出）作为将来「需要工具的回复」的参考实现。
+- **回复器使用可见的 DSH 会话**：每个线程一个 `whale-reply-<digest>` 会话，preset 为 `dsh-whale-chan-replier`，工作区 `<stateDir>/workspace`，标题 `钉钉 · <thread 标题>`；交互过程留在 DSH 会话里，主人可查看，工具集也保留（回复器没有 shell/文件/job，只带 persona、指令、时间与 `tool-web`）。
+- **T3 超时的根因是 TurnTracker，不是工具 schema**：DSH 先写 inbox 的 `user/message`、再发 `turn/start`；未认领的消息若被上一轮 `turn/end` 结算，就会把 7–12 秒完成的回复误判为超时。会话跟踪器已改为“先记待认领、由下一个 `turn/start` 认领”（`05762fa`），因此保留会话与工具不会牺牲结算正确性。
+- `LlmModel`（`src/executor/llm-model.ts`）是**未接线的直连实验**：它不建会话、不注册工具，只保留作为对照/将来需要无会话回复时的参考；当前运行时不用它。
 
 ## 6. 投递与幂等
 

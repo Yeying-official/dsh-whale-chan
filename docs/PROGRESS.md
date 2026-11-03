@@ -3,6 +3,8 @@
 > 快照时间：2026-11-02 17:54（Asia/Shanghai）。
 > 状态：**暂停**。无运行中的子智能体，无后台作业。
 > 恢复方式：对编排会话发送 `continue`。
+>
+> **恢复记录 2026-11-03 08:45**：WS1 已复审、合并到 `main`（`e700ad8`），重建并重载 bundle 后在新 GUI（`:59916`）复验通过；WS2/WS3 在独立 worktree 中并行启动。
 
 ---
 
@@ -11,16 +13,16 @@
 | 工作流 | 状态 | 位置 |
 | --- | --- | --- |
 | WS0 骨架 + rc.5 spike + 两轮契约修复 | **完成并合并** | `main` `f1312c6` |
-| WS1 core 领域 + SQLite store + effects + passes（含审核修复轮） | **已交付，待最终复审与合并** | `feat/ws1-core` `5bc1e4b`（9 个提交） |
-| WS2 dws 通道 | 未开始 | 计划 worktree `E:/DSHWork/wt-ws2` |
-| WS3 人设/提示/分类/检索/策略 | 未开始 | 计划 worktree `E:/DSHWork/wt-ws3` |
+| WS1 core 领域 + SQLite store + effects + passes（含审核修复轮） | **完成并合并** | `main` `e700ad8`（9 个提交） |
+| WS2 dws 通道 | 进行中 | worktree `E:/DSHWork/wt-ws2` |
+| WS3 人设/提示/分类/检索/策略 | 进行中 | worktree `E:/DSHWork/wt-ws3` |
 | WS4 任务执行器 + agent preset | 未开始 | 依赖 WS1/WS2/WS3 |
 | WS5 设置持久化 / HTTP API 全量 / 收件箱 / 健康 | 未开始 | 依赖 WS4 |
 | WS6 面板 UI 全页签 | 未开始 | 依赖 WS5 契约 |
 | WS7 文档 / 安装 / 兼容矩阵 / CHANGELOG | 未开始 | 可与 WS6 并行 |
 | WS8 端到端 + 真机 T0–T3 验收 | 未开始 | 最后收口 |
 
-已安装状态：`dsh-whale-chan-assistant` 已装入 `desktop` profile（link 到本仓库），WS0 版本通过真机面板验证；WS1 尚未部署。
+已安装状态：`dsh-whale-chan-assistant` 已装入 `desktop` profile（link 到本仓库）；WS1 合并后已重建并重载，面板与新 GUI 路由（`:59916`）复验通过。
 
 ---
 
@@ -28,9 +30,9 @@
 
 | 分支 | HEAD | 说明 |
 | --- | --- | --- |
-| `main` | `f1312c6` | WS0 合并提交：`chore(merge): ws0 bootstrap and frozen contracts` |
+| `main` | `e700ad8` | WS1 合并：`chore(merge): ws1 core domain and durable queue`（父 `f1312c6`） |
 | `feat/ws0-bootstrap` | `b22118c` | 保留用于审计；内容已全部在 main |
-| `feat/ws1-core` | `5bc1e4b` | 基于 `b22118c`，9 个提交，**未合并** |
+| `feat/ws1-core` | `5bc1e4b` | 已合并；保留分支用于审计 |
 
 WS1 提交：
 

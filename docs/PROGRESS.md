@@ -10,17 +10,17 @@
 
 ## 1. 总体完成度
 
-| 工作流 | 状态 | 位置 |
-| --- | --- | --- |
-| WS0 骨架 + rc.5 spike + 两轮契约修复 | **完成并合并** | `main` `f1312c6` |
+| 工作流                                                          | 状态           | 位置                         |
+| --------------------------------------------------------------- | -------------- | ---------------------------- |
+| WS0 骨架 + rc.5 spike + 两轮契约修复                            | **完成并合并** | `main` `f1312c6`             |
 | WS1 core 领域 + SQLite store + effects + passes（含审核修复轮） | **完成并合并** | `main` `e700ad8`（9 个提交） |
-| WS2 dws 通道 | 进行中 | worktree `E:/DSHWork/wt-ws2` |
-| WS3 人设/提示/分类/检索/策略 | 进行中 | worktree `E:/DSHWork/wt-ws3` |
-| WS4 任务执行器 + agent preset | 未开始 | 依赖 WS1/WS2/WS3 |
-| WS5 设置持久化 / HTTP API 全量 / 收件箱 / 健康 | 未开始 | 依赖 WS4 |
-| WS6 面板 UI 全页签 | 未开始 | 依赖 WS5 契约 |
-| WS7 文档 / 安装 / 兼容矩阵 / CHANGELOG | 未开始 | 可与 WS6 并行 |
-| WS8 端到端 + 真机 T0–T3 验收 | 未开始 | 最后收口 |
+| WS2 dws 通道                                                    | 进行中         | worktree `E:/DSHWork/wt-ws2` |
+| WS3 人设/提示/分类/检索/策略                                    | 进行中         | worktree `E:/DSHWork/wt-ws3` |
+| WS4 任务执行器 + agent preset                                   | 未开始         | 依赖 WS1/WS2/WS3             |
+| WS5 设置持久化 / HTTP API 全量 / 收件箱 / 健康                  | 未开始         | 依赖 WS4                     |
+| WS6 面板 UI 全页签                                              | 未开始         | 依赖 WS5 契约                |
+| WS7 文档 / 安装 / 兼容矩阵 / CHANGELOG                          | 未开始         | 可与 WS6 并行                |
+| WS8 端到端 + 真机 T0–T3 验收                                    | 未开始         | 最后收口                     |
 
 已安装状态：`dsh-whale-chan-assistant` 已装入 `desktop` profile（link 到本仓库）；WS1 合并后已重建并重载，面板与新 GUI 路由（`:59916`）复验通过。
 
@@ -28,11 +28,11 @@
 
 ## 2. 分支与提交坐标
 
-| 分支 | HEAD | 说明 |
-| --- | --- | --- |
-| `main` | `e700ad8` | WS1 合并：`chore(merge): ws1 core domain and durable queue`（父 `f1312c6`） |
-| `feat/ws0-bootstrap` | `b22118c` | 保留用于审计；内容已全部在 main |
-| `feat/ws1-core` | `5bc1e4b` | 已合并；保留分支用于审计 |
+| 分支                 | HEAD      | 说明                                                                        |
+| -------------------- | --------- | --------------------------------------------------------------------------- |
+| `main`               | `e700ad8` | WS1 合并：`chore(merge): ws1 core domain and durable queue`（父 `f1312c6`） |
+| `feat/ws0-bootstrap` | `b22118c` | 保留用于审计；内容已全部在 main                                             |
+| `feat/ws1-core`      | `5bc1e4b` | 已合并；保留分支用于审计                                                    |
 
 WS1 提交：
 
@@ -76,6 +76,7 @@ b25692e fix(core): bind assignment session and numeric expiry
 9. **WS8**：端到端 + 真机 T0（只读）→ T1（订阅观察，`dryRun`）→ T2（单条测试群发送）→ T3（@我全链路）；证据入 `docs/test-reports/WS8.md`。
 
 ### P1
+
 - 合并 WS1 后更新 README 的“当前状态”与目录说明。
 - 发布前补 `CHANGELOG.md`、版本 tag（`v0.1.0`）。
 
@@ -103,18 +104,18 @@ git worktree add E:/DSHWork/wt-ws3 -b feat/ws3-brain main
 
 ## 6. 已冻结的决策
 
-| 决策 | 值 |
-| --- | --- |
-| 插件身份 | `dsh-whale-chan-assistant` /「鲸鱼酱 · 钉钉助理」/ 默认二次元助理语气 |
-| 代回复披露 | 固定钉钉 AI 角标；不额外加前缀；v1 不提供关闭开关 |
-| 批准通道 | 仅 DSH 面板 + 收件箱会话；钉钉 A2UI 卡片留 v0.3 |
-| 管理 API | 19 个端点；`GET persona` 只读；`PUT settings/:block` 必带 revision，块内深合并 |
-| 设置默认 | `quietHours.enabled=true`（22:00–08:00）、`replyDuringQuiet=false`、`dryRun=false` |
-| 任务执行 | 无 `Approval(approve)` 不得创建 Assignment；迟到批准拒绝；取消后不可复活 |
-| 发送未知 | `replyUnknown` 为终态，不自动重发，需主人核对 |
-| effects | 保留 `UNIQUE(kind,key) WHERE state IN ('waiting','running')`；运行中 enqueue 覆盖 payload + `generation+1`，当前尝试结束后重跑 |
-| 监听目标 | 运行时只用已解析的 `openConversationId`/`userId`，不在监听期按名字解析 |
-| 真机测试 | 仅 `AI工程师孵化中心` 群；T0 只读 → T1 观察 → T2 单条 → T3 @我；全程 `dryRun/review` 先行 |
+| 决策       | 值                                                                                                                             |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| 插件身份   | `dsh-whale-chan-assistant` /「鲸鱼酱 · 钉钉助理」/ 默认二次元助理语气                                                          |
+| 代回复披露 | 固定钉钉 AI 角标；不额外加前缀；v1 不提供关闭开关                                                                              |
+| 批准通道   | 仅 DSH 面板 + 收件箱会话；钉钉 A2UI 卡片留 v0.3                                                                                |
+| 管理 API   | 19 个端点；`GET persona` 只读；`PUT settings/:block` 必带 revision，块内深合并                                                 |
+| 设置默认   | `quietHours.enabled=true`（22:00–08:00）、`replyDuringQuiet=false`、`dryRun=false`                                             |
+| 任务执行   | 无 `Approval(approve)` 不得创建 Assignment；迟到批准拒绝；取消后不可复活                                                       |
+| 发送未知   | `replyUnknown` 为终态，不自动重发，需主人核对                                                                                  |
+| effects    | 保留 `UNIQUE(kind,key) WHERE state IN ('waiting','running')`；运行中 enqueue 覆盖 payload + `generation+1`，当前尝试结束后重跑 |
+| 监听目标   | 运行时只用已解析的 `openConversationId`/`userId`，不在监听期按名字解析                                                         |
+| 真机测试   | 仅 `AI工程师孵化中心` 群；T0 只读 → T1 观察 → T2 单条 → T3 @我；全程 `dryRun/review` 先行                                      |
 
 ---
 

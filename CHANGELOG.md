@@ -26,7 +26,7 @@
 - 任务状态在 wire 上把领域 `approved` 映射为 `queued`（已批准、等待执行），`GET tasks?status=queued` 反向过滤。
 - 健康检查的 channel 语义：禁用监控、主人暂停、无 enabled target 都算正常 `idle`；只有“应有订阅却 stopped”才是 `degraded`。
 - Windows 下 `dws` 裸命令自动解析 npm shim（`PATH`、`%APPDATA%\npm`、Node 安装目录），并支持 `dws.binaryPath` 覆盖；解析结果只记录路径。
-- 回复路径改为直接使用 DSH 的模型服务，并放宽真实模型延迟的预算；任务结果继续走 outbox 与审计。
+- 回复路径使用可见的 DSH 会话（replier preset），交互可在「钉钉 · <标题>」会话中回看；真实模型延迟预算放宽为分类/草稿 60s、单回合 90s。任务结果继续走 outbox 与审计。
 
 ### Fixed
 
@@ -37,7 +37,7 @@ WS8 真机暴露、单元测试/桩无法发现的问题：
 - **真实群事件是 snake_case 扁平结构**：归一化支持 `message_id`、`conversation_id`、`sender_open_dingtalk_id`、`content`、`event_time`、`create_time`；`conversationType` 按目标类型推断；`@ownerNick` 文本判定；群事件无 `staffId`/`atUsers` 时仍能工作。
 - **回合认领与投递 id**：`TurnTracker` 改为等待下一个 `turn/start` 认领；新增 `deliveryId()` 统一 `dsh-whale-chan:` 前缀，`awaitTurnEnd` 用带前缀 id 匹配。
 - **T4 结果回帖泄漏内部信息**：结果模板只保留任务标题与摘要，worker prompt 禁止输出 `Route`、工具名、会话 ID、工作区路径；会话 ID 只进审计/面板，不进入对外文本。
-- 其他真机修复：owner nick 传入通道、回复器模型直接走 LLM 运行时、慢模型预算与输出 token 下限、可见会话回复、发送确认回执解析。
+- 其他真机修复：owner nick 传入通道、真实模型延迟预算、输出 token 下限、发送确认与回执解析、结果回复脱敏。
 
 ### Security
 

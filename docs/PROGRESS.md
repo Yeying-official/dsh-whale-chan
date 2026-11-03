@@ -19,7 +19,7 @@
 | WS5b 组合根 + 流水线 + 健康                     | **完成并合并** | `main` `4ebb2ca`                                       |
 | WS6 面板 UI 全页签                              | **完成并合并** | `main` `28d5645`                                       |
 | WS7 README/安装/兼容矩阵/CHANGELOG/013 安全基线 | **完成并合并** | `b0891fc`（`docs: write the security baseline`）       |
-| WS8 端到端 + 真机 T0–T4 验收                    | **完成**       | [WS8-live](test-reports/WS8-live.md)，`main` `f43d7c3` |
+| WS8 端到端 + 真机 T0–T4 验收                    | **完成**       | [WS8-live](test-reports/WS8-live.md)，`main` `3ac76c8` |
 
 ## 2. 发布坐标与门禁
 

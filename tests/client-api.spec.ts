@@ -5,7 +5,7 @@ import { API_REQUEST_HEADER, API_REQUEST_HEADER_VALUE, apiUrl } from '../src/sha
 const valid = {
   ok: true,
   name: 'dsh-whale-chan-assistant',
-  version: '0.1.0-dev.0',
+  version: '0.1.0',
   stateDir: 'C:\\Users\\example\\.dsh-whale-chan',
   startedAt: '2026-11-02T00:00:00.000Z',
 }

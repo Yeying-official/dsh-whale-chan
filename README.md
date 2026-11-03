@@ -2,7 +2,7 @@
 
 > **Whale Chan · DingTalk Assistant** — a DeepSeek Harness desktop plugin that replies as you, in your own DingTalk account, within a persona you define.
 > It watches @-mentions, selected groups and DMs, answers with web research when needed, and turns actionable requests into tasks that only you can approve in the DSH panel.
-> Status: WS0–WS6 merged, WS7 documentation in progress, WS8 real-device acceptance pending. Not released yet.
+> Status: v0.1.0 (2026-11-03), WS0–WS8 complete including Windows real-device acceptance. The release tag is cut after review.
 
 鲸鱼酱是运行在 DSH 桌面端里的**个人钉钉助理**：用主人本人的钉钉账号（`dws` 个人授权，不是机器人），按主人写的人设回复 @我、指定群与指定单聊；需要动手的事先变成任务，只有主人在面板里批准后，才会在 DSH 会话中执行，结果再回到原会话。
 
@@ -115,7 +115,7 @@ pnpm build          # 生成 lib/index.js 与 lib/client.js
 2. 打开「插件」→「添加插件」；选择「安装第三方插件」（不同版本可能直接打开输入框）。
 3. 在「包名或地址」中填入**本仓库的绝对路径**，例如 `E:\DSHWork\wt-ws7`。安装器支持 npm 包、Git 仓库和本地目录；本地目录会以 `link:` 依赖写入 profile。
 4. 点击安装，等待完成。界面提示「请重启 DSH」时重启桌面端。
-5. 重启后侧栏出现「鲸鱼酱」，打开面板应看到「已连接」与版本 `0.1.0-dev.0`。
+5. 重启后侧栏出现「鲸鱼酱」，打开面板应看到「已连接」与版本 `0.1.0`。
 
 > 桌面端的 `desktop` profile 由桌面端保留，命令行 `dsh plugin --profile desktop ...` 不用于管理它；请使用上面的 GUI 入口。自建 profile 可以用 `dsh plugin --profile <name> add <本地路径>`，该命令由 DSH CLI 转发给 profile 内的 pnpm。
 
@@ -200,6 +200,8 @@ pnpm build          # 生成 lib/index.js 与 lib/client.js
 - **失败关闭**：模板缺失、授权缺失、状态目录不可写、数据库版本高于当前插件时，插件拒绝启动订阅或任务，而不是猜一个降级路径。
 - **本地数据**：消息、决策、任务、审计与设置都在本机 SQLite；只有回复/分类/任务执行需要的文本会按 DSH 的模型路由发给模型提供方，检索查询会发给 DSH 的搜索适配器。
 
+**v0.1.0 真机验收范围**：Windows 10/11 + DSH Desktop `0.2.1-rc.5` + `dws` `1.0.66`，T0 认证/发现、T1 目标校验、T2 单条发送、T3 群内 @ 自动回复、T4 任务批准与执行全部通过；验收后测试群目标已停用，通道回到 `idle`。单聊 o2o、macOS/Linux 仍未真机覆盖。首次使用建议先用 `dryRun=true` 验证目标与模板，再逐级放量；任务始终需要人工批准，`unknown` 投递不重发。完整记录见 [WS8 真机报告](docs/test-reports/WS8-live.md)。
+
 更细的授权规则见 [002 授权与回复策略](docs/002-authorization.md)，发送与回执语义见 [009 DWS 协议](docs/009-dws-protocol.md)；完整的威胁模型、控制、数据保留与事件响应见 [013 安全基线](docs/013-security.md)。
 
 ## 排障
@@ -252,17 +254,18 @@ pnpm build          # 生成 lib/index.js 与 lib/client.js
 | [009 DWS 协议](docs/009-dws-protocol.md)        | 事件键、NDJSON、发送回执、provisional 字段      |
 | [010 设计摘要](docs/010-design.md)              | WS0 冻结的产品与架构决策                        |
 | [011 设置合约](docs/011-settings-contract.md)   | 57 个字段、默认值、范围与错误码                 |
-| [012 发布](docs/012-release.md)                 | 发布门禁、干净 profile 安装、T0–T3、tag 与回滚  |
+| [012 发布](docs/012-release.md)                 | 发布门禁、干净 profile 安装、T0–T4、tag 与回滚  |
 | [013 安全基线](docs/013-security.md)            | 威胁模型、控制、明确不防御、数据保留与事件响应  |
+| [WS8 真机报告](docs/test-reports/WS8-live.md)   | T0–T4 结果、真机修复、残留与未覆盖              |
 | [兼容矩阵](docs/compatibility.md)               | DSH / `dws` / OS / Node / 模型路由的验证状态    |
 | [PROGRESS](docs/PROGRESS.md)                    | 工作流进度与恢复快照                            |
 
 ## 状态
 
-- WS0 骨架与冻结合约、WS1 领域与持久化、WS2 `dws` 通道、WS3 人设与策略、WS4 执行器、WS5a 设置/API、WS5b 组合根、WS6 面板：**已合并到 `main`**。
-- WS7：README、安装/首次配置、兼容矩阵、CHANGELOG 与发布清单，仍在 `feat/ws7-docs` 分支上评审。
-- WS8：真机 T0–T3 验收尚未完成；当前版本 `0.1.0-dev.0`，没有 tag，也没有发布。
-- 真机测试只允许在测试群按 T0（只读）→ T1（订阅观察）→ T2（单条发送）→ T3（@我全链路）逐级放行，证据写入 `docs/test-reports/WS8.md`。
+- WS0 骨架与冻结合约、WS1 领域与持久化、WS2 `dws` 通道、WS3 人设与策略、WS4 执行器、WS5a 设置/API、WS5b 组合根、WS6 面板、WS7 文档与安全基线、WS8 真机验收：**全部完成**。
+- 当前版本 `0.1.0`，2026-11-03 完成 Windows 真机 T0–T4；tag `v0.1.0` 由发布复核后打，尚未 push。
+- 真机范围：Windows 10/11、DSH Desktop `0.2.1-rc.5`、`dws` `1.0.66`；单聊 o2o、macOS/Linux 未真机覆盖，见 [WS8 真机报告](docs/test-reports/WS8-live.md) 与 [兼容矩阵](docs/compatibility.md)。
+- 验收后测试群目标已停用（`targets.rows=[]`），通道回到 `idle: no enabled targets`；重新启用前请先核对目标、`dryRun` 与回复模式。
 
 ## 许可证
 

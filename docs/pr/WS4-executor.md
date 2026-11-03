@@ -114,9 +114,9 @@
 
 ## 5. 测试
 
-- 新增 **120** 条：`executor-task` 31、`executor-model` 21、`executor-llm-model` 16、
-  `executor-role-model` 12、`executor-research` 10、`executor-session` 13、`presets` 17。
-  仓库总数 335 → **455**。
+- 新增 **124** 条：`executor-task` 31、`executor-model` 21、`executor-llm-model` 16、
+  `executor-role-model` 12、`executor-research` 10、`executor-session` 17、`presets` 17。
+  仓库总数 335 → **459**。
 - 5 个变异实验全部被杀死：关掉批准门（3 条失败）、回合匹配改成「任意 turn/end」（3 条）、
   去掉按 thread 的互斥（1 条）、忽略提示预算（3 条）、`onFinished` 重复调用（3 条）。
 - `DshSessionHost` 无法在单测里真跑（会真的建会话并呼唤模型），因此它的验证方式是

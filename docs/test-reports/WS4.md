@@ -19,7 +19,7 @@ $ tsc --noEmit
 （无输出，退出码 0）
 
 $ pnpm test
- ✓ tests/executor-session.spec.ts (13 tests) 91ms
+ ✓ tests/executor-session.spec.ts (17 tests) 95ms
  ✓ tests/executor-research.spec.ts (10 tests) 53ms
  ✓ tests/executor-task.spec.ts (31 tests) 52ms
  ✓ tests/executor-model.spec.ts (21 tests) 44ms
@@ -29,7 +29,7 @@ $ pnpm test
 （另有既有 27 个 spec 文件）
 
  Test Files  34 passed (34)
-      Tests  455 passed (455)
+      Tests  459 passed (459)
 
 $ pnpm build
 ℹ [CJS] lib\client.js    42.04 kB │ gzip: 12.48 kB
@@ -60,10 +60,10 @@ $ git status --porcelain
 | `tests/executor-llm-model.spec.ts`  | 16   | 回复直接调用：请求形状（`system` / 一条 user / `maxTokens` / `signal`、无 `tools`）、路由优先级与回退、delta 拼接与 reasoning 忽略、流错误/中止、只访问 `llm`+`agentDefaultModel`（代理上下文）、`maxChars`→`maxTokens` 映射与上限                       |
 | `tests/executor-role-model.spec.ts` | 12   | 路由映射（含 effort、半配置、设置默认值）、`needsSeeding` 四种判断、空配置不注入、已有选择不覆盖、成功才 append + wire + flush、解析失败回退宿主默认                                                                                                     |
 | `tests/executor-research.spec.ts`   | 10   | 事实/来源映射、hostname 兜底、非 http(s) 丢弃与去重、limit 上限、长事实截断、空结果、异常、中止、预算耗尽、空查询不调用                                                                                                                                  |
-| `tests/executor-session.spec.ts`    | 13   | `TurnTracker` 归属回合、早于投递的 `turn/end`、历史已结束、aborted/failed 详情、无 requestId 的下一回合；`awaitTurn` 实时匹配、立即返回、订阅/扫描竞态补放、超时、中止、已中止不订阅、忽略无关事件                                                       |
+| `tests/executor-session.spec.ts`    | 17   | `TurnTracker` 归属回合、早于投递的 `turn/end`、历史已结束、aborted/failed 详情、无 requestId 的下一回合；`awaitTurn` 实时匹配、立即返回、订阅/扫描竞态补放、超时、中止、已中止不订阅、忽略无关事件                                                       |
 | `tests/presets.spec.ts`             | 17   | 宿主行仍在、无重复 loader id、两套 preset 的 id/name/order、回复器工具集与「无 shell/fs/jobs/skill」、执行器工具集、shell 平台门控、jobs 5 秒、compaction 隔离、插件名语法、`!!js` 位置、两套 preset 的中性人设前缀                                      |
 
-合计 **120** 条；仓库总数 335 → **455**。
+合计 **124** 条；仓库总数 335 → **459**。
 
 ## 3. 变异实验
 
@@ -183,6 +183,22 @@ brain 的分类与草稿**不需要任何工具**，所以回复路径改为直�
 
 预期效果：一次分类请求从「prefill 141k 工具 schema」变成「system + 一条 user 消息」，
 T3 应在 1–3 秒内返回。
+
+## 5.3 T3 真实根因：`turn/end` 匹配错回合
+
+截图显示同一次分类 3 次执行分别 12s / 9s / 7s 就产出了 JSON，插件却一直等到超时——
+模型并不慢，是 `TurnTracker` 没认出结束事件：
+
+- 真实 DSH 在 `turn/start` **之前**记录 `user/message`（inbox append）。会话复用时
+  `current` 还是上一轮的编号，旧实现直接 `claimed = current`，于是新消息被算在上一轮头上；
+  随后 `turn/start` 开新一轮、`turn/end` 报新编号，与 claimed 不符 → 永不结算 → 15s/60s 超时。
+- 修复：新增「待认领」状态。消息落在已开启的回合内才直接认领，否则记为 `pending`，
+  由**下一个** `turn/start` 认领；未认领前任何 `turn/end` 都不结算。`turn/end` 同时清空
+  `current`，避免跨回合残留。
+- 先写复现测试再改实现：新增 4 条（队列先于 turn/start、旧回合 end 不误结算、
+  历史已含完整本轮、id 不匹配不认领），改前 3 红，改后全绿。
+- 教训：旧测试都按「`turn/start` 先到」构造，恰好绕过了真实顺序；对时序敏感的匹配逻辑，
+  测试必须覆盖真实事件顺序，而不是代码作者脑内的顺序。
 
 ## 6. 复核清单
 

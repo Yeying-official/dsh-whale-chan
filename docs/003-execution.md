@@ -127,6 +127,7 @@ interface ExecutorResult {
 ## 7. 回合结束、超时与取消
 
 - `awaitTurnEnd` 的匹配单位是**一次投递所在的回合**：投递消息的 `user/message` 事件决定回合号，该回合的 `turn/end` 才算结束。别的回合、别的会话的事件都不算。
+- **顺序假设：`user/message` 可能先于它的 `turn/start` 出现**（DSH 先记录 inbox append，再由 driver 开回合；会话复用时当前回合号还是上一轮的）。因此跟踪器只在消息落在**已开启的回合内**时直接认领；否则把它记为待认领，由**下一个 `turn/start`** 认领。未认领前任何 `turn/end` 都不结算——否则会拿上一轮的结束当成本次结束（T3 真机即此故障：分类 7–12 秒就完成，插件却等到超时）。
 - 订阅先建立、历史后扫描，扫描期间到达的事件会补放，因此不会漏掉「刚好在订阅前后结束」的回合；如果回合在等待开始前就已经结束，直接返回 `completed`。
 - 结果只有四种：`completed`、`timeout`、`aborted`、`failed`（`failed` 带上 DSH 的结束原因，例如 `aborted by hook`）。
 - 超时：执行器调用 `host.cancel` 取消会话回合，返回 `timeout`；不 SIGKILL 任何进程。

@@ -81,6 +81,43 @@ describe('TurnTracker', () => {
     expect(tracker.observe(end(2))).toBe(true)
   })
 
+  it('settles a message that was queued before its turn started', () => {
+    // T3: the inbox append records `user/message` before the driver opens the
+    // turn, so a reused session's `current` is still the previous turn's number.
+    const tracker = new TurnTracker([start(1), end(1)], 'dsh-whale-chan:task:task-1')
+    expect(tracker.observe(userMessage('dsh-whale-chan:task:task-1'))).toBe(false)
+    expect(tracker.observe(start(2))).toBe(false)
+    expect(tracker.observe(end(2))).toBe(true)
+    expect(tracker.turn).toBe(2)
+    expect(tracker.outcome()).toEqual({ status: 'completed' })
+  })
+
+  it('does not settle on the end of the turn that was open when the message queued', () => {
+    const tracker = new TurnTracker([start(1)], 'm')
+    // The message is recorded between turns: it must not be claimed as turn 1.
+    expect(tracker.observe(end(1))).toBe(false)
+    expect(tracker.observe(userMessage('m'))).toBe(false)
+    expect(tracker.observe(end(1))).toBe(false)
+    expect(tracker.settled).toBe(false)
+    expect(tracker.observe(start(2))).toBe(false)
+    expect(tracker.observe(end(2))).toBe(true)
+  })
+
+  it('settles when the whole exchange is already in the log', () => {
+    const tracker = new TurnTracker([start(1), end(1), userMessage('m'), start(2), end(2)], 'm')
+    expect(tracker.settled).toBe(true)
+    expect(tracker.turn).toBe(2)
+    expect(tracker.outcome()).toEqual({ status: 'completed' })
+  })
+
+  it('ignores a user message with another id', () => {
+    const tracker = new TurnTracker([start(1), end(1)], 'm')
+    expect(tracker.observe(userMessage('other'))).toBe(false)
+    expect(tracker.observe(start(2))).toBe(false)
+    expect(tracker.observe(end(2))).toBe(false)
+    expect(tracker.settled).toBe(false)
+  })
+
   it('is settled when the history already ends the turn', () => {
     const tracker = new TurnTracker(
       [start(1), userMessage('dsh-whale-chan:task:task-1'), end(1)],

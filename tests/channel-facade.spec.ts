@@ -40,13 +40,15 @@ async function waitFor(predicate: () => boolean, timeoutMs = 5_000, stepMs = 10)
 const atMe: DwsTarget = { kind: 'at-me', id: 'at-me', mentionOnly: true, enabled: true }
 
 const eventLine = {
-  msgId: 'm-1',
-  conversationId: 'cid-1',
-  conversationType: 'group',
-  senderStaffId: 'u-alice',
-  senderNick: 'Alice',
-  text: '@鲸鱼酱 hi',
-  atUsers: ['u-owner'],
+  type: 'user_im_message_receive_group',
+  event_id: 'evt-m-1',
+  message_id: 'm-1',
+  conversation_id: 'cid-1',
+  sender: 'Alice',
+  sender_open_dingtalk_id: 'od-alice',
+  content: '@鲸鱼酱 hi',
+  create_time: '2026-11-03 14:04:17',
+  event_time: 1793685857502,
 }
 
 function channel(provider: () => Settings | Promise<Settings>, extraEnv: Record<string, string> = {}): DingTalkChannel {

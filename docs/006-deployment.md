@@ -1,6 +1,6 @@
 # 006 部署
 
-> 当前状态：WS0 冻结 `cordis.patch.yml` 的宿主机行；WS2 补充本机 `dws` 个人授权的检查、登录、验证与停止说明；WS4 增加两套 agent preset、插件工作区与会话创建排障。完整的 bundle 安装、升级、卸载与 profile 隔离留给 WS7，本文不指导修改 `~/.dsh`。
+> 当前状态：WS0 冻结 `cordis.patch.yml` 的宿主机行；WS2 补充本机 `dws` 个人授权的检查、登录、验证与停止说明；WS4 增加两套 agent preset、插件工作区与会话创建排障。完整的 bundle 安装、升级、卸载与 profile 隔离见 [012 发布](012-release.md) 与根 README；本文不指导修改 `~/.dsh`。
 
 ## 1. 前置条件
 
@@ -210,7 +210,7 @@ bundle 在 `cordis.patch.yml` 里声明两个 `@deepseek-ai/dsh-agent-preset` �
 
 - 默认日志不包含消息正文、token、clientSecret、账号 id 或完整原始 payload。
 - `dws.debug` 或 `advanced.debugPayloads` 打开后，也只输出字段名与白名单结构字段的截断值（见 [009 DWS 协议](009-dws-protocol.md) §4.4）。
-- 审计与状态目录、备份策略、profile 隔离随 WS5/WS7 落地；本工作流不写 `~/.dsh`。
+- 审计与状态目录、备份策略见 §9；profile 隔离与安装见 [012 发布](012-release.md)。
 
 ## 8. 已知限制与尚未覆盖
 
@@ -221,11 +221,7 @@ bundle 在 `cordis.patch.yml` 里声明两个 `@deepseek-ai/dsh-agent-preset` �
 - 模型路由只在会话首次创建时写入；之后主人在面板里改的模型优先，插件不会覆盖。
 - 执行器没有全局并发上限；`tasks.maxConcurrent` 由 WS5b 的 `launch` effect handler 执行（达到上限时该 effect 延迟 1 秒重试，不会启动第二个运行）。
 
-尚未覆盖（WS7）：
-
-- bundle 安装/升级/卸载与 profile 隔离；
-- 状态目录、日志轮转、审计保留策略；
-- 版本兼容矩阵与 CHANGELOG。
+发布、安装、升级/卸载、profile 隔离与兼容矩阵见 [012 发布](012-release.md)、[兼容矩阵](compatibility.md) 和根 README。
 
 ## 9. 状态目录、数据库与锁（WS5a）
 

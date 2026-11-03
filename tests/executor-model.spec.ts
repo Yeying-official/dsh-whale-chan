@@ -8,6 +8,8 @@ import {
   DROPPED_MARKER,
   ExecutorError,
   MAX_PROMPT_CHARS,
+  MODEL_TURN_TIMEOUT_MS,
+  REPLY_TIMEOUT_MS,
   ModelAbortedError,
   ModelFailedError,
   ModelTimeoutError,
@@ -131,6 +133,29 @@ describe('session identity', () => {
       host.ensured[0]?.sessionId,
       host.ensured[1]?.sessionId,
     ])
+  })
+})
+
+describe('turn budget', () => {
+  it('gives one replier turn 90 seconds, so a slow first token is not a timeout', async () => {
+    const { host, model } = learning()
+    await model.complete(request(), new AbortController().signal)
+    expect(REPLY_TIMEOUT_MS).toBe(90_000)
+    expect(MODEL_TURN_TIMEOUT_MS).toBe(REPLY_TIMEOUT_MS)
+    expect(host.awaited[0]?.options.timeoutMs).toBe(90_000)
+  })
+
+  it('still honours an explicit budget from the caller', async () => {
+    const host = new FakeSessionHost()
+    const model = new SessionModel({
+      host,
+      threadKey: 'dm:u1',
+      title: '小明',
+      homeDir: '/home/owner',
+      timeoutMs: 5_000,
+    })
+    await model.complete(request(), new AbortController().signal)
+    expect(host.awaited[0]?.options.timeoutMs).toBe(5_000)
   })
 })
 

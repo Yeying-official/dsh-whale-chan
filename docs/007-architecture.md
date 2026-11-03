@@ -163,7 +163,7 @@ brain 不开 socket、不 spawn 进程、不 import DSH 包：所有外部能力
 | `TaskExecutor.execute/cancel`                                                 | 执行一个已批准任务；`onStarted`/`onFinished` 对应领域两个命令                                      |
 | `SessionHost.ensureSession/deliver/awaitTurnEnd/readFinalText/cancel/dispose` | 所有 DSH 调用的唯一入口，按 `SessionRef` 寻址，无跨任务状态                                        |
 | `DshSessionHost`                                                              | 真实实现：`sessionController`、`workspaceRegistry`、`permissionPresets`、`agents`、`session/event` |
-| `DshTaskExecutor`                                                             | worker 会话生命周期、系统提示、超时/取消、结果映射                                                 |
+| `DshTaskExecutor`                                                             | worker 会话生命周期、系统提示、超时（单回合 90 秒 / 任务总预算 `timeoutMinutes`）、取消、结果映射  |
 | `SessionModel`（`implements ModelPort`）                                      | 每个会话线程一个 replier 会话，串行、限轮、限时、限长                                              |
 | `DshResearch`（`implements ResearchPort`）                                    | `ctx.web.search` 适配，空结果/异常/中止一律降级为空                                                |
 | `seedRoleModel` / `routeSelection`                                            | 把 `settings.models.*` 播种到新会话（`model/selection` + 首次请求注入），不改全局默认              |

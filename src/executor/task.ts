@@ -29,6 +29,7 @@ import type { Settings } from '../shared/settings.ts'
 import type { PermissionPreset } from '../shared/limits.ts'
 import { ExecutorError } from './errors.ts'
 import {
+  MODEL_TURN_TIMEOUT_MS,
   WORKER_PRESET,
   taskSessionId,
   type AwaitTurnOptions,
@@ -288,7 +289,10 @@ export class DshTaskExecutor implements TaskExecutor {
 
       const requestId = taskRequestId(task)
       await this.host.deliver(session, { requestId, text: renderTaskMessage(task) })
-      const timeoutMs = settings.tasks.timeoutMinutes * 60_000
+      // A task has one turn, so its overall budget is also the wait budget; it
+      // never drops below one model turn, or a one-minute task would cut a slow
+      // first token before the model could answer.
+      const timeoutMs = Math.max(settings.tasks.timeoutMinutes * 60_000, MODEL_TURN_TIMEOUT_MS)
       const awaitOptions: AwaitTurnOptions = { requestId, timeoutMs, signal: lifetime }
       const end = await this.host.awaitTurnEnd(session, awaitOptions)
       const final = await this.host.readFinalText(session)

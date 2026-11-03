@@ -19,13 +19,14 @@
  * races startup still releases everything already open.
  */
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-workspace'
 import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import { access, mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import { lock } from 'proper-lockfile'
-import type { Clock, InboundMessage, Outbound } from '../core/index.ts'
+import type { Clock, InboundMessage, Outbound, Task } from '../core/index.ts'
 import { Engine } from '../core/index.ts'
 import type { PromptSource, ResearchPort } from '../brain/index.ts'
 import { defaultPromptStore } from '../brain/index.ts'
@@ -40,7 +41,7 @@ import {
   type TaskExecutor,
 } from '../executor/index.ts'
 import { PLUGIN_NAME, PLUGIN_VERSION, type LogLevel } from '../shared/limits.ts'
-import type { Health, StateView } from '../shared/models.ts'
+import type { Health, StateView, TargetWorkspace } from '../shared/models.ts'
 import type { ModelRoute, SettingsBlock } from '../shared/settings.ts'
 import { SETTINGS_BLOCKS } from '../shared/settings.ts'
 import type { BrainModelFactory } from './brain-ports.ts'
@@ -62,7 +63,8 @@ import { Passes } from './passes.ts'
 import { Pipeline } from './pipeline.ts'
 import { SettingsService } from './settings.ts'
 import { Store } from './store.ts'
-import { healthView, stateView, type ViewContext } from './views.ts'
+import { healthView, stateView, type TargetWorkspaceInput, type ViewContext } from './views.ts'
+import { WorkspaceService } from './workspaces.ts'
 
 /** How long a lock left by a dead process is honoured before it is reclaimed. */
 export const LOCK_STALE_MS = 10_000
@@ -224,6 +226,7 @@ class SessionModelPool implements BrainModelFactory {
     private readonly stateDir: string,
     route: ModelRoute,
     private readonly logger: ExecutorLogger,
+    private readonly workspaceFor: (threadKey: string, title?: string) => { path: string; title: string },
   ) {
     this.route = { ...route }
     this.current = this.build()
@@ -254,6 +257,7 @@ class SessionModelPool implements BrainModelFactory {
       host: this.host,
       logger: this.logger,
       stateDir: this.stateDir,
+      workspaceFor: this.workspaceFor,
       model: this.route,
     })
   }
@@ -303,6 +307,7 @@ export class Runtime {
   private runningChannel: ChannelRuntime | undefined
   private channelPortRef: ChannelPort | undefined
   private countersRef: KvCounterStore | undefined
+  private workspacesRef: WorkspaceService | undefined
   private promptsRef: PromptSource | undefined
   private promptsReady = false
   private promptError: string | null = null
@@ -372,6 +377,11 @@ export class Runtime {
     return this.channelPortRef ?? this.managementChannel ?? this.runningChannel
   }
 
+  /** Per-conversation workspaces; constructed with the settings service. */
+  private get workspaces(): WorkspaceService {
+    return this.require(this.workspacesRef, 'workspaces')
+  }
+
   info(): RuntimeInfo {
     return {
       name: this.name,
@@ -427,6 +437,30 @@ export class Runtime {
   /** The frozen `GET health` view. */
   health(): Health {
     return healthView(this.viewContext())
+  }
+
+  /**
+   * The workspace one task of a conversation runs in.
+   *
+   * The conversation's target label names the workspace when it is known,
+   * because the DSH workspace list is the owner's only view of these
+   * directories. The thread title is the next best name, and the thread key is
+   * the last resort; the path never depends on the title.
+   */
+  taskWorkspace(task: Task): { path: string; title: string } {
+    const thread = this.storeRef?.threads.get(task.threadKey)
+    const label =
+      thread === undefined
+        ? undefined
+        : this.settingsRef?.current().targets.rows.find((row) => row.id === thread.targetId)?.label
+    const labelText = (label ?? '').trim()
+    const title = labelText.length > 0 ? labelText : thread?.title.trim() || task.threadKey
+    return this.workspaces.resolveThreadWorkspace(task.threadKey, title)
+  }
+
+  /** Read-only workspace projection of one target row. */
+  targetWorkspace(target: TargetWorkspaceInput): TargetWorkspace {
+    return this.workspaces.targetWorkspace(target)
   }
 
   /** Everything a view builder may read. */
@@ -494,6 +528,12 @@ export class Runtime {
       const settings = new SettingsService(store, this.time)
       this.settingsRef = settings
       this.applySettingsSeed(settings)
+      this.workspacesRef = new WorkspaceService({
+        settings: () => this.settings.current(),
+        stateDir: this.stateDir,
+        logger: this.executorLogger(),
+        ...(this.ctx === undefined ? {} : { registry: this.ctx.workspaceRegistry }),
+      })
       this.engineRef = new Engine({
         repos: store,
         ids: this.idSource,
@@ -505,6 +545,9 @@ export class Runtime {
       this.countersRef = new KvCounterStore(new Kv(store), { now: () => this.time.now().getTime() })
       await this.preparePrompts()
       await this.prepareServices()
+      // Best-effort: a conversation directory that cannot be created is a
+      // warning, not a reason to keep the monitor down.
+      await this.provisionWorkspaces()
       await this.prepareChannel()
       await this.startBackgroundWork()
     } catch (error) {
@@ -553,7 +596,13 @@ export class Runtime {
     if (this.overrides.model !== undefined) {
       this.modelRef = this.overrides.model
     } else if (this.hostRef !== undefined) {
-      this.modelRef = new SessionModelPool(this.hostRef, this.stateDir, this.settings.current().models.reply, logger)
+      this.modelRef = new SessionModelPool(
+        this.hostRef,
+        this.stateDir,
+        this.settings.current().models.reply,
+        logger,
+        (threadKey, title) => this.workspaces.resolveThreadWorkspace(threadKey, title),
+      )
     }
 
     this.executorRef =
@@ -564,6 +613,7 @@ export class Runtime {
             host: this.hostRef,
             logger,
             stateDir: this.stateDir,
+            workspaceFor: (task) => this.taskWorkspace(task),
             ...(this.promptsRef === undefined ? {} : { personaTemplate: this.promptsRef.get('persona') }),
           }))
     this.wireExecutor()
@@ -724,7 +774,20 @@ export class Runtime {
       this.requestReconcile(0)
       return
     }
-    if (block === 'targets' || block === 'dws') {
+    if (block === 'targets') {
+      // A newly enabled target gets its directory now; a disabled one keeps
+      // everything it already had.
+      void this.provisionWorkspaces()
+      this.requestReconcile(CHANNEL_RESTART_DEBOUNCE_MS)
+      return
+    }
+    if (block === 'tasks') {
+      // `tasks.workspaceRoot` may have moved the conversation root; existing
+      // directories and their registry records are left where they are.
+      void this.provisionWorkspaces()
+      return
+    }
+    if (block === 'dws') {
       this.requestReconcile(CHANNEL_RESTART_DEBOUNCE_MS)
     }
   }
@@ -883,6 +946,27 @@ export class Runtime {
     }
   }
 
+  /**
+   * Create and register the workspaces of every provisionable target.
+   *
+   * A failure is a warning: one unreachable directory must not keep the
+   * monitor, the channel or a settings save down. The service already isolates
+   * one failing target from the rest.
+   */
+  private async provisionWorkspaces(): Promise<void> {
+    const workspaces = this.workspacesRef
+    if (workspaces === undefined) return
+    try {
+      const summary = await workspaces.provisionTargets(this.settings.current())
+      this.log(
+        'debug',
+        `dsh-whale-chan: workspace provisioning: ${summary.created} created, ${summary.updated} retitled, ${summary.unchanged} unchanged, ${summary.skipped} skipped, ${summary.failed} failed`,
+      )
+    } catch (error) {
+      this.log('warn', `dsh-whale-chan: workspace provisioning failed: ${stableReason(error)}`)
+    }
+  }
+
   private executorLogger(): ExecutorLogger & ChannelLogger {
     if (this.ctx === undefined) return noopLogger()
     const logger = this.ctx.logger
@@ -946,6 +1030,7 @@ export class Runtime {
     this.hostRef = undefined
     this.passesRef = undefined
     this.countersRef = undefined
+    this.workspacesRef = undefined
     this.promptsRef = undefined
     this.managementChannel = undefined
     this.channelPortRef = undefined

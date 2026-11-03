@@ -125,6 +125,13 @@ export interface EnsureSessionOptions {
   readonly sessionId: string
   /** Directory the session owns; created before the session is. */
   readonly workspace: string
+  /**
+   * Display title of the workspace record, when it differs from the session
+   * title. A conversation owns one workspace shared by its replier and its
+   * tasks, so the registry row is titled after the conversation, not after
+   * whichever session happened to create it first.
+   */
+  readonly workspaceTitle?: string
   readonly title: string
   readonly preset: string
   readonly permission: PermissionPreset

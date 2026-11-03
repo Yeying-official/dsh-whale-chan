@@ -198,10 +198,10 @@ function safeSegment(value: string): boolean {
 /**
  * The workspace a task action runs in.
  *
- * An explicit directory must expand to an absolute path; otherwise the default
- * is `tasks.workspaceRoot` or `<stateDir>/tasks`, joined with the task id. A
- * relative configured root is refused for the same reason the executor refuses
- * one: the owner could not predict where the worker would run.
+ * An explicit directory must expand to an absolute path; it wins because it is
+ * the person's escape hatch. Otherwise the task runs in the workspace of its
+ * own conversation, the same directory its replier uses. The assignment stores
+ * that concrete path, so a later settings change cannot move a running task.
  */
 function workspaceFor(deps: HttpDeps, taskId: string, requested: string | undefined): string {
   const approved = (requested ?? '').trim()
@@ -210,13 +210,14 @@ function workspaceFor(deps: HttpDeps, taskId: string, requested: string | undefi
     if (!isAbsolute(expanded)) throw new HttpError(400, 'invalidWorkspace', 'The workspace must be an absolute path')
     return resolve(expanded)
   }
+  const task = deps.engine.task(taskId)
+  if (task !== undefined) return deps.runtime.taskWorkspace(task).path
+  // Unreachable through the routes (every caller resolves the task first), but
+  // a task without a conversation row still needs a predictable local default.
   if (!safeSegment(taskId)) {
     throw new HttpError(400, 'invalid_task', 'The task id cannot be used as a workspace directory name')
   }
-  const configured = deps.settings.current().tasks.workspaceRoot.trim()
-  const root = configured.length > 0 ? expandHome(configured) : join(deps.runtime.info().stateDir, 'tasks')
-  if (!isAbsolute(root)) throw new HttpError(400, 'invalidWorkspace', 'tasks.workspaceRoot must be an absolute path')
-  return join(root, taskId)
+  return join(deps.runtime.info().stateDir, 'tasks', taskId)
 }
 
 function requireTask(deps: HttpDeps, id: string): void {
@@ -396,7 +397,11 @@ async function route(
     }
     if (name === 'targets') {
       if (!methodAllowed(request, response, 'GET')) return
-      sendJson(response, 200, targetsView(deps.settings))
+      sendJson(
+        response,
+        200,
+        targetsView(deps.settings, (target) => deps.runtime.targetWorkspace(target)),
+      )
       return
     }
     if (name === 'threads') {

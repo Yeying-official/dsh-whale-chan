@@ -212,6 +212,15 @@ export interface DshTaskExecutorOptions {
   readonly stateDir?: string
   /** Shipped `persona` template, when the composition root loaded one. */
   readonly personaTemplate?: string
+  /**
+   * Per-conversation workspace resolver, supplied by the app layer.
+   *
+   * It is consulted only when the approval names no directory. A task without
+   * one then runs where the conversation's replier runs, which is what makes a
+   * task and its follow-up conversation share files. An approval that names a
+   * directory still wins: that is the human escape hatch for one-off work.
+   */
+  readonly workspaceFor?: (task: Task) => { readonly path: string; readonly title: string }
   /** Creates a directory recursively; replaced by tests. */
   readonly mkdir?: (path: string) => Promise<void>
 }
@@ -234,6 +243,7 @@ export class DshTaskExecutor implements TaskExecutor {
   private readonly homeDir: string
   private readonly stateDir: string
   private readonly personaTemplate: string | undefined
+  private readonly workspaceFor: DshTaskExecutorOptions['workspaceFor']
   private readonly makeDirectory: (path: string) => Promise<void>
   private readonly runs = new Map<string, Run>()
 
@@ -247,6 +257,7 @@ export class DshTaskExecutor implements TaskExecutor {
     this.homeDir = options.homeDir ?? homedir()
     this.stateDir = options.stateDir ?? DEFAULT_STATE_DIR
     this.personaTemplate = options.personaTemplate
+    this.workspaceFor = options.workspaceFor
     this.makeDirectory =
       options.mkdir ??
       (async (path: string): Promise<void> => {
@@ -280,7 +291,8 @@ export class DshTaskExecutor implements TaskExecutor {
       const workspace = await this.prepareWorkspace(task, settings, request.workspace)
       const session = await this.host.ensureSession({
         sessionId,
-        workspace,
+        workspace: workspace.path,
+        ...(workspace.title === undefined ? {} : { workspaceTitle: workspace.title }),
         title: `任务 · ${task.title}`,
         preset: WORKER_PRESET,
         permission: permissionFor(settings),
@@ -412,16 +424,35 @@ export class DshTaskExecutor implements TaskExecutor {
     }
   }
 
-  private async prepareWorkspace(task: Task, settings: Settings, approved?: string): Promise<string> {
-    const workspace = resolveTaskWorkspace({
+  /**
+   * The workspace one run uses.
+   *
+   * An explicit approved directory is expanded and must be absolute; it wins
+   * because a person who chose a directory expects the worker there. Without
+   * one, the injected conversation resolver decides (reply and task share the
+   * directory); a composition root that injects no resolver keeps the legacy
+   * `<root>/<taskId>` behavior, including its safe-segment check.
+   */
+  private async prepareWorkspace(
+    task: Task,
+    settings: Settings,
+    approved?: string,
+  ): Promise<{ path: string; title?: string }> {
+    const named = (approved ?? '').trim().length > 0
+    if (!named && this.workspaceFor !== undefined) {
+      const resolved = this.workspaceFor(task)
+      await this.makeDirectory(resolved.path)
+      return { path: resolved.path, title: resolved.title }
+    }
+    const path = resolveTaskWorkspace({
       taskId: task.id,
       settings,
       ...(approved === undefined ? {} : { approved }),
       home: this.homeDir,
       stateDir: this.stateDir,
     })
-    await this.makeDirectory(workspace)
-    return workspace
+    await this.makeDirectory(path)
+    return { path }
   }
 }
 

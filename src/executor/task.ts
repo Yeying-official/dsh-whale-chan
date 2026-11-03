@@ -93,7 +93,9 @@ export function resolveTaskWorkspace(input: {
   const approved = (input.approved ?? '').trim()
   if (approved.length > 0) {
     const expanded = expandHome(approved, input.home)
-    if (!isAbsolute(expanded)) throw new ExecutorError('invalidWorkspace', expanded)
+    // A user-correctable input error: the panel must ask for another directory,
+    // so the domain error carries it rather than an internal executor failure.
+    if (!isAbsolute(expanded)) throw new UserError('invalidWorkspace')
     return expanded
   }
   return taskWorkspace(input.settings, input.taskId, input.home, input.stateDir ?? DEFAULT_STATE_DIR)

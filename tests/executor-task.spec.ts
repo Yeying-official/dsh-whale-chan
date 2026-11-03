@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { join } from 'node:path'
-import { UserError } from '../src/core/errors.ts'
+import { USER_ERRORS, UserError } from '../src/core/errors.ts'
 import { ExecutorError } from '../src/executor/errors.ts'
 import {
   DEFAULT_STATE_DIR,
@@ -127,6 +127,12 @@ describe('session and workspace', () => {
     expect(result.sessionId).toBe(taskSessionId('task-1', 'assignment-1'))
   })
 
+  it('keeps invalidWorkspace in the domain table as a refused code', () => {
+    // The classification lives in core, so the API maps it with every other
+    // refusal; a move back into the executor would be caught here.
+    expect(USER_ERRORS.invalidWorkspace[0]).toBe('refused')
+  })
+
   it('defaults the permission to workspace-write', async () => {
     const { host, executor } = harness()
     const task = makeTask()
@@ -201,18 +207,23 @@ describe('session and workspace', () => {
     expect(host.ensured[0]?.workspace).toBe(join('/srv/tasks', 'task-1'))
   })
 
-  it('refuses a relative approved workspace before creating anything', async () => {
+  it('refuses a relative approved workspace as a user error, before creating anything', async () => {
     const { host, executor, dirs } = harness()
     const task = makeTask()
-    await expect(
-      executor.execute({
+    const error = await executor
+      .execute({
         task,
         approval: makeApproval(task),
         settings: makeSettings(),
         workspace: 'projects/alpha',
         signal: new AbortController().signal,
-      }),
-    ).rejects.toMatchObject({ code: 'invalidWorkspace' })
+      })
+      .catch((thrown: unknown) => thrown)
+    // A user-correctable input error, so the API can answer the same way it
+    // answers every other refusal the owner can act on.
+    expect(error).toBeInstanceOf(UserError)
+    expect((error as UserError).code).toBe('invalidWorkspace')
+    expect((error as UserError).missing).toBe(false)
     expect(dirs).toHaveLength(0)
     expect(host.ensured).toHaveLength(0)
   })

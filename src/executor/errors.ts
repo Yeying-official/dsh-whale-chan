@@ -13,15 +13,6 @@ export const EXECUTOR_ERRORS = {
   alreadyRunning: 'The task is already running',
   unsafeTaskId: 'The task id is not a single safe path segment',
   missingWorkspace: 'The task has no usable workspace directory',
-  /**
-   * The approval named a workspace that is not an absolute path.
-   *
-   * It is an executor error rather than a `UserError` because the domain's code
-   * table in `src/core/errors.ts` is closed and this layer does not write it; a
-   * relative path is refused before any directory or session is created, which
-   * is the property the domain care about.
-   */
-  invalidWorkspace: 'The approved workspace must be an absolute path',
   sessionUnavailable: 'The worker session could not be created',
   modelTimeout: 'The session did not end its turn in time',
   modelAborted: 'The session turn was aborted',

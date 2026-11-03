@@ -232,144 +232,140 @@ export function TargetsPage() {
           {errorText(loadError, t)}
         </Alert>
       ) : null}
-      <div className="wc-grid" data-columns="two">
-        <div className="wc-grid-col">
-          <Card
-            title={t('targets.list.title')}
-            actions={<Badge tone={dirty ? 'warning' : 'neutral'}>{rows.length}</Badge>}
-          >
-            {targetsApi.loading && !targetsApi.data ? <Skeleton label={t('common.loading')} rows={4} /> : null}
-            {conflict ? (
-              <div style={{ marginBottom: 12 }}>
-                <Alert
-                  tone="warning"
-                  role="alert"
-                  action={
-                    <Button size="sm" onClick={resetDraft}>
-                      {t('common.reload')}
-                    </Button>
-                  }
-                >
-                  {t('targets.conflict')}
-                </Alert>
-              </div>
-            ) : null}
-            {Object.entries(blockErrors).map(([path, message]) => (
-              <p className="wc-field-error" role="alert" key={path}>
-                {message}
-              </p>
-            ))}
-            {!targetsApi.loading && targetsApi.data && rows.length === 0 ? (
-              <EmptyState title={t('targets.empty')} />
-            ) : null}
-            <RowsField
-              rows={rows}
-              onChange={updateRows}
-              disabled={saving || revision === undefined}
-              rowErrors={rowErrors}
-            />
-            <FormActions
-              dirty={dirty}
-              saving={saving}
-              saveLabel={t('targets.save')}
-              savingLabel={t('common.saving')}
-              resetLabel={t('common.reset')}
-              dirtyLabel={t('targets.dirty')}
-              onSave={() => void save()}
-              onReset={resetDraft}
-              disabled={revision === undefined}
-            />
-          </Card>
-        </div>
-        <div className="wc-grid-col">
-          <Card
-            title={t('targets.discover.title')}
-            actions={
-              <Button size="sm" onClick={() => void search()} disabled={discover.pending}>
-                {discover.pending ? t('targets.discover.searching') : t('targets.discover.search')}
-              </Button>
-            }
-          >
-            <p className="wc-hint">{t('targets.discover.body')}</p>
-            <div className="wc-toolbar" style={{ marginTop: 10 }}>
-              <FieldRow label={t('targets.discover.kind')}>
-                <EnumField
-                  value={discoverKind}
-                  options={['group', 'dm', 'at-me']}
-                  optionLabel={(option) => t(`targets.kind.${option}` as 'targets.kind.group')}
-                  onChange={(next) => setDiscoverKind(next as TargetKind)}
-                />
-              </FieldRow>
-              <FieldRow label={t('targets.discover.query')}>
-                <TextField value={query} placeholder={t('targets.discover.queryPlaceholder')} onChange={setQuery} />
-              </FieldRow>
+      <div className="wc-grid-col">
+        <Card
+          title={t('targets.list.title')}
+          actions={<Badge tone={dirty ? 'warning' : 'neutral'}>{rows.length}</Badge>}
+        >
+          {targetsApi.loading && !targetsApi.data ? <Skeleton label={t('common.loading')} rows={4} /> : null}
+          {conflict ? (
+            <div style={{ marginBottom: 12 }}>
+              <Alert
+                tone="warning"
+                role="alert"
+                action={
+                  <Button size="sm" onClick={resetDraft}>
+                    {t('common.reload')}
+                  </Button>
+                }
+              >
+                {t('targets.conflict')}
+              </Alert>
             </div>
-            {discover.error ? (
-              <div style={{ marginTop: 10 }}>
-                <Alert tone="error" role="alert">
-                  {errorText(discover.error, t)}
-                </Alert>
-              </div>
-            ) : null}
-            {searched && !discover.pending && candidates.length === 0 && !discover.error ? (
-              <div style={{ marginTop: 10 }}>
-                <EmptyState title={t('targets.discover.empty')} />
-              </div>
-            ) : null}
-            {candidates.length > 0 ? (
-              <ul className="wc-health-list" style={{ marginTop: 10 }}>
-                {candidates.map((candidate) => (
-                  <li key={`${candidate.kind}:${candidate.id}`} className="wc-health-row">
-                    <div>
-                      <span className="wc-health-name">{candidate.label || candidate.id}</span>
-                      <span className="wc-health-detail-text">
-                        {t(`targets.kind.${candidate.kind}` as 'targets.kind.group')} · {candidate.id}
-                        {candidate.description ? ` · ${candidate.description}` : ''}
-                      </span>
-                    </div>
-                    <Button size="sm" aria-label={t('targets.discover.add')} onClick={() => addCandidate(candidate)}>
-                      {t('targets.discover.add')}
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </Card>
-          <Card
-            title={t('targets.validate')}
-            actions={
-              <Button size="sm" onClick={() => void runValidation()} disabled={validate.pending || rows.length === 0}>
-                {validate.pending ? t('targets.validate.validating') : t('targets.validate')}
-              </Button>
-            }
-          >
-            {validate.error ? (
+          ) : null}
+          {Object.entries(blockErrors).map(([path, message]) => (
+            <p className="wc-field-error" role="alert" key={path}>
+              {message}
+            </p>
+          ))}
+          {!targetsApi.loading && targetsApi.data && rows.length === 0 ? (
+            <EmptyState title={t('targets.empty')} />
+          ) : null}
+          <RowsField
+            rows={rows}
+            onChange={updateRows}
+            disabled={saving || revision === undefined}
+            rowErrors={rowErrors}
+          />
+          <FormActions
+            dirty={dirty}
+            saving={saving}
+            saveLabel={t('targets.save')}
+            savingLabel={t('common.saving')}
+            resetLabel={t('common.reset')}
+            dirtyLabel={t('targets.dirty')}
+            onSave={() => void save()}
+            onReset={resetDraft}
+            disabled={revision === undefined}
+          />
+        </Card>
+      </div>
+      <div className="wc-grid" data-columns="two">
+        <Card
+          title={t('targets.discover.title')}
+          actions={
+            <Button size="sm" onClick={() => void search()} disabled={discover.pending}>
+              {discover.pending ? t('targets.discover.searching') : t('targets.discover.search')}
+            </Button>
+          }
+        >
+          <p className="wc-hint">{t('targets.discover.body')}</p>
+          <div className="wc-toolbar" style={{ marginTop: 10 }}>
+            <FieldRow label={t('targets.discover.kind')}>
+              <EnumField
+                value={discoverKind}
+                options={['group', 'dm', 'at-me']}
+                optionLabel={(option) => t(`targets.kind.${option}` as 'targets.kind.group')}
+                onChange={(next) => setDiscoverKind(next as TargetKind)}
+              />
+            </FieldRow>
+            <FieldRow label={t('targets.discover.query')}>
+              <TextField value={query} placeholder={t('targets.discover.queryPlaceholder')} onChange={setQuery} />
+            </FieldRow>
+          </div>
+          {discover.error ? (
+            <div style={{ marginTop: 10 }}>
               <Alert tone="error" role="alert">
-                {errorText(validate.error, t)}
+                {errorText(discover.error, t)}
               </Alert>
-            ) : null}
-            {validation.length > 0 ? (
-              <Alert tone={invalidCount > 0 ? 'warning' : 'success'} role="status">
-                <span>{t('targets.validate.summary', { valid: validCount, invalid: invalidCount })}</span>
-                {validation.some((item) => !item.valid) ? (
-                  <ul className="wc-health-list" style={{ marginTop: 8 }}>
-                    {validation
-                      .filter((item) => !item.valid)
-                      .map((item, index) => (
-                        <li key={`${item.target.kind}:${item.target.id}:${index}`} className="wc-health-detail-text">
-                          {item.target.label || item.target.id} —{' '}
-                          {t('targets.validate.invalid', { message: item.error ?? '' })}
-                        </li>
-                      ))}
-                  </ul>
-                ) : null}
-              </Alert>
-            ) : null}
-            {validation.length === 0 && !validate.error ? (
-              <p className="wc-hint">{t('targets.discover.body')}</p>
-            ) : null}
-          </Card>
-        </div>
+            </div>
+          ) : null}
+          {searched && !discover.pending && candidates.length === 0 && !discover.error ? (
+            <div style={{ marginTop: 10 }}>
+              <EmptyState title={t('targets.discover.empty')} />
+            </div>
+          ) : null}
+          {candidates.length > 0 ? (
+            <ul className="wc-health-list" style={{ marginTop: 10 }}>
+              {candidates.map((candidate) => (
+                <li key={`${candidate.kind}:${candidate.id}`} className="wc-health-row">
+                  <div>
+                    <span className="wc-health-name">{candidate.label || candidate.id}</span>
+                    <span className="wc-health-detail-text">
+                      {t(`targets.kind.${candidate.kind}` as 'targets.kind.group')} · {candidate.id}
+                      {candidate.description ? ` · ${candidate.description}` : ''}
+                    </span>
+                  </div>
+                  <Button size="sm" aria-label={t('targets.discover.add')} onClick={() => addCandidate(candidate)}>
+                    {t('targets.discover.add')}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </Card>
+        <Card
+          title={t('targets.validate')}
+          actions={
+            <Button size="sm" onClick={() => void runValidation()} disabled={validate.pending || rows.length === 0}>
+              {validate.pending ? t('targets.validate.validating') : t('targets.validate')}
+            </Button>
+          }
+        >
+          {validate.error ? (
+            <Alert tone="error" role="alert">
+              {errorText(validate.error, t)}
+            </Alert>
+          ) : null}
+          {validation.length > 0 ? (
+            <Alert tone={invalidCount > 0 ? 'warning' : 'success'} role="status">
+              <span>{t('targets.validate.summary', { valid: validCount, invalid: invalidCount })}</span>
+              {validation.some((item) => !item.valid) ? (
+                <ul className="wc-health-list" style={{ marginTop: 8 }}>
+                  {validation
+                    .filter((item) => !item.valid)
+                    .map((item, index) => (
+                      <li key={`${item.target.kind}:${item.target.id}:${index}`} className="wc-health-detail-text">
+                        {item.target.label || item.target.id} —{' '}
+                        {t('targets.validate.invalid', { message: item.error ?? '' })}
+                      </li>
+                    ))}
+                </ul>
+              ) : null}
+            </Alert>
+          ) : null}
+          {validation.length === 0 && !validate.error ? <p className="wc-hint">{t('targets.discover.body')}</p> : null}
+        </Card>
       </div>
     </div>
   )

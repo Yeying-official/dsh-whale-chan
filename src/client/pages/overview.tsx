@@ -202,11 +202,7 @@ export function OverviewPage() {
               </div>
               <dl className="wc-facts" style={{ marginTop: 12 }}>
                 <div>
-                  <dt>{t('overview.monitor')}</dt>
-                  <dd>{data.monitor.enabled ? t('common.enabled') : t('common.disabled')}</dd>
-                </div>
-                <div>
-                  <dt>{t('overview.monitor.runningNote')}</dt>
+                  <dt>{t('overview.monitor.executor')}</dt>
                   <dd>{data.monitor.running ? t('overview.monitor.runningNote') : t('overview.monitor.idleNote')}</dd>
                 </div>
               </dl>

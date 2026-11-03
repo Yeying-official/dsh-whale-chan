@@ -462,5 +462,8 @@
   "overview.counts.title": "数据概览",
   "threads.column.title": "会话",
   "threads.column.kind": "类型",
-  "settings.fieldRequired": "请填写该字段。"
+  "settings.fieldRequired": "请填写该字段。",
+  "overview.monitor.executor": "执行通道",
+  "targets.validate.body": "在保存前校验目标是否仍可访问；通道未接入时会返回不可用。",
+  "threads.detail.info": "会话信息"
 }

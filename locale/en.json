@@ -462,5 +462,8 @@
   "overview.counts.title": "At a glance",
   "threads.column.title": "Conversation",
   "threads.column.kind": "Kind",
-  "settings.fieldRequired": "Fill in this field."
+  "settings.fieldRequired": "Fill in this field.",
+  "overview.monitor.executor": "Executor",
+  "targets.validate.body": "Check that the targets are still reachable before saving; without an attached channel this reports unavailable.",
+  "threads.detail.info": "Conversation info"
 }

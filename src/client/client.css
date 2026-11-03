@@ -950,3 +950,20 @@
     align-items: flex-start;
   }
 }
+.wc-number {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.wc-number .wc-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.wc-number-unit {
+  flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+}

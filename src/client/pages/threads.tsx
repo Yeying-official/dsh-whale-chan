@@ -67,7 +67,7 @@ function ThreadMessages({ threadKey, onBack }: { threadKey: string; onBack: () =
       ) : null}
       {detail.loading && !detail.data ? <Skeleton label={t('common.loading')} rows={4} /> : null}
       {thread ? (
-        <Card title={t('threads.list.title')}>
+        <Card title={t('threads.detail.info')}>
           <dl className="wc-facts">
             <div>
               <dt>{t('threads.key')}</dt>

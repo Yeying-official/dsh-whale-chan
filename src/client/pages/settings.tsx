@@ -183,6 +183,7 @@ export function SettingsPage() {
           <div className="wc-block-nav" role="group" aria-label={t('settings.blocks')}>
             {FORM_BLOCKS.map((block) => {
               const state = drafts[block]
+              const label = t(`settings.block.${block}.label` as 'settings.block.monitor.label')
               return (
                 <button
                   key={block}
@@ -190,10 +191,12 @@ export function SettingsPage() {
                   className="wc-block-button"
                   aria-current={active === block}
                   aria-pressed={active === block}
+                  aria-label={label}
+                  title={state?.dirty ? t('common.dirty') : undefined}
                   onClick={() => setActive(block)}
                 >
-                  {t(`settings.block.${block}.label` as 'settings.block.monitor.label')}
-                  {state?.dirty ? <span className="wc-dirty-dot" aria-label={t('common.dirty')} /> : null}
+                  {label}
+                  {state?.dirty ? <span className="wc-dirty-dot" aria-hidden="true" /> : null}
                 </button>
               )
             })}

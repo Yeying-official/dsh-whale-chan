@@ -75,14 +75,36 @@ export interface FieldRowProps {
   readonly note?: string | undefined
   readonly error?: string | undefined
   readonly className?: string
+  /** Composite controls (lists, row editors) label a group instead of one input. */
+  readonly group?: boolean
   readonly children: ReactElement<{ id?: string; 'aria-invalid'?: boolean | undefined }>
 }
 
 /** One labeled control with hint, warning note and field-level error. */
-export function FieldRow({ label, labelFor, hint, note, error, className, children }: FieldRowProps) {
+export function FieldRow({ label, labelFor, hint, note, error, className, group, children }: FieldRowProps) {
   const generated = useId()
   const id = labelFor ?? children.props.id ?? `wc-field-${generated}`
+  const labelId = `${id}-label`
   const control = cloneElement(children, { id, 'aria-invalid': error ? true : undefined })
+  if (group) {
+    return (
+      <div className={cx('wc-field', className)}>
+        <span className="wc-field-label">
+          <span id={labelId}>{label}</span>
+        </span>
+        <div role="group" aria-labelledby={labelId} aria-invalid={error ? true : undefined}>
+          {control}
+        </div>
+        {hint ? <span className="wc-field-hint">{hint}</span> : null}
+        {note ? <span className="wc-field-note">{note}</span> : null}
+        {error ? (
+          <span className="wc-field-error" role="alert">
+            {error}
+          </span>
+        ) : null}
+      </div>
+    )
+  }
   return (
     <div className={cx('wc-field', className)}>
       <span className="wc-field-label">
@@ -110,6 +132,7 @@ export interface TextFieldProps {
   readonly disabled?: boolean
   readonly autoFocus?: boolean
   readonly ariaLabel?: string
+  readonly 'aria-invalid'?: boolean | undefined
 }
 
 export function TextField({
@@ -122,6 +145,7 @@ export function TextField({
   disabled,
   autoFocus,
   ariaLabel,
+  'aria-invalid': ariaInvalid,
 }: TextFieldProps) {
   if (multiline) {
     return (
@@ -133,6 +157,7 @@ export function TextField({
         placeholder={placeholder}
         disabled={disabled}
         aria-label={ariaLabel}
+        aria-invalid={ariaInvalid}
         onChange={(event) => onChange(event.target.value)}
       />
     )
@@ -147,6 +172,7 @@ export function TextField({
       disabled={disabled}
       autoFocus={autoFocus}
       aria-label={ariaLabel}
+      aria-invalid={ariaInvalid}
       spellCheck={false}
       onChange={(event) => onChange(event.target.value)}
     />
@@ -161,9 +187,19 @@ export interface NumberFieldProps {
   readonly unit?: string | undefined
   readonly onChange: (next: number | '') => void
   readonly disabled?: boolean
+  readonly 'aria-invalid'?: boolean | undefined
 }
 
-export function NumberField({ id, value, min, max, unit, onChange, disabled }: NumberFieldProps) {
+export function NumberField({
+  id,
+  value,
+  min,
+  max,
+  unit,
+  onChange,
+  disabled,
+  'aria-invalid': ariaInvalid,
+}: NumberFieldProps) {
   return (
     <div className="wc-number">
       <input
@@ -176,6 +212,7 @@ export function NumberField({ id, value, min, max, unit, onChange, disabled }: N
         max={max}
         step={1}
         disabled={disabled}
+        aria-invalid={ariaInvalid}
         onChange={(event) => {
           const text = event.target.value.trim()
           if (text === '') return onChange('')
@@ -216,15 +253,25 @@ export interface EnumFieldProps {
   readonly optionLabel: (option: string) => string
   readonly onChange: (next: string) => void
   readonly disabled?: boolean
+  readonly 'aria-invalid'?: boolean | undefined
 }
 
-export function EnumField({ id, value, options, optionLabel, onChange, disabled }: EnumFieldProps) {
+export function EnumField({
+  id,
+  value,
+  options,
+  optionLabel,
+  onChange,
+  disabled,
+  'aria-invalid': ariaInvalid,
+}: EnumFieldProps) {
   return (
     <select
       id={id}
       className="wc-select"
       value={value}
       disabled={disabled}
+      aria-invalid={ariaInvalid}
       onChange={(event) => onChange(event.target.value)}
     >
       {options.map((option) => (
@@ -588,7 +635,7 @@ export function RegistryField({ spec, value, error, note, wide, disabled, onChan
   }
   if (spec.type === 'string-list') {
     return (
-      <FieldRow className={className} label={label} hint={hint} note={note} error={error}>
+      <FieldRow className={className} label={label} hint={hint} note={note} error={error} group>
         <ListField
           items={Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []}
           disabled={disabled}
@@ -599,7 +646,7 @@ export function RegistryField({ spec, value, error, note, wide, disabled, onChan
   }
   if (spec.type === 'rows') {
     return (
-      <FieldRow className={className} label={label} hint={hint} note={note} error={error}>
+      <FieldRow className={className} label={label} hint={hint} note={note} error={error} group>
         <RowsField
           rows={(Array.isArray(value) ? value : []) as TargetRowValue[]}
           disabled={disabled}

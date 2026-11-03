@@ -164,7 +164,7 @@ export function OverviewPage() {
         title={t('tabs.overview')}
         subtitle={t('overview.subtitle')}
         actions={
-          <Button size="sm" onClick={refresh} aria-label={t('aria.refresh')}>
+          <Button size="sm" onClick={refresh}>
             {t('common.refresh')}
           </Button>
         }

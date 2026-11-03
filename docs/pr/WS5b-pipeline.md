@@ -71,7 +71,7 @@
 - 设置热应用：persona → 无需重建（随请求渲染）；models → 用新路由重建 `LlmModel`；monitor → 立即 reconcile；targets/dws → 500 ms 防抖重启。
 - 健康：`status()` 提供真实 `monitorRunning`、channel state/targets/error、auth 布尔、effects pending/dead、executor active、prompts ready/error；`healthView` 将它们映射为 checks，`overview.monitor.running` 不再写死。通道 `disabled`/`paused`/无 enabled target 均投影为 `ok`（idle），只有应有订阅却 `stopped` 才 `degraded`。
 - 停止顺序：`effects.drain → channel.stop → executor.dispose → model.dispose → passes.stop → host.dispose → 释放锁/关闭 db`，可重复调用。
-- `src/index.ts`：`inject` 增加 `agents`/`sessionController`/`workspaceRegistry`/`permissionPresets`/`sessionPersistence`/`llm`/`web`（`systemPrompt` 经 agent context 访问，不注入），`new Runtime({ ctx, config })`（生产入口；旧 `(config, options)` 标注 `@deprecated`，仅供无 ctx 的 API 测试），`ctx.effect` 注册 `stop`。
+- `src/index.ts`：`inject` 增加 `agents`/`sessionController`/`workspaceRegistry`/`permissionPresets`/`sessionPersistence`/`llm`/`agentDefaultModel`/`web`（`systemPrompt` 经 agent context 访问，不注入），`new Runtime({ ctx, config })`（生产入口；旧 `(config, options)` 标注 `@deprecated`，仅供无 ctx 的 API 测试），`ctx.effect` 注册 `stop`。
 
 ## 6. Passes
 
@@ -81,16 +81,16 @@
 
 ## 7. 测试
 
-WS5b 自身新增 6 个 spec、69 条用例；合并 `main`（WS2 T3 + WS4 直连 + WS6）后全量为 58 个 spec、691 条：
+WS5b 自身新增 6 个 spec、70 条用例；合并 `main`（WS2 T3 + WS4 直连 + WS6）后全量为 58 个 spec、692 条：
 
-| 文件                             | 条数 | 覆盖                                                                                            |
-| -------------------------------- | ---- | ----------------------------------------------------------------------------------------------- |
-| `tests/core-outbound.spec.ts`    | 10   | follow-up 幂等、目标匹配、空值、终态与重复上报                                                  |
-| `tests/rate-counters.spec.ts`    | 11   | 窗口、裁剪、跨重启、gap、损坏、线程窗口/连续回复/目标/broadcast                                 |
-| `tests/pipeline-chat.spec.ts`    | 18   | 自动回复、闸门 review/defer、检索、回声、unknown/failed/skipped                                 |
-| `tests/pipeline-task.spec.ts`    | 7    | 待批准可见、批准执行回帖、未批准/取消/派工不符不执行、失败只通知                                |
-| `tests/runtime-pipeline.spec.ts` | 19   | 授权门、暂停/恢复、防抖重启、outbox 恢复、过期/probe pass、停机顺序、ownerNick、无 SessionModel |
-| `tests/health-view.spec.ts`      | 4    | disabled / paused / 无 enabled target / 有目标但 stopped 的 channel 健康语义                    |
+| 文件                             | 条数 | 覆盖                                                                                                         |
+| -------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------ |
+| `tests/core-outbound.spec.ts`    | 10   | follow-up 幂等、目标匹配、空值、终态与重复上报                                                               |
+| `tests/rate-counters.spec.ts`    | 11   | 窗口、裁剪、跨重启、gap、损坏、线程窗口/连续回复/目标/broadcast                                              |
+| `tests/pipeline-chat.spec.ts`    | 18   | 自动回复、闸门 review/defer、检索、回声、unknown/failed/skipped                                              |
+| `tests/pipeline-task.spec.ts`    | 7    | 待批准可见、批准执行回帖、未批准/取消/派工不符不执行、失败只通知                                             |
+| `tests/runtime-pipeline.spec.ts` | 20   | 授权门、暂停/恢复、防抖重启、outbox 恢复、过期/probe pass、停机顺序、ownerNick、无 SessionModel、inject 声明 |
+| `tests/health-view.spec.ts`      | 4    | disabled / paused / 无 enabled target / 有目标但 stopped 的 channel 健康语义                                 |
 
 所有外部能力均为 fake：无真实 `dws`、模型、网络或 DSH 会话。
 

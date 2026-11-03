@@ -203,6 +203,12 @@ describe('pause, resume and settings changes', () => {
     expect(source).toContain('replyModelFor')
   })
 
+  it('declares every service the direct reply model touches', () => {
+    const source = readFileSync(join(process.cwd(), 'src/index.ts'), 'utf8')
+    expect(source).toMatch(/'agentDefaultModel'/)
+    expect(source).toMatch(/'llm'/)
+  })
+
   it('adopts a new reply model route', async () => {
     const h = await start()
     h.runtime.settings.update('models', { reply: { provider: 'p', model: 'm', effort: '' } }, 0)

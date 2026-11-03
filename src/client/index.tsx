@@ -14,6 +14,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { App } from './app.tsx'
 import { NS, dictionaries, type T } from './locale.ts'
 import { PanelProvider } from './provider.tsx'
+import { SessionNavigationError } from './session.ts'
 import { PANEL_ID } from '../shared/limits.ts'
 
 type WhalePanelId = MainPanelId
@@ -24,14 +25,6 @@ interface SessionCatalog {
     getSnapshot(): { readonly phase: string; readonly byId: Readonly<Record<string, unknown>> }
   }
   refresh(): Promise<void>
-}
-
-/** The host Session catalog is not ready or does not list the requested session. */
-class SessionNavigationError extends Error {
-  constructor(readonly reason: 'not-ready' | 'not-listed') {
-    super(reason)
-    this.name = 'SessionNavigationError'
-  }
 }
 
 type PanelContext = Context & {
@@ -79,11 +72,6 @@ function MainPanel({ ctx, t }: { ctx: PanelContext; t: T }) {
       <App />
     </PanelProvider>
   )
-}
-
-/** Friendly copy for the two session-navigation failures. */
-export function sessionErrorKey(reason: 'not-ready' | 'not-listed'): 'session.notReady' | 'session.notListed' {
-  return reason === 'not-ready' ? 'session.notReady' : 'session.notListed'
 }
 
 export const inject = ['slots', 'locale', 'sessions', 'uiWorkspace'] as const

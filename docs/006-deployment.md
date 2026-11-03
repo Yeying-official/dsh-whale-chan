@@ -156,7 +156,7 @@ bundle 在 `cordis.patch.yml` 里声明两个 `@deepseek-ai/dsh-agent-preset` �
 - **工作区仍以批准为准**：批准任务时主人显式选的目录就是 worker 的目录，优先于会话工作区；没选目录时，HTTP 在批准/重试时就把该任务会话的工作区路径写进 `Assignment.workspace`，执行器记录并运行在这个实际路径上。相对路径会被拒绝（领域错误 `invalidWorkspace`，属用户可纠正的 `refused` 组），因为 DSH 会按宿主工作目录解析它，主人无法预测文件落在哪里。
 - **`tasks.workspaceRoot` 是回复与任务共用的根**：它不再表示「每个任务一个子目录的根」，而是会话工作区的根；相对路径会被记录 warning 并回退到 `<stateDir>/workspaces`。修改它之后只影响新解析出的路径，旧目录与注册记录保留。
 - **启用目标时预建**：`group` 与普通 `dm` 目标在启动及设置热应用时创建目录并在 `workspaceRegistry` 注册（标题 `钉钉 · <目标 label>`）；`at-me` 是全局订阅、`open:` 单聊只有发送用 id，两者都在首条消息时惰性创建。重复目标按会话去重；禁用/删除目标**不删除**目录或注册记录，因为同一会话可能仍经其他目标到达，历史也属于主人。
-- 工作区目录在会话创建**之前**用 `mkdir -p` 建好：DSH 的 `workspaceRegistry.create` 只接受已存在的目录，不存在的路径会被拒绝。`ensureSession` 对已注册的目录是幂等的；标题变了只调用 `setTitle`。
+- 工作区目录在会话创建**之前**用 `mkdir -p` 建好：DSH 的 `workspaceRegistry.create` 只接受已存在的目录，不存在的路径会被拒绝。`ensureSession` 对已注册的目录是幂等的，且**只有显式传入 `workspaceTitle` 时才调用 `setTitle`**：会话标题只是新记录的名字，任务进入已有会话工作区时不会用「任务 · …」覆盖「钉钉 · …」。目标预建与回复器的显式标题负责改名。
 - 旧回退路径里的 `taskId` 必须是单一安全路径段；含 `/`、`\` 或 `..` 的 id 会被执行器拒绝，不会写到根目录之外。
 - 任务会话 id 是 `whale-task-<taskId>-<派工后缀>`（同一任务的每次派工都是一个新会话），标题 `任务 · <标题>`。**回复器也建会话**：每个线程一个 `whale-reply-<threadDigest 前 12 位>`，标题 `钉钉 · <thread 标题>`，工作区就是该会话的 `conversation-<digest>`；因此 DSH 会话列表里会同时出现任务会话与回复器会话，交互过程可查看。会话 id 的哈希输入从 v2 起包含布局版本（`<threadKey>\0v2`），所以升级后第一次回复会新建会话，旧会话与历史原样保留。
 - 模型来自设置：worker 用 `models.worker`，回复器用 `models.reply`；两者都为空时用部署默认模型，且**不会**修改 DSH 的全局默认模型。

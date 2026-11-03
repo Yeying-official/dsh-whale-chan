@@ -160,6 +160,8 @@ Effects 不感知领域事务：调用方必须在命令事务提交后入队。
 | `probe`    | `auth`         | 无                                             | 更新健康；授权失效则停通道                           | 探测只读；重复执行无副作用                           |
 | `notify`   | `kind:目标 id` | `{kind, taskId?, outboundId?, decisionId?, …}` | 写一条 `notice` 审计事件（v1 不建 DSH 会话）         | 事件追加，重复写只影响审计                           |
 
+`finish` 的群回复只渲染任务标题与面向发起人的摘要：按行剔除 `Route:`、`Aegis Reason Note:`、`会话：`、`Session:` 等内部行后再折叠、截断；`sessionId` 只留在任务结果/审计与面板，不进入 outbound 文本。
+
 任务结果回帖**不经过 Decision**：`Engine.queueFollowup` 直接落一条 `Outbound`，`outbound.queued/sent/unknown/failed/dropped` 是它自己的生命周期（见 §6.4）。
 
 ## 6. 各层的端口与职责
@@ -304,7 +306,7 @@ Outbound 有两条入口，共用同一个发送处理器：
 | `tests/core-outbound.spec.ts`       | `queueFollowup` 幂等/目标匹配/空值；outbound 终态与重复上报（10 条）                                    |
 | `tests/rate-counters.spec.ts`       | 窗口滚动、裁剪、跨重启、gap、损坏恢复、消息窗口与回环状态（11 条）                                      |
 | `tests/pipeline-chat.spec.ts`       | 自动回复、闸门降级/拒绝、检索、回声、unknown/failed 发送（18 条）                                       |
-| `tests/pipeline-task.spec.ts`       | 任务批准可见、批准后执行与回帖、未批准/取消/派工不符不执行、失败只通知（7 条）                          |
+| `tests/pipeline-task.spec.ts`       | 任务批准可见、批准后执行与回帖、未批准/取消/派工不符不执行、失败只通知、内部行脱敏（9 条）              |
 | `tests/runtime-pipeline.spec.ts`    | 启动授权门、暂停/恢复、防抖重启、outbox 恢复、过期/probe pass、停机顺序、ownerNick、会话式重建（18 条） |
 | `tests/health-view.spec.ts`         | channel 健康语义：disabled/paused/无 target 为 ok，有 target 却 stopped 为 degraded（4 条）             |
 

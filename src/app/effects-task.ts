@@ -53,11 +53,29 @@ function readString(value: unknown, key: string): string | undefined {
   return typeof found === 'string' && found.length > 0 ? found : undefined
 }
 
-/** The short Chinese template a finished task posts back to its thread. */
-export function renderFollowup(task: Task, summary: string, sessionId: string | undefined): string {
-  const text = summary.trim().replace(/\s+/gu, ' ').slice(0, FOLLOWUP_SUMMARY_CHARS)
+/** Worker output lines that describe internals rather than the result. */
+const INTERNAL_LINE = /^(?:[-*]\s*)?(?:\*\*)?(?:Route|Aegis Reason Note|会话|Session)(?:\*\*)?\s*[:：]/iu
+
+/** Keep only the owner-facing part of a worker summary. */
+function publicSummary(summary: string): string {
+  return summary
+    .split(/\r?\n/u)
+    .filter((line) => !INTERNAL_LINE.test(line.trim()))
+    .join('\n')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .slice(0, FOLLOWUP_SUMMARY_CHARS)
+}
+
+/**
+ * The short Chinese template a finished task posts back to its thread.
+ *
+ * The group reply carries only the task title and the owner-facing summary;
+ * routing notes, Aegis reasons and session ids stay in the audit/panel.
+ */
+export function renderFollowup(task: Task, summary: string): string {
+  const text = publicSummary(summary)
   const lines = [`任务「${task.title}」已完成。`, text.length > 0 ? text : '这次没有文字汇报，详情可以在面板里查看。']
-  if (sessionId !== undefined && sessionId.trim().length > 0) lines.push(`会话：${sessionId.trim()}`)
   return lines.join('\n')
 }
 
@@ -170,8 +188,7 @@ export class TaskEffects {
       return
     }
     const summary = readString(payload, 'summary') ?? task.result?.summary ?? ''
-    const sessionId = readString(payload, 'sessionId') ?? task.result?.sessionId
-    const text = renderFollowup(task, summary, sessionId)
+    const text = renderFollowup(task, summary)
     const outbound = this.deps.engine.queueFollowup(
       {
         threadKey: thread.key,

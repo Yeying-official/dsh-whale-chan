@@ -87,7 +87,8 @@ describe('capturing and approving a task', () => {
     expect(h.channel.sends[0]).toMatchObject({ kind: 'reply' })
     expect(h.channel.sends[0]?.text).toContain('整理发布说明')
     expect(h.channel.sends[0]?.text).toContain('已经整理好了。')
-    expect(h.channel.sends[0]?.text).toContain('session-1')
+    expect(h.channel.sends[0]?.text).not.toContain('session-1')
+    expect(h.channel.sends[0]?.text).not.toContain('会话：')
     const outbound = h.runtime.store.db.prepare('SELECT status FROM outbound LIMIT 1').get() as Record<string, unknown>
     expect(outbound['status']).toBe('sent')
   })
@@ -197,6 +198,46 @@ describe('reporting a finished task', () => {
       conversationId: 'user-9',
       peerUserId: 'user-9',
     })
-    expect(h.channel.sends[0]?.text).toContain('会话：session-1')
+    expect(h.channel.sends[0]?.text).toContain('已经整理好了。')
+    expect(h.channel.sends[0]?.text).not.toContain('会话：')
+    expect(h.channel.sends[0]?.text).not.toContain('session-1')
+  })
+
+  it('strips internal routing and session lines from the result reply', async () => {
+    const h = await start()
+    h.executor.result = {
+      outcome: 'succeeded',
+      summary:
+        '发布说明已整理好。\nRoute: fast-path — 单文件新建\nAegis Reason Note: 内部理由\n会话：whale-task-task-1-c236a8a7\nSession: whale-task-task-1\n可以直接发布。',
+      sessionId: 'whale-task-task-1-c236a8a7',
+    }
+    const taskId = await deliverTask(h, { id: 'message-internal-lines' })
+    http = await serveRuntime(h.runtime)
+    await request(http.baseUrl, `/whale-chan/api/tasks/${taskId}/approve`, jsonBody('POST', {}))
+    await h.runtime.effects.idle()
+
+    const text = h.channel.sends[0]?.text ?? ''
+    expect(text).toContain('任务「')
+    expect(text).toContain('发布说明已整理好。')
+    expect(text).toContain('可以直接发布。')
+    expect(text).not.toMatch(/Route:|Aegis Reason Note:|会话：|Session:/u)
+    expect(text).not.toContain('whale-task-task-1')
+  })
+
+  it('falls back when every summary line is internal', async () => {
+    const h = await start()
+    h.executor.result = {
+      outcome: 'succeeded',
+      summary: 'Route: fast-path\nSession: whale-task-hidden',
+      sessionId: 'whale-task-hidden',
+    }
+    const taskId = await deliverTask(h, { id: 'message-empty-summary' })
+    http = await serveRuntime(h.runtime)
+    await request(http.baseUrl, `/whale-chan/api/tasks/${taskId}/approve`, jsonBody('POST', {}))
+    await h.runtime.effects.idle()
+
+    const text = h.channel.sends[0]?.text ?? ''
+    expect(text).toContain('这次没有文字汇报，详情可以在面板里查看。')
+    expect(text).not.toContain('whale-task-hidden')
   })
 })

@@ -59,7 +59,7 @@
 - `launch`：校验 task exists、`approved`、approval `approved` 且属于该 task、assignment `pending` 且匹配 payload；`tasks.maxConcurrent` 达到上限抛 `Later`（1 s 重试）；`executor.execute({ task, approval, settings, workspace, signal })`。
 - 执行器回调：`onStarted → engine.assignmentStarted(..., { sessionId })`，`onFinished → engine.assignmentEnded(..., { outcome, result })`。
 - 成功 → enqueue `finish`；失败/超时/取消 → 只写 `notice`。
-- `finish`：`queueFollowup` 到原线程，target 由线程与最近一条消息推导（dm → peerUserId，group/at-me → conversationId），文本为「任务标题 + 摘要 + 会话 id」，幂等键 `task-finish:<taskId>:<assignmentId>`，再 enqueue `send`。
+- `finish`：`queueFollowup` 到原线程，target 由线程与最近一条消息推导（dm → peerUserId，group/at-me → conversationId），文本为「任务标题 + 面向发起人的摘要」（按行剔除 Route/Aegis/会话/Session 内部行，会话 id 不出口），幂等键 `task-finish:<taskId>:<assignmentId>`，再 enqueue `send`。
 - `notify`：v1 只写 `notice` 审计事件，不建 DSH 回话。
 - `probe`：pass 调用组合根的 `probe()`；授权失效立即停通道并让 health 变红。
 
@@ -81,14 +81,14 @@
 
 ## 7. 测试
 
-WS5b 自身新增 6 个 spec、68 条用例；合并 `main`（WS2 T3 + WS4 + WS6）后全量为 58 个 spec、695 条：
+WS5b 自身新增 6 个 spec、70 条用例；合并 `main`（WS2 T3 + WS4 + WS6）后全量为 58 个 spec、697 条：
 
 | 文件                             | 条数 | 覆盖                                                                                                |
 | -------------------------------- | ---- | --------------------------------------------------------------------------------------------------- |
 | `tests/core-outbound.spec.ts`    | 10   | follow-up 幂等、目标匹配、空值、终态与重复上报                                                      |
 | `tests/rate-counters.spec.ts`    | 11   | 窗口、裁剪、跨重启、gap、损坏、线程窗口/连续回复/目标/broadcast                                     |
 | `tests/pipeline-chat.spec.ts`    | 18   | 自动回复、闸门 review/defer、检索、回声、unknown/failed/skipped                                     |
-| `tests/pipeline-task.spec.ts`    | 7    | 待批准可见、批准执行回帖、未批准/取消/派工不符不执行、失败只通知                                    |
+| `tests/pipeline-task.spec.ts`    | 9    | 待批准可见、批准执行回帖、未批准/取消/派工不符不执行、失败只通知、内部行脱敏与会话 id 不出口        |
 | `tests/runtime-pipeline.spec.ts` | 18   | 授权门、暂停/恢复、防抖重启、outbox 恢复、过期/probe pass、停机顺序、ownerNick、会话式 persona 重建 |
 | `tests/health-view.spec.ts`      | 4    | disabled / paused / 无 enabled target / 有目标但 stopped 的 channel 健康语义                        |
 
@@ -107,6 +107,7 @@ WS5b 自身新增 6 个 spec、68 条用例；合并 `main`（WS2 T3 + WS4 + WS6
 9. `fix(runtime): pass the owner nick to the channel`
 10. `fix(runtime): use the direct llm model for replies`（已由下一条回退）
 11. `revert(runtime): keep replies on a visible session`
+12. `fix(task): keep internal routing out of the result reply`
 
 ## 9. 门禁
 

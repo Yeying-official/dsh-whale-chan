@@ -7,6 +7,8 @@ import {
   auditFixture,
   auditPage,
   failure,
+  healthFixture,
+  NOW,
   overviewFixture,
   pathOf,
   reply,
@@ -39,6 +41,25 @@ function handler(overrides: { readonly pause?: () => ReturnType<typeof reply> } 
   }
 }
 
+function channelHealth(detail: string | undefined, status: 'ok' | 'error' | 'degraded' = 'ok') {
+  const health = healthFixture()
+  if (detail === undefined) return health
+  return {
+    ...health,
+    checks: [...health.checks, { id: 'channel', status, detail, observedAt: NOW }],
+  }
+}
+
+function renderWithChannel(detail: string | undefined, status: 'ok' | 'error' | 'degraded' = 'ok') {
+  return renderPanel((request) => {
+    const path = pathOf(request.url)
+    if (path === 'overview') return reply(200, overviewFixture({ health: channelHealth(detail, status) }))
+    if (path === 'tasks') return reply(200, tasksPage([]))
+    if (path === 'audit') return reply(200, auditPage([]))
+    return undefined
+  })
+}
+
 describe('overview page', () => {
   it('renders counters, recent activity and health checks from the host routes', async () => {
     renderPanel(handler())
@@ -49,6 +70,23 @@ describe('overview page', () => {
     expect(within(stat(zh['overview.counts.running'])).getByText('0')).toBeTruthy()
     expect(await screen.findByText('task.approved')).toBeTruthy()
     expect(screen.getByText(zh['health.check.database'])).toBeTruthy()
+  })
+
+  it.each([
+    ['idle', 'ok', 'idle: no enabled targets', zh['overview.channel.idle']],
+    ['paused', 'ok', 'paused by the owner', zh['overview.channel.paused']],
+    ['ready', 'ok', 'ready; 2 target(s)', zh['overview.channel.ready']],
+    ['error', 'error', 'not subscribed because authorization is invalid', zh['overview.channel.error']],
+    ['absent', undefined, undefined, zh['overview.channel.absent']],
+  ] as const)('maps the channel health check to %s', async (_name, status, detail, label) => {
+    renderWithChannel(detail, status)
+    const heading = await screen.findByRole('heading', { name: zh['overview.monitor'] })
+    const card = heading.closest('section')
+    if (!card) throw new Error('missing monitor card')
+    expect(await within(card).findByText(label)).toBeTruthy()
+    if (status === 'error' && detail) {
+      expect((await screen.findAllByText(detail)).length).toBeGreaterThan(0)
+    }
   })
 
   it('pauses monitoring through POST monitor/pause and refreshes the overview', async () => {

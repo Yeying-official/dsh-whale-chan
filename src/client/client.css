@@ -73,11 +73,20 @@
   align-items: stretch;
   gap: 2px;
   overflow-x: auto;
-  scrollbar-width: thin;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  scroll-padding-inline: 4px;
+  padding: 0 2px;
+  background: var(--dsw-alias-bg-base);
+}
+.wc-tabs::-webkit-scrollbar {
+  display: none;
 }
 .wc-tab {
   flex: 0 0 auto;
   margin: 0;
+  scroll-margin-inline: 4px;
   padding: 8px 12px 9px;
   border: 0;
   border-bottom: 2px solid transparent;

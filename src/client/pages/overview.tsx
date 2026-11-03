@@ -1,7 +1,7 @@
 /** Overview tab: monitor switch, counters, health checks, recent activity and quick links. */
 import { useEffect, useState } from 'react'
 import { call, useApi, useMutation, type ApiQueryState } from '../api.ts'
-import { Alert, Badge, Button, Card, EmptyState, PageHeader, Skeleton, Switch } from '../controls.tsx'
+import { Alert, Badge, Button, Card, EmptyState, PageHeader, Skeleton, Switch, type BadgeTone } from '../controls.tsx'
 import { errorText } from '../errors.ts'
 import { shortTime, timeText } from '../format.ts'
 import { usePanel } from '../provider.tsx'
@@ -17,6 +17,49 @@ const CHECK_LABELS: Readonly<Record<string, WhaleChanKey>> = {
   settings: 'health.check.settings',
   channel: 'health.check.channel',
   executor: 'health.check.executor',
+}
+
+type ChannelState = 'idle' | 'paused' | 'ready' | 'disabled' | 'error' | 'degraded' | 'absent' | 'connected'
+
+interface ChannelStatus {
+  readonly state: ChannelState
+  readonly detail?: string
+}
+
+const CHANNEL_LABELS: Readonly<Record<ChannelState, WhaleChanKey>> = {
+  idle: 'overview.channel.idle',
+  paused: 'overview.channel.paused',
+  ready: 'overview.channel.ready',
+  disabled: 'overview.channel.disabled',
+  error: 'overview.channel.error',
+  degraded: 'overview.channel.degraded',
+  absent: 'overview.channel.absent',
+  connected: 'overview.channel.connected',
+}
+
+const CHANNEL_TONES: Readonly<Record<ChannelState, BadgeTone>> = {
+  idle: 'neutral',
+  paused: 'warning',
+  ready: 'success',
+  disabled: 'neutral',
+  error: 'error',
+  degraded: 'warning',
+  absent: 'neutral',
+  connected: 'success',
+}
+
+/** Project the host's channel health check; the badge still follows `health.status`. */
+function channelStatus(health: Health): ChannelStatus {
+  const check = health.checks.find((item) => item.id === 'channel')
+  if (!check) return { state: 'absent' }
+  const detail = check.detail.trim()
+  if (check.status === 'error') return { state: 'error', detail }
+  if (check.status === 'degraded') return { state: 'degraded', detail }
+  if (detail.includes('paused by the owner')) return { state: 'paused' }
+  if (detail.includes('monitoring is disabled')) return { state: 'disabled' }
+  if (detail.includes('idle')) return { state: 'idle' }
+  if (detail.includes('ready')) return { state: 'ready' }
+  return { state: 'connected' }
 }
 
 function healthStatusLabel(health: Health, t: T): string {
@@ -135,6 +178,7 @@ export function OverviewPage() {
 
   const data: Overview | undefined = overview.data
   const paused = optimisticPaused ?? data?.monitor.paused ?? false
+  const channel = data ? channelStatus(data.health) : { state: 'absent' as const }
   const runningCount = running.data?.items.length ?? 0
   const runningCapped = running.data?.nextOffset !== null && running.data !== undefined
   const counts = data
@@ -212,8 +256,16 @@ export function OverviewPage() {
               </div>
               <dl className="wc-facts" style={{ marginTop: 12 }}>
                 <div>
-                  <dt>{t('overview.monitor.executor')}</dt>
-                  <dd>{data.monitor.running ? t('overview.monitor.runningNote') : t('overview.monitor.idleNote')}</dd>
+                  <dt>{t('overview.channel')}</dt>
+                  <dd>
+                    <div className="wc-flags">
+                      <Badge tone={CHANNEL_TONES[channel.state]}>{t(CHANNEL_LABELS[channel.state])}</Badge>
+                    </div>
+                    {channel.detail &&
+                    (channel.state === 'error' || channel.state === 'degraded' || channel.state === 'connected') ? (
+                      <span className="wc-health-detail-text">{channel.detail}</span>
+                    ) : null}
+                  </dd>
                 </div>
               </dl>
             </Card>

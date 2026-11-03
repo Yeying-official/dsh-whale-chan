@@ -11,8 +11,8 @@
 | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `pnpm install --frozen-lockfile` | exit 0；`Done in 43.7s`（之后加测试库用 `pnpm add -D` 更新锁文件）                                                      |
 | `pnpm typecheck`                 | `tsc --noEmit`，无输出，exit 0                                                                                          |
-| `pnpm test`                      | `Test Files 47 passed (47)`、`Tests 567 passed (567)`，exit 0                                                           |
-| `pnpm build`                     | `lib/client.js 220.21 kB │ gzip: 45.77 kB`；`lib/index.js 113.83 kB │ gzip: 29.35 kB`；`lib/index.d.ts 0.75 kB`，exit 0 |
+| `pnpm test`                      | `Test Files 54 passed (54)`、`Tests 649 passed (649)`，exit 0                                                           |
+| `pnpm build`                     | `lib/client.js 222.76 kB │ gzip: 46.31 kB`；`lib/index.js 316.06 kB │ gzip: 87.45 kB`；`lib/index.d.ts 0.90 kB`，exit 0 |
 | `pnpm format:check`              | `All matched files use Prettier code style!`，exit 0                                                                    |
 | `node scripts/check-pack.mjs`    | `pack check passed: 15 artifacts, icon 711 bytes`，exit 0                                                               |
 | `git status --porcelain`         | docs 提交后为空                                                                                                         |
@@ -22,8 +22,8 @@
 ```text
 tests/client-api.spec.ts        4 passed   （既有，保留）
 tests/client-api-layer.spec.tsx 8 passed
-tests/client-shell.spec.tsx     6 passed
-tests/client-overview.spec.tsx  5 passed
+tests/client-shell.spec.tsx     7 passed
+tests/client-overview.spec.tsx 10 passed
 tests/client-threads.spec.tsx   5 passed
 tests/client-tasks.spec.tsx    12 passed
 tests/client-targets.spec.tsx   7 passed
@@ -32,7 +32,7 @@ tests/client-persona.spec.tsx   7 passed
 tests/client-audit.spec.tsx     4 passed
 tests/client-i18n.spec.ts       7 passed
 ----------------------------------------
-11 files / 75 tests（WS6 新增 71）
+11 files / 81 tests（WS6 新增 77）
 ```
 
 ## 2. 测试设计
@@ -72,7 +72,16 @@ tests/client-i18n.spec.ts       7 passed
 
 检查后修正了三处布局/文案问题（概览执行通道重复、目标表过窄、数字单位换行），临时目录与静态服务已删除，未提交任何预览产物。
 
-## 4. 未覆盖 / 已知缺口
+## 4. 合并后的 P1 修复
+
+维护者在真实 Host 上复验 WS6（main `28d5645`）时发现两处 UI 问题，已在本次补齐：
+
+1. **页签栏对比度与遮挡**：页签栏透明，壁纸亮部降低文字对比度；桌面装饰浮层还遮住最右侧「审计」页签的点击区域。修复：`.wc-tabs` 使用不透明 `--dsw-alias-bg-base` 表面；`overflow-x:auto` 保留、`scrollbar-width:none` 与 `::-webkit-scrollbar{display:none}` 隐藏滚动条；`scroll-margin-inline`/`scroll-padding-inline` 保证焦点与激活态不被裁切。外部装饰浮层不归插件控制，已知限制与操作提示写入 005。
+2. **通道状态文案错误**：概览原先用 `overview.monitor.running` 显示「执行通道未接入」，但真实状态是已授权 + 0 启用目标 + idle。修复：改为读取 `health.checks` 的 `channel` 项，映射 `idle`/`paused by the owner`/`ready`/`error`（附 detail）/`monitoring is disabled`/`degraded`/无检查项；顶部健康徽标仍只看 `health.status`。
+
+新增 6 个测试：页签条 7 个页签全部键盘可达且唯一 roving tabIndex、样式块包含不透明底/横向滚动/隐藏滚动条；通道 idle、paused、ready、error、absent 五条映射。写完后全仓 54 files / 649 tests 通过。
+
+## 5. 未覆盖 / 已知缺口
 
 - **真实 Host 端到端**：没有把插件安装到 profile，也没有对真实 `state.db`、dws 通道或 DSH 会话目录运行；`openSession` 仅在 mock 的会话目录服务上验证调用参数。
 - **通道相关**：WS5a 的 `targets/discover|validate` 在通道未接入时固定 503，测试覆盖 503 文案，未覆盖真实发现结果。
@@ -81,6 +90,6 @@ tests/client-i18n.spec.ts       7 passed
 - **任务详情缺失字段**：宿主 `TaskDetail` 不含派工/结果/会话 ID；面板按可选字段前向兼容并给出明确提示，测试用注入 `assignment.sessionId` 验证打开逻辑。
 - **轮询精度**：概览/健康 5s；未做网络抖动或长离线的长时间浸泡测试。
 
-## 5. 结论
+## 6. 结论
 
-WS6 的客户端实现通过全部静态门禁、567 个全仓测试（其中客户端 75 个、新增 71 个）与打包检查；交互（含键盘与 409 恢复）、i18n 与请求取消均有行为测试。剩余缺口集中在真实 Host/通道/多浏览器验证，属于审核方真机验收范围。
+WS6 的客户端实现通过全部静态门禁、649 个全仓测试（其中客户端 81 个、新增 77 个）与打包检查；交互（含键盘与 409 恢复）、i18n、页签可达性与通道状态映射均有行为测试。合并到 main 后维护者在真实 Host 复验发现的两处 P1 已修复，待重载复验；剩余缺口集中在多浏览器视觉回归。

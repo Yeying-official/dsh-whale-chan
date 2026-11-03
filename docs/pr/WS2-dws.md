@@ -51,7 +51,7 @@
 ```text
 pnpm install --frozen-lockfile   -> Done, exit 0
 pnpm typecheck                   -> tsc --noEmit, exit 0
-pnpm test                        -> 46 files, 579 tests passed (WS2: 12 files / 126 tests)
+pnpm test                        -> 47 files, 588 tests passed (WS2: 13 files / 135 tests)
 pnpm build                       -> lib/index.js, lib/index.d.ts, lib/client.js, exit 0
 node scripts/check-pack.mjs      -> pack check passed: 10 artifacts, icon 711 bytes
 pnpm format:check                -> All matched files use Prettier code style!
@@ -65,7 +65,7 @@ WS2 用例分布：
 | `channel-targets.spec.ts`       | 11   | 事件键、群/单聊/open 参数、TTL、profile、去重、owner 无回退                                            |
 | `channel-process.spec.ts`       | 11   | 就绪行、行切分、stdin 停止、SIGTERM、orphaned、dry-run、超时、spawn 失败                               |
 | `channel-supervisor.spec.ts`    | 9    | 双目标、顺序、sink 抛错、坏行、退避重启、无重叠、非法目标、stop 收敛、孤儿清理、无 owner 拒绝          |
-| `channel-send.spec.ts`          | 18   | 四种结果、幂等键、ledger、超时 unknown、回执分类                                                       |
+| `channel-send.spec.ts`          | 15   | 四种结果、幂等键、ledger、超时 unknown、回执分类                                                       |
 | `channel-confirm.spec.ts`       | 3    | 缺 `--yes` → failed；`deliveryStatus` 非白名单 → unknown；重复 key → unknown 且一条 ledger             |
 | `channel-discover-auth.spec.ts` | 16   | 发现容错/上限/去重、dry-run 校验、auth 降级、owner userId 与脱敏                                       |
 | `channel-log.spec.ts`           | 9    | token/secret/query/JSON 脱敏、单行错误、截断                                                           |
@@ -73,6 +73,7 @@ WS2 用例分布：
 | `channel-review.spec.ts`        | 8    | owner userId 与脱敏、owner 拒绝启动、dryRun skipped、纯媒体、JSON 脱敏                                 |
 | `channel-command.spec.ts`       | 10   | win32 解析顺序、APPDATA/ProgramFiles/LOCALAPPDATA 回退、路径/扩展名原样、无命中、非 win32、shim 端到端 |
 | `channel-ttl.spec.ts`           | 4    | `--ttl` Go duration（1h/24h）、fake 拒收裸数字、validate argv 记录 24h                                 |
+| `channel-t3.spec.ts`            | 9    | 真实 snake_case flatten、message_id 优先、open id 自过滤、ownerNick @、本地 create_time、title 回退    |
 
 ### 4.1 Review round 1 修复（REQUEST_CHANGES）
 
@@ -110,6 +111,20 @@ T2 真机发现非交互 `+messages-send` 缺少 `--yes` 会被 dws 拒绝（exi
 - fake 同步模拟：缺 `--yes` → `confirmation_required` + exit 3 且不写 ledger；同 key 第二次 → `CONFLICT_ERROR` + exit 1 且不新增 ledger；成功回执改为真实字段。
 
 测试：`buildSendArgs` 精确 argv 含 `--yes`；缺 `--yes` → failed（非 unknown）且 ledger 空；成功解析 `openMessageId` 且 ledger 含 `--yes`；`deliveryStatus: unknown` → unknown；重复 key → unknown 且 ledger 保持 1 条；dryRun 仍不 spawn。
+
+### 4.5 Review round 5：T3 真实 flatten 归一化
+
+T3 抓到的群事件全部是 snake_case，且没有 `senderStaffId`/`conversationType`/`atUsers`/`title`，原别名表逐条判 `malformed`。修复：
+
+- 别名：`message_id` 首选（`event_id` 仅兜底）、`conversation_id`、`sender_open_dingtalk_id`、`content`、`event_time`/`timestamp`/`create_time`、`sender`。
+- `sender.userId` 优先 `sender_staff_id`/`senderStaffId`，否则 `sender_open_dingtalk_id`；`openDingTalkId` 同值；昵称取 `sender`。
+- 缺 `conversationType` 时按目标 kind 推断（`group`/`at-me` → group，`dm` → direct），不再判 malformed。
+- `addressed`：at-me/dm 恒 true；group 只看正文 `@<ownerNick>` 或 `@我`，ownerNick 未知时恒 false。
+- 自消息：`sender_open_dingtalk_id`/`senderUserId` 命中 ownerUserId，或 `sender` 昵称等于 ownerNick。
+- `mentions` 从正文按 `@([^\s@]{1,32})` 解析并去重；`title` 缺失时回退 `context.target.label`。
+- `probeAuth` 新增可选 `userName`（`user_name`/`userName`），宿主把它作为 `ownerNick` 注入（WS5b 接线）。
+
+测试：`channel-t3.spec.ts` 9 条——真实结构映射、message_id 优先、open id/昵称自过滤、ownerNick @、缺 conversationType、create_time 本地时区、正文 @mentions、staff id 优先、auth userName。supervisor/facade/process 的事件夹具同步改成真实 snake_case。
 
 ## 5. 风险与未验证项
 
@@ -153,6 +168,7 @@ review round 1/2 已决定，不再需要额外决策：
 5. **`format:check`**：整合方已在 `main` `b69177d` 修复 `docs/PROGRESS.md`，本分支 merge 后整仓通过。
 6. **`--ttl` 单位**：dws 按 Go duration 解析，v1 固定 `<hours>h`；T1 裸数字被拒的回归已由测试固化。
 7. **非交互发送**：`--yes` 固定追加；重复 key 视为已受理（unknown），按幂等键对账，不重发。
-8. **Windows `dws` 解析**：自动解析 npm shim；找不到时保留原命令或由 `dws.binaryPath` 绝对路径覆盖，不再要求宿主 `PATH` 与交互 shell 一致。
+8. **真实 flatten 结构**：以 T3 抓包为准（snake_case、open id、正文 @）；旧 camelCase 别名保留兼容。
+9. **Windows `dws` 解析**：自动解析 npm shim；找不到时保留原命令或由 `dws.binaryPath` 绝对路径覆盖，不再要求宿主 `PATH` 与交互 shell 一致。
 
 遗留只有真机验证：§5 列出的 provisional 项需要在 T1–T2 逐项核对；不一致时先改 009 与测试，再改实现。

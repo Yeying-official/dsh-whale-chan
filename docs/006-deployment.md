@@ -45,7 +45,7 @@ dws auth login
 
 ### 2.1 owner 身份
 
-插件启动订阅前必须知道“本人”的账号 id：宿主调用 `probeAuth()`，把返回的 `userId` 作为 `ownerUserId` 注入通道。没有该值时 `start` 抛 `owner-unknown` 并拒绝订阅——通道不会用群目标 id 回退猜测，否则助手可能把自己的回复当成新消息形成回环。该 id 只用于过滤自己发出的消息，不写日志、不持久化。排障时先确认 `dws auth status --format json` 能返回账号 id 字段（`user_id`/`userId`/`staff_id` 等别名，真机字段名待 T1 确认）。
+插件启动订阅前必须知道“本人”的账号 id：宿主调用 `probeAuth()`，把返回的 `userId` 作为 `ownerUserId` 注入通道。没有该值时 `start` 抛 `owner-unknown` 并拒绝订阅——通道不会用群目标 id 回退猜测，否则助手可能把自己的回复当成新消息形成回环。该 id 只用于过滤自己发出的消息，不写日志、不持久化。排障时先确认 `dws auth status --format json` 能返回账号 id 字段（`user_id`/`userId`/`staff_id` 等别名）与显示名 `user_name`/`userName`。群事件没有 `atUsers`，@ 只出现在正文里，通道用 `user_name` 作为 `ownerNick` 判断是否 @ 了本人；auth 不返回显示名时，群消息不会被判为 addressed，需要先补齐该字段。
 
 ### 2.2 Windows：npm shim 与 `binaryPath` 覆盖
 

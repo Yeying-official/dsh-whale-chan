@@ -19,7 +19,7 @@
  *    started. A refusal before the session exists throws instead, because the
  *    domain has no running assignment to end.
  */
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { homedir } from 'node:os'
 import { mkdir } from 'node:fs/promises'
 import { UserError } from '../core/errors.ts'
@@ -61,17 +61,42 @@ export function expandHome(path: string, home: string): string {
 }
 
 /**
- * The workspace directory of one task.
+ * The default workspace directory of one task.
  *
- * `tasks.workspaceRoot` wins when set; otherwise the directory is
- * `<stateDir>/tasks/<taskId>`. The task id must be one safe path segment, so a
- * crafted id cannot escape the root.
+ * It is only used when the approving person named no directory: `tasks.workspaceRoot`
+ * wins over `<stateDir>/tasks`, and the task id must be one safe path segment, so
+ * a crafted id cannot escape the root.
  */
 export function taskWorkspace(settings: Settings, taskId: string, home: string, stateDir = DEFAULT_STATE_DIR): string {
   if (!isSafeSegment(taskId)) throw new ExecutorError('unsafeTaskId', taskId)
   const configured = settings.tasks.workspaceRoot.trim()
   const root = configured.length > 0 ? expandHome(configured, home) : join(expandHome(stateDir, home), TASKS_DIRECTORY)
   return join(root, taskId)
+}
+
+/**
+ * The workspace one run uses: the approved directory when it names one, else the
+ * settings default.
+ *
+ * A relative path is refused instead of resolved: `mkdir` and the session
+ * workspace are both resolved by DSH against the host's own working directory,
+ * so accepting `work/foo` would silently place the worker somewhere the owner
+ * cannot predict.
+ */
+export function resolveTaskWorkspace(input: {
+  readonly taskId: string
+  readonly settings: Settings
+  readonly approved?: string
+  readonly home: string
+  readonly stateDir?: string
+}): string {
+  const approved = (input.approved ?? '').trim()
+  if (approved.length > 0) {
+    const expanded = expandHome(approved, input.home)
+    if (!isAbsolute(expanded)) throw new ExecutorError('invalidWorkspace', expanded)
+    return expanded
+  }
+  return taskWorkspace(input.settings, input.taskId, input.home, input.stateDir ?? DEFAULT_STATE_DIR)
 }
 
 /** Whether `value` is usable as one path segment and cannot traverse out of a root. */
@@ -141,6 +166,7 @@ export function renderTaskSystemPrompt(input: TaskPromptInput): string {
 
 /** The assignment message handed to the worker session. */
 export function renderTaskMessage(task: Task): string {
+  const previous = (task.result?.summary ?? '').trim()
   return [
     `任务开工：${task.title}`,
     '',
@@ -152,6 +178,9 @@ export function renderTaskMessage(task: Task): string {
     '',
     '交付要求：',
     bullets(task.requirements, '（无额外要求。）'),
+    // A retry runs in a new session, so the previous attempt's report is the
+    // only way it can avoid repeating work. It is context, never an instruction.
+    ...(previous.length === 0 ? [] : ['', '## 上一轮结果（供参考）', previous]),
     '',
     '完成后用简洁的中文汇报结果。',
   ].join('\n')
@@ -176,6 +205,8 @@ export interface DshTaskExecutorOptions {
 /** One in-flight run; the executor's only per-task state. */
 interface Run {
   readonly controller: AbortController
+  /** Session this run addresses, known before `ensureSession` resolves so a cancel can find it. */
+  readonly sessionId: string
   session: SessionRef | undefined
   cancelled: boolean
   reason: string | undefined
@@ -219,15 +250,22 @@ export class DshTaskExecutor implements TaskExecutor {
     this.assertApproved(task, approval)
     if (this.runs.has(task.id)) throw new ExecutorError('alreadyRunning', task.id)
 
-    const run: Run = { controller: new AbortController(), session: undefined, cancelled: false, reason: undefined }
+    const sessionId = taskSessionId(task.id, task.assignmentId)
+    const run: Run = {
+      controller: new AbortController(),
+      sessionId,
+      session: undefined,
+      cancelled: false,
+      reason: undefined,
+    }
     this.runs.set(task.id, run)
     let started = false
     let result: ExecutorResult | undefined
     try {
       const lifetime = AbortSignal.any([signal, run.controller.signal])
-      const workspace = await this.prepareWorkspace(task, settings)
+      const workspace = await this.prepareWorkspace(task, settings, request.workspace)
       const session = await this.host.ensureSession({
-        sessionId: taskSessionId(task.id),
+        sessionId,
         workspace,
         title: `任务 · ${task.title}`,
         preset: WORKER_PRESET,
@@ -238,6 +276,7 @@ export class DshTaskExecutor implements TaskExecutor {
           now: this.clock(),
           ...(this.personaTemplate === undefined ? {} : { personaTemplate: this.personaTemplate }),
         }),
+        model: settings.models.worker,
         signal: lifetime,
       })
       run.session = session
@@ -260,7 +299,7 @@ export class DshTaskExecutor implements TaskExecutor {
       result = {
         outcome: run.cancelled ? 'cancelled' : 'failed',
         summary: '',
-        sessionId: run.session?.sessionId ?? taskSessionId(task.id),
+        sessionId: run.session?.sessionId ?? run.sessionId,
         error: run.cancelled ? 'cancelled' : describe(error),
       }
       return result
@@ -287,7 +326,7 @@ export class DshTaskExecutor implements TaskExecutor {
     // Abort our own lifetime first so the pending wait settles as `aborted`
     // before the host's turn cancellation is observed.
     run.controller.abort()
-    const ref = run.session ?? { sessionId: taskSessionId(taskId), workspace: '' }
+    const ref = run.session ?? { sessionId: run.sessionId, workspace: '' }
     try {
       await this.host.cancel(ref, reason ?? 'the task was cancelled')
     } catch (error) {
@@ -321,7 +360,7 @@ export class DshTaskExecutor implements TaskExecutor {
 
   /** Map one turn ending plus the worker's final text onto the executor result. */
   private async ending(task: Task, end: TurnEndOutcome, text: string, run: Run): Promise<ExecutorResult> {
-    const sessionId = run.session?.sessionId ?? taskSessionId(task.id)
+    const sessionId = run.session?.sessionId ?? run.sessionId
     const summary = text.trim()
     switch (end.status) {
       case 'completed':
@@ -355,8 +394,14 @@ export class DshTaskExecutor implements TaskExecutor {
     }
   }
 
-  private async prepareWorkspace(task: Task, settings: Settings): Promise<string> {
-    const workspace = taskWorkspace(settings, task.id, this.homeDir, this.stateDir)
+  private async prepareWorkspace(task: Task, settings: Settings, approved?: string): Promise<string> {
+    const workspace = resolveTaskWorkspace({
+      taskId: task.id,
+      settings,
+      ...(approved === undefined ? {} : { approved }),
+      home: this.homeDir,
+      stateDir: this.stateDir,
+    })
     await this.makeDirectory(workspace)
     return workspace
   }

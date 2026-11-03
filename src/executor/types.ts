@@ -15,7 +15,7 @@
  */
 import type { Approval, AssignmentOutcome, Task } from '../core/model.ts'
 import type { PermissionPreset } from '../shared/limits.ts'
-import type { Settings } from '../shared/settings.ts'
+import type { ModelRoute, Settings } from '../shared/settings.ts'
 
 /** Preset ids declared by this bundle in `cordis.patch.yml`. */
 export const WORKER_PRESET = 'dsh-whale-chan-worker'
@@ -24,9 +24,21 @@ export const REPLIER_PRESET = 'dsh-whale-chan-replier'
 /** Source kind stamped on every message this plugin delivers into a session. */
 export const DELIVERY_SOURCE = 'dsh-whale-chan' as const
 
-/** Session id of the worker that runs `taskId`. It is deterministic so a cancel can address it before it exists. */
-export function taskSessionId(taskId: string): string {
-  return `whale-task-${taskId}`
+/** Characters an assignment id may contribute to a session id. */
+const SESSION_ID_SAFE = /[^A-Za-z0-9_-]/g
+
+/**
+ * Session id of the worker that runs one assignment of `taskId`.
+ *
+ * The last eight characters of the assignment id make a retry a *new* session:
+ * the domain treats a retry as a new assignment, so the worker must not resume
+ * the conversation of the attempt that failed. The id stays deterministic, so a
+ * cancel can address the session before it exists.
+ */
+export function taskSessionId(taskId: string, assignmentId?: string | null): string {
+  const cleaned = (assignmentId ?? '').replace(SESSION_ID_SAFE, '')
+  const suffix = cleaned.length === 0 ? 'initial' : cleaned.slice(-8)
+  return `whale-task-${taskId}-${suffix}`
 }
 
 /**
@@ -51,6 +63,15 @@ export interface ExecutorRequest {
   readonly task: Task
   readonly approval: Approval
   readonly settings: Settings
+  /**
+   * The directory the approving person chose (`Assignment.workspace`).
+   *
+   * It wins over `tasks.workspaceRoot`: a person who approved a task into a
+   * directory expects the worker to run there, and the setting is only the
+   * default for approvals that name none. `~` is expanded; a relative path is
+   * refused rather than resolved against the host's working directory.
+   */
+  readonly workspace?: string
   /** Caller lifetime; aborting it cancels the run and its session turn. */
   readonly signal: AbortSignal
 }
@@ -89,6 +110,13 @@ export interface EnsureSessionOptions {
    * An existing session keeps the prompt it was created with.
    */
   readonly systemPrompt?: string
+  /**
+   * Route from `settings.models`, seeded onto a brand-new session.
+   *
+   * An empty or half-configured route leaves the deployment default in place;
+   * an existing session keeps the selection it already recorded.
+   */
+  readonly model?: ModelRoute
   /** Abandon the current session of this identity and build a fresh one. */
   readonly fresh?: boolean
   readonly signal: AbortSignal

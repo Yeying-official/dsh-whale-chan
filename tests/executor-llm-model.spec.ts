@@ -107,14 +107,23 @@ describe('request shape', () => {
     expect(sent).not.toContain('系统指令')
   })
 
-  it('derives maxTokens from the brain character hint and caps it', async () => {
+  it('keeps a reasoning model enough output tokens whatever the character hint is', async () => {
     const { llm, instance } = model({ route: { provider: 'p', model: 'm', effort: '' } })
-    await instance.complete(request('x', 400), new AbortController().signal)
-    expect(llm.options[0]?.maxTokens).toBe(100)
-    await instance.complete(request('x', 100_000), new AbortController().signal)
-    expect(llm.options[1]?.maxTokens).toBe(MAX_OUTPUT_TOKENS)
-    await instance.complete(request('x'), new AbortController().signal)
-    expect(llm.options[2]?.maxTokens).toBeUndefined()
+    const signal = new AbortController().signal
+    // The classifier asks for 800 characters and the reply for 300; reasoning
+    // runs before the answer, so both must keep the one-kilotoken floor.
+    await instance.complete(request('x', 800), signal)
+    expect(llm.options[0]?.maxTokens).toBe(1_024)
+    await instance.complete(request('x', 300), signal)
+    expect(llm.options[1]?.maxTokens).toBe(1_024)
+    // 4 characters per token: the 4096 cap engages from 16384 characters up.
+    await instance.complete(request('x', 16_000), signal)
+    expect(llm.options[2]?.maxTokens).toBe(4_000)
+    await instance.complete(request('x', 20_000), signal)
+    expect(llm.options[3]?.maxTokens).toBe(MAX_OUTPUT_TOKENS)
+    // No hint: the provider decides.
+    await instance.complete(request('x'), signal)
+    expect(llm.options[4]?.maxTokens).toBeUndefined()
   })
 
   it('bounds the assembled user message', async () => {
@@ -260,11 +269,14 @@ describe('composition', () => {
 })
 
 describe('outputTokensFor', () => {
-  it('maps characters to tokens with a floor and a ceiling', () => {
+  it('maps characters to tokens with a floor for reasoning and a ceiling', () => {
     expect(outputTokensFor(undefined)).toBeUndefined()
     expect(outputTokensFor(0)).toBeUndefined()
-    expect(outputTokensFor(8)).toBe(2)
-    expect(outputTokensFor(4)).toBe(1)
+    expect(outputTokensFor(800)).toBe(1_024)
+    expect(outputTokensFor(300)).toBe(1_024)
+    expect(outputTokensFor(16_000)).toBe(4_000)
+    expect(outputTokensFor(20_000)).toBe(MAX_OUTPUT_TOKENS)
     expect(outputTokensFor(1_000_000)).toBe(MAX_OUTPUT_TOKENS)
+    expect(outputTokensFor(8_000)).toBe(2_000)
   })
 })

@@ -188,7 +188,7 @@ describe('composeReply', () => {
     expect(fenced).toMatchObject({ ok: false, reason: 'empty' })
 
     const disclaimer = await composeReply(makeInput(), stubModel('我是人类'), new AbortController().signal)
-    expect(disclaimer).toMatchObject({ ok: false, reason: 'empty' })
+    expect(disclaimer).toMatchObject({ ok: false, reason: 'empty', detail: '我是人类' })
   })
 
   it('defaults to a 60s budget and accepts a slow draft inside it', async () => {

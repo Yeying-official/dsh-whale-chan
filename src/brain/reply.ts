@@ -19,6 +19,7 @@ import {
   codePointLength,
   collapseBlankLines,
   normalizeWhitespace,
+  outputSample,
   redactSecretLike,
   renderThreadWindow,
   truncateSentence,
@@ -300,6 +301,6 @@ export async function composeReply(input: ComposeInput, model: ModelPort, signal
   })
 
   if (sanitized.echoedSystemPrompt) return { ok: false, reason: 'echoes_system_prompt' }
-  if (sanitized.text.length === 0) return { ok: false, reason: 'empty' }
+  if (sanitized.text.length === 0) return { ok: false, reason: 'empty', detail: outputSample(outcome.value) }
   return { ok: true, text: sanitized.text, sources: sanitized.sources }
 }

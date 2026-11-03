@@ -131,6 +131,17 @@ describe('classify', () => {
     expect(result).toMatchObject({ ok: false, reason: 'invalid' })
   })
 
+  it('puts a bounded sample of the raw answer in the invalid detail', async () => {
+    const prose = `我猜这算问题。${'细节'.repeat(400)}`
+    const { result } = await run(prose)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    // Enough to tell "empty / prose / truncated" apart, without the whole answer.
+    expect(result.detail).toContain('我猜这算问题。')
+    expect(result.detail?.length ?? 0).toBeLessThan(400)
+    expect(result.detail?.endsWith('…')).toBe(true)
+  })
+
   it('returns invalid when the model throws', async () => {
     const model = stubModel(() => {
       throw new Error('provider exploded')

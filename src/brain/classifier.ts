@@ -15,7 +15,7 @@
 import { z } from 'zod'
 import type { PersonaSettings } from '../shared/settings.ts'
 import { withDeadline } from './deadline.ts'
-import { formatLocalTime, renderThreadWindow } from './format.ts'
+import { formatLocalTime, outputSample, renderThreadWindow } from './format.ts'
 import { renderPersonaSummary } from './persona.ts'
 import { defaultPromptStore, render } from './prompts.ts'
 import type {
@@ -217,7 +217,8 @@ export async function classify(input: ClassifyInput, signal: AbortSignal): Promi
   }
 
   const parsed = parseClassification(outcome.value)
-  if (!parsed.ok) return { ok: false, reason: 'invalid', detail: parsed.detail }
+  // The sample answers "empty, prose, or cut off?" without logging the answer.
+  if (!parsed.ok) return { ok: false, reason: 'invalid', detail: `${parsed.detail} | ${outputSample(outcome.value)}` }
 
   const floor = input.options?.minConfidence ?? DEFAULT_MIN_CONFIDENCE
   if (parsed.value.confidence < floor) {

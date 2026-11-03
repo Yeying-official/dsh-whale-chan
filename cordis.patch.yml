@@ -23,7 +23,9 @@
           - id: persona
             name: '@deepseek-ai/dsh-persona'
             config:
-              prefix: 你是「鲸鱼酱」，主人授权你以主人的身份在钉钉上回复消息。
+              # 中性前缀：具体身份、语气与边界由动态人设段落（随消息投递）定义，
+              # 主人改名后这里的硬编码不会与它冲突。
+              prefix: 你是主人授权在钉钉上回复消息的助理；具体身份、语气与边界由动态人设段落定义。
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
             config:
@@ -69,7 +71,8 @@
           - id: persona
             name: '@deepseek-ai/dsh-persona'
             config:
-              prefix: 你是「鲸鱼酱」的任务执行器，在一个受限工作区内完成主人批准的任务。
+              # 中性前缀，理由同上：任务说明与人设都由执行器随消息投递。
+              prefix: 你是主人授权执行任务的助理，在一个受限工作区内完成已批准的任务；具体身份与边界由动态人设段落定义。
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
             config:

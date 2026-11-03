@@ -1,6 +1,6 @@
 # 012 发布
 
-> 当前状态：**v0.3.0 发布提交已就绪，tag 未打**。WS0–WS12 已完成；T3/T4 真机证据沿用 v0.1.0 的 T0–T4 与 v0.2.0 的 T3/T4 复验（[WS8 报告](test-reports/WS8-live.md)、[WS9/WS10 报告](test-reports/WS9-10.md)）。WS12 只改人设默认值与只读预设投影，不涉及回复/发送链路，本轮**不重跑** T3/T4。
+> 当前状态：**v0.3.0 已本地打 tag、未 push**。WS0–WS12 已完成；T3/T4 真机证据沿用 v0.1.0 的 T0–T4 与 v0.2.0 的 T3/T4 复验（[WS8 报告](test-reports/WS8-live.md)、[WS9/WS10 报告](test-reports/WS9-10.md)）。WS12 只改人设默认值与只读预设投影，不涉及回复/发送链路，本轮**不重跑** T3/T4。
 >
 > 版本 `0.3.0`，日期 `2026-11-03`。`private: true`，不发布到 npm。
 
@@ -43,10 +43,11 @@ git status --porcelain
 - [x] `scripts/check-pack.mjs` → 版本断言 `0.3.0`
 - [x] `CHANGELOG.md` → `## [0.3.0] - 2026-11-03`，含 Added / Changed / Fixed / Migration；`0.2.0`、`0.1.0` 段落保留
 - [x] `docs/compatibility.md` → 适用版本、0.3.0 人设默认/预设行为、旧 persona 行保留、不涉及 DSH 版本变化
-- [x] `docs/PROGRESS.md` → WS12 完成并合并、main HEAD、765 tests、WS12 真机结论、tag 未打、测试目标停用
+- [x] `docs/PROGRESS.md` → WS12 完成并合并、main HEAD、765 tests、WS12 真机结论、tag 已打、测试目标停用
 - [x] `README.md` → v0.3.0 状态、安装验证版本 `0.3.0`、人设段核对（默认为空、预设手动载入、已保存不覆盖）、014 链接
 - [x] `docs/013-security.md` → 追加预设只读与无新权限（只追加，不改结构）
 - [x] `docs/test-reports/WS12-persona.md` → 空默认/预设/面板动作的验收报告（脱敏）
+- [x] 发布 tag：`v0.3.0` 已由协调者打在本 docs 提交上（本地，未 push；实现代理未执行 tag/push）
 - [ ] 发布复核人确认 T3/T4 沿用结论（WS8、WS9/WS10）与 `docs/test-reports/WS12-persona.md`、CHANGELOG 一致
 
 ## 4. 安装与卸载
@@ -137,12 +138,12 @@ pnpm format:check
 node scripts/check-pack.mjs
 git status --porcelain
 
-# annotated tag（只在门禁全绿、发布复核通过后）
+# annotated tag（已执行；保留作复核记录）
 git tag -a v0.3.0 -m "dsh-whale-chan-assistant 0.3.0"
 git show --stat v0.3.0
 ```
 
-- **tag 由发布负责人复核后打**，不在实现代理的发布准备提交里；**不要 push，除非发布负责人明确授权**。
+- **tag 已由发布负责人复核后由协调者打在本 docs 提交上**（本地，未 push）；实现代理没有执行 tag 或 push。
 - tag 必须指向包含版本 bump、CHANGELOG、compatibility、PROGRESS、014 与 WS12 报告的提交。
 - 打 tag 后如需归档，再执行 `npm pack --ignore-scripts`；产物不入库（`.gitignore` 已忽略 `*.tgz`）。
 

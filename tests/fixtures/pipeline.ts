@@ -278,6 +278,7 @@ export interface PipelineOptions {
   readonly stateDir: string
   readonly settings?: Partial<Record<SettingsBlock, Record<string, unknown>>>
   readonly channel?: FakeChannel
+  readonly channelFactory?: RuntimeOverrides['channelFactory']
   readonly model?: FakeModelFactory
   readonly research?: FakeResearch
   readonly executor?: FakeExecutor
@@ -307,6 +308,7 @@ export async function startPipeline(options: PipelineOptions): Promise<PipelineH
       timers,
       overrides: {
         channel,
+        ...(options.channelFactory === undefined ? {} : { channelFactory: options.channelFactory }),
         model,
         research,
         executor,

@@ -103,6 +103,41 @@ describe('startup and authorization', () => {
     expect(health.status).toBe('error')
     expect(health.checks.find((check) => check.id === 'channel')?.detail).toContain('could not start')
   })
+
+  it('passes the probed owner nick to the running channel', async () => {
+    const probe = new FakeChannel({ auth: { userName: '鲸鱼酱' } })
+    const running = new FakeChannel()
+    let seen: { userId: string; ownerNick?: string } | undefined
+    const h = await start({
+      channel: probe,
+      channelFactory: (owner) => {
+        seen = owner
+        return running
+      },
+    })
+
+    expect(seen).toEqual({ userId: 'owner-1', ownerNick: '鲸鱼酱' })
+    expect(running.startCalls).toBe(1)
+    expect(h.runtime.status()).toMatchObject({ ownerKnown: true, monitorRunning: true })
+  })
+
+  it('does not invent an owner nick when auth reports none', async () => {
+    const probe = new FakeChannel()
+    const running = new FakeChannel()
+    let seen: { userId: string; ownerNick?: string } | undefined
+    await start({
+      channel: probe,
+      channelFactory: (owner) => {
+        seen = owner
+        return running
+      },
+    })
+
+    expect(seen?.userId).toBe('owner-1')
+    expect(seen?.ownerNick).toBeUndefined()
+    expect(seen !== undefined && 'ownerNick' in seen).toBe(false)
+    expect(running.startCalls).toBe(1)
+  })
 })
 
 describe('pause, resume and settings changes', () => {

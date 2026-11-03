@@ -81,16 +81,16 @@
 
 ## 7. 测试
 
-新增 6 个 spec、66 条用例（基线 496 → 562）：
+WS5b 自身新增 6 个 spec、68 条用例；合并 `main`（WS2 T3 + WS6）后全量为 57 个 spec、667 条：
 
-| 文件                             | 条数 | 覆盖                                                                         |
-| -------------------------------- | ---- | ---------------------------------------------------------------------------- |
-| `tests/core-outbound.spec.ts`    | 10   | follow-up 幂等、目标匹配、空值、终态与重复上报                               |
-| `tests/rate-counters.spec.ts`    | 11   | 窗口、裁剪、跨重启、gap、损坏、线程窗口/连续回复/目标/broadcast              |
-| `tests/pipeline-chat.spec.ts`    | 18   | 自动回复、闸门 review/defer、检索、回声、unknown/failed/skipped              |
-| `tests/pipeline-task.spec.ts`    | 7    | 待批准可见、批准执行回帖、未批准/取消/派工不符不执行、失败只通知             |
-| `tests/runtime-pipeline.spec.ts` | 16   | 授权门、暂停/恢复、防抖重启、outbox 恢复、过期/probe pass、停机顺序          |
-| `tests/health-view.spec.ts`      | 4    | disabled / paused / 无 enabled target / 有目标但 stopped 的 channel 健康语义 |
+| 文件                             | 条数 | 覆盖                                                                                |
+| -------------------------------- | ---- | ----------------------------------------------------------------------------------- |
+| `tests/core-outbound.spec.ts`    | 10   | follow-up 幂等、目标匹配、空值、终态与重复上报                                      |
+| `tests/rate-counters.spec.ts`    | 11   | 窗口、裁剪、跨重启、gap、损坏、线程窗口/连续回复/目标/broadcast                     |
+| `tests/pipeline-chat.spec.ts`    | 18   | 自动回复、闸门 review/defer、检索、回声、unknown/failed/skipped                     |
+| `tests/pipeline-task.spec.ts`    | 7    | 待批准可见、批准执行回帖、未批准/取消/派工不符不执行、失败只通知                    |
+| `tests/runtime-pipeline.spec.ts` | 18   | 授权门、暂停/恢复、防抖重启、outbox 恢复、过期/probe pass、停机顺序、ownerNick 透传 |
+| `tests/health-view.spec.ts`      | 4    | disabled / paused / 无 enabled target / 有目标但 stopped 的 channel 健康语义        |
 
 所有外部能力均为 fake：无真实 `dws`、模型、网络或 DSH 会话。
 
@@ -104,6 +104,7 @@
 6. `fix(app): write capture notices directly and accept the runtime initializer`
 7. `docs: document the WS5b runtime`
 8. `fix(app): report an idle channel as healthy`
+9. `fix(runtime): pass the owner nick to the channel`
 
 ## 9. 门禁
 

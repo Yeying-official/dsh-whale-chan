@@ -128,9 +128,23 @@ export interface RuntimeTimers {
   clearTimeout(handle: unknown): void
 }
 
+/** Owner identity the running channel is subscribed with. */
+export interface ChannelOwnerIdentity {
+  readonly userId: string
+  /** Display name from `probeAuth().userName`; used for `@<name>` mention detection. */
+  readonly ownerNick?: string
+}
+
 /** Test seams: every external capability can be replaced. */
 export interface RuntimeOverrides {
   readonly channel?: ChannelRuntime
+  /**
+   * Build the running channel from the probed owner identity.
+   *
+   * Production builds a `DingTalkChannel` with `ownerNick`; a test uses this to
+   * assert exactly what the runtime passed without spawning `dws`.
+   */
+  readonly channelFactory?: (owner: ChannelOwnerIdentity) => ChannelRuntime
   readonly model?: BrainModelFactory
   readonly research?: ResearchPort
   readonly executor?: TaskExecutor
@@ -790,12 +804,21 @@ export class Runtime {
     if (this.runningChannel !== undefined) return
     const owner = (this.auth?.userId ?? '').trim()
     if (owner.length === 0) return
+    // Flattened group events carry no atUsers, so `@<user_name>` is the only
+    // mention signal; pass the probed display name through as `ownerNick`.
+    const ownerNick = (this.auth?.userName ?? '').trim()
+    const identity: ChannelOwnerIdentity = {
+      userId: owner,
+      ...(ownerNick.length === 0 ? {} : { ownerNick }),
+    }
     const channel =
+      this.overrides.channelFactory?.(identity) ??
       this.overrides.channel ??
       createDingTalkChannel({
         settings: () => this.settings.current(),
         logger: this.channelLogger(),
         ownerUserId: owner,
+        ...(identity.ownerNick === undefined ? {} : { ownerNick: identity.ownerNick }),
         ...(this.overrides.command === undefined ? {} : { command: this.overrides.command }),
         ...(this.overrides.baseArgs === undefined ? {} : { baseArgs: this.overrides.baseArgs }),
         ...(this.overrides.env === undefined ? {} : { env: this.overrides.env }),

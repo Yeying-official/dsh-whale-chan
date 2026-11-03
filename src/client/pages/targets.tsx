@@ -13,7 +13,7 @@ import {
   type TargetRowValue,
 } from '../fields.tsx'
 import { usePanel } from '../provider.tsx'
-import type { Target, TargetCandidate, TargetValidation } from '../../shared/models.ts'
+import type { Target, TargetCandidate, TargetValidation, TargetWorkspace } from '../../shared/models.ts'
 import type { TargetKind } from '../../shared/limits.ts'
 
 function toRows(targets: readonly Target[]): TargetRowValue[] {
@@ -61,6 +61,7 @@ export function TargetsPage() {
   const [candidates, setCandidates] = useState<readonly TargetCandidate[]>([])
   const [searched, setSearched] = useState(false)
   const [validation, setValidation] = useState<readonly TargetValidation[]>([])
+  const [copiedWorkspace, setCopiedWorkspace] = useState<string>()
   const discover = useMutation((kind: TargetKind) =>
     call('POST targets/discover', { body: { kind, ...(query.trim() ? { query: query.trim() } : {}) } }),
   )
@@ -205,9 +206,47 @@ export function TargetsPage() {
     }
   }
 
+  /**
+   * Copy one read-only workspace path.
+   *
+   * The path is display-only: copying it must never feed the editable draft or
+   * a PUT body. `navigator.clipboard` is unavailable on an insecure origin, so
+   * the selection fallback keeps the button useful in a plain-http panel.
+   */
+  const copyWorkspacePath = async (key: string, path: string) => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(path)
+        setCopiedWorkspace(key)
+        return
+      }
+    } catch {
+      // Fall through to the selection fallback.
+    }
+    try {
+      const field = document.createElement('textarea')
+      field.value = path
+      field.setAttribute('readonly', '')
+      field.style.position = 'fixed'
+      field.style.opacity = '0'
+      document.body.append(field)
+      field.select()
+      const copied = document.execCommand('copy')
+      field.remove()
+      setCopiedWorkspace(copied ? key : undefined)
+    } catch {
+      setCopiedWorkspace(undefined)
+    }
+  }
+
   const loadError = targetsApi.error ?? settingsApi.error
   const validCount = validation.filter((item) => item.valid).length
   const invalidCount = validation.length - validCount
+  // `workspace` is a derived, read-only projection; older hosts omit it, in
+  // which case the whole section stays hidden instead of showing a guess.
+  const workspaceTargets = (targetsApi.data?.targets ?? []).flatMap((target) =>
+    target.workspace === undefined ? [] : [{ target, workspace: target.workspace as TargetWorkspace }],
+  )
 
   return (
     <div className="wc-page">
@@ -280,6 +319,60 @@ export function TargetsPage() {
           />
         </Card>
       </div>
+      {workspaceTargets.length > 0 ? (
+        <Card title={t('targets.workspace.title')}>
+          <p className="wc-hint">{t('targets.workspace.hint')}</p>
+          <div className="wc-tablewrap" style={{ marginTop: 10 }}>
+            <table className="wc-table">
+              <thead>
+                <tr>
+                  <th scope="col">{t('targets.list.title')}</th>
+                  <th scope="col">{t('targets.workspace.title')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {workspaceTargets.map(({ target, workspace }) => {
+                  const key = `${target.kind}:${target.id}`
+                  const label = target.label || target.id
+                  const path = workspace.path
+                  return (
+                    <tr key={key} data-workspace-mode={workspace.mode}>
+                      <td>
+                        <span className="wc-cell-title">{label}</span>
+                        <span className="wc-cell-meta">
+                          {t(`targets.kind.${target.kind}` as 'targets.kind.group')} · {target.id}
+                        </span>
+                      </td>
+                      <td>
+                        {workspace.mode === 'ready' && path !== null ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
+                            <Badge tone="success">{t('targets.workspace.ready')}</Badge>
+                            <span className="wc-mono">{path}</span>
+                            <Button
+                              size="sm"
+                              aria-label={`${t('targets.workspace.copy')}: ${label}`}
+                              onClick={() => void copyWorkspacePath(key, path)}
+                            >
+                              {t('targets.workspace.copy')}
+                            </Button>
+                            {copiedWorkspace === key ? (
+                              <span className="wc-hint" role="status">
+                                {t('targets.workspace.copied')}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <Badge tone="neutral">{t('targets.workspace.perConversation')}</Badge>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      ) : null}
       <div className="wc-grid" data-columns="two">
         <Card
           title={t('targets.discover.title')}

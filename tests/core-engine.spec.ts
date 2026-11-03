@@ -455,6 +455,158 @@ describe('error handling', () => {
   })
 })
 
+describe('retrying a failed task', () => {
+  function failFirst(harness: ReturnType<typeof createHarness>): { taskId: string; assignmentId: string } {
+    const { task } = receiveTask(harness, {}, { title: '重试' }, 3_600_000)
+    const approved = harness.engine.approveTask(task.id, {
+      by: 'owner',
+      at: '2026-11-02T09:00:10.000Z',
+      workspace: '/workspace/task-1',
+    })
+    harness.engine.assignmentStarted(task.id, approved.assignment.id)
+    harness.engine.assignmentEnded(task.id, approved.assignment.id, {
+      outcome: 'failed',
+      result: { summary: '上一次失败了' },
+    })
+    return { taskId: task.id, assignmentId: approved.assignment.id }
+  }
+
+  it('creates a new pending assignment and keeps the result and the approval', () => {
+    const harness = createHarness()
+    const { taskId, assignmentId } = failFirst(harness)
+    const result = harness.engine.retryTask(taskId, {
+      by: 'owner',
+      at: '2026-11-02T09:05:00.000Z',
+      workspace: '/workspace/task-1-retry',
+      note: '再试一次',
+    })
+
+    expect(result.task).toMatchObject({
+      id: taskId,
+      status: 'approved',
+      assignmentId: result.assignment.id,
+      result: { summary: '上一次失败了' },
+      approvalId: 'approval-1',
+    })
+    expect(result.assignment).toMatchObject({
+      taskId,
+      state: 'pending',
+      workspace: '/workspace/task-1-retry',
+      sessionId: null,
+      startedAt: null,
+      endedAt: null,
+      outcome: null,
+      error: null,
+    })
+    expect(result.assignment.id).not.toBe(assignmentId)
+    expect(harness.repos.assignments.get(assignmentId)).toMatchObject({ state: 'ended', outcome: 'failed' })
+    expect(harness.repos.approvals.byTaskId(taskId)?.status).toBe('approved')
+    expect(harness.engine.task(taskId)?.status).toBe('approved')
+    expect(harness.events.at(-1)).toMatchObject({
+      type: 'task.retried',
+      data: { taskId, assignmentId: result.assignment.id },
+    })
+  })
+
+  it('accepts a Windows absolute workspace from the domain check', () => {
+    const harness = createHarness()
+    const { taskId } = failFirst(harness)
+    const result = harness.engine.retryTask(taskId, {
+      by: 'owner',
+      at: '2026-11-02T09:05:00.000Z',
+      workspace: 'C:\\work\\task-1',
+    })
+    expect(result.assignment.workspace).toBe('C:\\work\\task-1')
+  })
+
+  it('refuses every status other than failed', () => {
+    const awaiting = createHarness()
+    const pending = receiveTask(awaiting)
+    expect(() =>
+      awaiting.engine.retryTask(pending.task.id, {
+        by: 'owner',
+        at: '2026-11-02T09:05:00.000Z',
+        workspace: '/workspace/x',
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'notFailed' }))
+
+    const running = createHarness()
+    const runningTask = receiveTask(running)
+    const approved = running.engine.approveTask(runningTask.task.id, {
+      by: 'owner',
+      at: '2026-11-02T09:00:10.000Z',
+      workspace: '/workspace/running',
+    })
+    running.engine.assignmentStarted(runningTask.task.id, approved.assignment.id)
+    expect(() =>
+      running.engine.retryTask(runningTask.task.id, {
+        by: 'owner',
+        at: '2026-11-02T09:05:00.000Z',
+        workspace: '/workspace/running',
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'notFailed' }))
+
+    const succeeded = createHarness()
+    const succeededTask = receiveTask(succeeded)
+    const succeededApproval = succeeded.engine.approveTask(succeededTask.task.id, {
+      by: 'owner',
+      at: '2026-11-02T09:00:10.000Z',
+      workspace: '/workspace/succeeded',
+    })
+    succeeded.engine.assignmentStarted(succeededTask.task.id, succeededApproval.assignment.id)
+    succeeded.engine.assignmentEnded(succeededTask.task.id, succeededApproval.assignment.id, {
+      outcome: 'succeeded',
+    })
+    expect(() =>
+      succeeded.engine.retryTask(succeededTask.task.id, {
+        by: 'owner',
+        at: '2026-11-02T09:05:00.000Z',
+        workspace: '/workspace/succeeded',
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'notFailed' }))
+
+    const cancelled = createHarness()
+    const cancelledTask = receiveTask(cancelled)
+    cancelled.engine.cancelTask(cancelledTask.task.id, { by: 'owner', at: '2026-11-02T09:01:00.000Z' })
+    expect(() =>
+      cancelled.engine.retryTask(cancelledTask.task.id, {
+        by: 'owner',
+        at: '2026-11-02T09:05:00.000Z',
+        workspace: '/workspace/cancelled',
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'notFailed' }))
+  })
+
+  it('refuses a missing or relative workspace without writing a new assignment', () => {
+    const harness = createHarness()
+    const { taskId } = failFirst(harness)
+    expect(() =>
+      harness.engine.retryTask(taskId, { by: 'owner', at: '2026-11-02T09:05:00.000Z', workspace: '   ' }),
+    ).toThrowError(expect.objectContaining({ code: 'missingWorkspace' }))
+    expect(() =>
+      harness.engine.retryTask(taskId, { by: 'owner', at: '2026-11-02T09:05:00.000Z', workspace: 'relative/dir' }),
+    ).toThrowError(expect.objectContaining({ code: 'invalidWorkspace' }))
+    expect(harness.repos.listAssignments()).toHaveLength(1)
+    expect(harness.engine.task(taskId)?.status).toBe('failed')
+  })
+
+  it('refuses an unknown task and an unparseable instant', () => {
+    const harness = createHarness()
+    expect(() =>
+      harness.engine.retryTask('task-missing', {
+        by: 'owner',
+        at: '2026-11-02T09:05:00.000Z',
+        workspace: '/workspace/x',
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'unknownTask', missing: true }))
+
+    const { taskId } = failFirst(harness)
+    expect(() =>
+      harness.engine.retryTask(taskId, { by: 'owner', at: 'not-a-time', workspace: '/workspace/x' }),
+    ).toThrowError(expect.objectContaining({ code: 'invalidTime' }))
+  })
+})
+
 function capture(work: () => unknown): unknown {
   try {
     work()

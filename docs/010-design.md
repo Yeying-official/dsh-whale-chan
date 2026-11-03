@@ -1,6 +1,6 @@
 # 010 设计摘要
 
-> 当前状态：设计摘要已冻结（WS0）。本文描述目标架构和硬规则；只有 WS0 骨架已经落地，其余能力尚未实现。
+> 当前状态：设计摘要已冻结（WS0）。本文描述目标架构和硬规则；WS0 骨架与 WS1 领域/持久化已落地，通道、执行器、面板与设置持久化尚未实现。
 
 ## 1. 产品目标
 
@@ -62,42 +62,43 @@ WS0 不订阅任何事件。WS1 先通过 `dws` 的类型、help 和 schema 实�
 | 层             | 职责                                              | 允许依赖                              | 禁止                                  |
 | -------------- | ------------------------------------------------- | ------------------------------------- | ------------------------------------- |
 | `src/shared`   | 设置 schema、字段表、API 合约、视图模型、边界常量 | 浏览器和 Node 都能用的纯模块          | Node 内置模块、宿主实现               |
-| `src/core`     | Thread、Decision、Task、Approval 等领域规则       | 仅本层                                | I/O、环境变量、定时器、任何其他项目层 |
+| `src/core`     | Thread、Decision、Task、Approval 等领域规则       | 本层、`src/shared` 的纯类型           | I/O、环境变量、定时器、任何其他项目层 |
 | `src/app`      | 组合 Runtime、HTTP、持久化、Outbox、Passes        | core、shared、端口接口                | 直接启动 dws；直接向钉钉发送          |
 | `src/channel`  | dws 子进程、事件解码、发送参数                    | shared、app 提供的端口                | 领域决策；绕过 sender                 |
 | `src/sender`   | 唯一发送出口与发送幂等                            | shared、channel 端口                  | 读取业务状态；生成决策                |
 | `src/executor` | DSH 会话、工作区、权限预设与任务执行              | app/core 提供的端口                   | 自己发钉钉消息                        |
 | `src/client`   | Web 面板                                          | shared 的类型与字段表、DSH 客户端服务 | 宿主实现、Node 内置模块、发送层       |
 
-WS0 的目录和契约测试保证：`core` 没有 import，`shared` 不 import Node 内置模块，`client` 不 import `app`、`channel`、`sender`、`executor` 或 `core`。以后新增跨层调用必须通过 app 暴露的窄接口，不允许用“图方便”的相对导入破坏方向。
+WS1 的契约测试保证：`core` 只 import 本层模块与 `shared` 的纯类型，不 import `node:*`、`@deepseek-ai/*` 或 `app`、`channel`、`executor`、`client`；`shared` 不 import Node 内置模块；`client` 不 import `app`、`channel`、`sender`、`executor` 或 `core`。以后新增跨层调用必须通过 app 暴露的窄接口，不允许用“图方便”的相对导入破坏方向。
 
 ## 4. 领域模型与任务状态机
 
 ### 4.1 概念
 
-- **Thread**：一个可追踪的会话，键由通道类型和目标 ID 确定；保存最近消息时间、标签和任务引用。
-- **Message**：入站或出站消息；保存稳定消息 ID、发送者、正文、时间和方向。
-- **Decision**：对一条消息的纯判断结果（忽略、回复、捕获任务、检索），带原因和时间。
-- **Task**：从消息捕获的可执行单元；记录来源 Thread、标题、状态、时间和 Approval 引用。
-- **Approval**：人对待执行任务的明确授权；有有效期，只有 `approved` 且未过期的 Approval 才能放行执行。
-- **Assignment**：已批准任务到执行器 Session 的派工记录；记录会话 ID、状态和时间。
+- **Thread**：一个可追踪的会话，键由目标与会话确定；保存最近消息时间、对端与 inbound/replied/tasks 计数。
+- **Message**：入站消息；保存稳定事件 ID、发送者、正文、时间与提及列表，按 ID 幂等。
+- **Decision**：对一条消息的判断与后续动作（分类、草稿、发送回执或任务引用），带原因与时间。
+- **Task**：从消息捕获的可执行单元；记录来源 Thread、请求者、标题、状态、Approval 与 Assignment 引用。
+- **Approval**：人对待执行任务的明确授权；有有效期，只有 `pending` 能被批准，迟到批准无效。
+- **Assignment**：已批准任务到执行器 Session 的派工记录；记录工作区、状态、时间与结果。
+- **Outbound**：已排队的对外消息；`idempotencyKey` 唯一，状态由通道回执推进。
 
 ### 4.2 任务状态机
 
 ```text
-captured
-  └─ capture-task ─> awaiting-approval
-                        ├─ approve ─> queued ─> running ─> succeeded
-                        │                         └─────> failed
-                        ├─ reject ─> rejected
-                        └─ ttl ───> expired
-queued / running ── cancel ─> cancelled
+awaiting-approval
+  ├─ approve ─> approved ─> running ─> succeeded
+  │                            └────> failed
+  ├─ reject ─> rejected
+  ├─ cancel ─> cancelled
+  └─ ttl ───> expired
+approved / running ── cancel ─> cancelled
 ```
 
 硬规则：
 
 - `awaiting-approval` 是执行前唯一可被批准的入口。
-- 没有 `Approval.status === 'approved'` 的任务不得进入 `queued`，更不得进入 `running`。
+- 没有 `Approval.status === 'approved'` 的任务不得进入 `approved`，更不得进入 `running`。
 - Approval 过期后，迟到批准无效，任务必须转 `expired`，不得“补执行”。
 - 拒绝、取消、失败都要写审计；恢复时不得把已终止任务重新启动。
 

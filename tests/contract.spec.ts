@@ -50,6 +50,13 @@ function sourceFiles(directory: string): string[] {
   })
 }
 
+/** Every import specifier of one source: `from`, dynamic and side-effect imports. */
+function importSpecifiers(source: string): string[] {
+  return [...source.matchAll(/(?:from\s+|import\s*\(\s*|import\s+)['"]([^'"]+)['"]/g)].map(
+    (match) => match[1] as string,
+  )
+}
+
 describe('settings schema and field registry', () => {
   it('covers exactly the same leaf paths in both directions', () => {
     expect(schemaPaths).toEqual(fieldPaths)
@@ -158,13 +165,43 @@ describe('management API contract', () => {
 })
 
 describe('repository and layer invariants', () => {
-  it('keeps core free of imports and shared free of Node built-ins', () => {
-    const core = readFileSync('src/core/index.ts', 'utf8')
-    expect(core).not.toMatch(/^\s*import\s/m)
+  it('keeps core free of I/O and of every other project layer', () => {
+    // WS0 could assert that `src/core/index.ts` had no imports at all. WS1 makes
+    // core a real domain layer: files may import their own siblings and the pure
+    // types of `src/shared`, but never a Node built-in, a DSH service, or an
+    // app/channel/executor/client module, and never `require`.
+    const files = sourceFiles('src/core')
+    expect(files.length).toBeGreaterThan(0)
+    for (const file of files) {
+      const source = readFileSync(file, 'utf8')
+      expect(source, file).not.toMatch(/\brequire\s*\(/)
+      for (const specifier of importSpecifiers(source)) {
+        expect(specifier, file).not.toMatch(/^node:/)
+        expect(specifier, file).not.toMatch(/^@deepseek-ai\//)
+        expect(specifier, file).not.toMatch(/^\.\.\/(?:app|channel|executor|client)(?:\/|$)/)
+        expect(specifier, file).toMatch(/^(?:\.\/|\.\.\/shared\/)/)
+      }
+    }
     for (const file of sourceFiles('src/shared')) {
       const source = readFileSync(file, 'utf8')
       expect(source, file).not.toMatch(/from\s+['"]node:/)
       expect(source, file).not.toMatch(/require\(['"]node:/)
+    }
+  })
+
+  it('keeps persistence and scheduling modules off transport layers', () => {
+    // The store, its read queries, the migration, the effects queue, the pass
+    // scheduler and the key-value helper may use Node built-ins and core types,
+    // but must not depend on a channel, an executor, a client bundle or the HTTP
+    // host around them.
+    for (const name of ['store.ts', 'store-read.ts', 'migration.ts', 'effects.ts', 'passes.ts', 'kv.ts']) {
+      const file = join('src/app', name)
+      const source = readFileSync(file, 'utf8')
+      for (const specifier of importSpecifiers(source)) {
+        expect(specifier, file).not.toMatch(/^@deepseek-ai\//)
+        expect(specifier, file).not.toMatch(/^\.\.\/(?:channel|executor|client)(?:\/|$)/)
+        expect(specifier, file).not.toMatch(/^\.\/(?:http|runtime|views|settings|deployment)\.ts$/)
+      }
     }
   })
 

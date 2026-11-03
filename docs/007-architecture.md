@@ -289,8 +289,8 @@ Outbound 有两条入口，共用同一个发送处理器：
 
 | 文件                                | 覆盖                                                                                                       |
 | ----------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `tests/core-engine.spec.ts`         | 领域命令、事件、会话绑定与标题（23 条）                                                                    |
-| `tests/core-invariants.spec.ts`     | 10 条硬不变量 + 中途失败回滚 + 迟到批准 + 偏移时间与非法时间（15 条）                                      |
+| `tests/core-engine.spec.ts`         | 领域命令、事件、会话绑定与标题（28 条）                                                                    |
+| `tests/core-invariants.spec.ts`     | 10 条硬不变量 + 中途失败回滚 + 迟到批准 + 偏移时间与非法时间（16 条）                                      |
 | `tests/store.spec.ts`               | 打开/迁移/索引/往返/回滚/唯一约束/损坏 JSON/分页/裁剪/KV（13 条）                                          |
 | `tests/effects.spec.ts`             | 顺序、并发、覆盖、运行中重排、退避、上限、Later、dead、drain（10 条）                                      |
 | `tests/passes.spec.ts`              | 间隔、runAtStart、单飞、异常隔离、stop、重复注册（6 条）                                                   |
@@ -314,6 +314,7 @@ Outbound 有两条入口，共用同一个发送处理器：
 | `tests/pipeline-task.spec.ts`       | 任务批准可见、批准后执行与回帖、未批准/取消/派工不符不执行、失败只通知、内部行脱敏（9 条）                 |
 | `tests/runtime-pipeline.spec.ts`    | 启动授权门、暂停/恢复、防抖重启、outbox 恢复、过期/probe pass、停机顺序、ownerNick、会话式重建（18 条）    |
 | `tests/health-view.spec.ts`         | channel 健康语义：disabled/paused/无 target 为 ok，有 target 却 stopped 为 degraded（4 条）                |
+| `tests/display-name.spec.ts`        | 显示名 DSH助理与默认人设鲸鱼酱并存：只改展示，不动包名/状态目录/API 前缀/panel 与 preset id（10 条）       |
 
 ## 9. v1 限制
 

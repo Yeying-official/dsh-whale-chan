@@ -1,6 +1,6 @@
 # 010 设计摘要
 
-> 当前状态：本文是 WS0 冻结的设计基线。实现状态以 [007 架构](007-architecture.md) 与 [005 面板](005-panel.md) 为准；WS0–WS8 已完成，v0.1.0 于 2026-11-03 通过 Windows 真机 T0–T4。
+> 当前状态：本文是 WS0 冻结的设计基线。实现状态以 [007 架构](007-architecture.md) 与 [005 面板](005-panel.md) 为准；WS0–WS10 已完成，v0.2.0 于 2026-11-03 通过 Windows 真机 T0–T4 与工作区复验。
 
 ## 1. 产品目标
 
@@ -143,11 +143,11 @@ approved / running ── cancel ─> cancelled
 - **T3**：群内 @ 我全链路，从事件接收、分类、回复到回执。
 - **T4**：端到端任务，从捕获到面板批准、执行、回传；失败路径必须先行演练。
 
-护栏：只允许测试群目标、默认提及限制、自动回复默认关闭、演练模式默认开启；每次放量前检查目标 ID 和回复上限；出现非测试群消息立即停止通道并保留审计。v0.1.0 的 T0–T4 已完成，验收后测试群目标已停用。
+护栏：只允许测试群目标、默认提及限制、自动回复默认关闭、演练模式默认开启；每次放量前检查目标 ID 和回复上限；出现非测试群消息立即停止通道并保留审计。v0.2.0 的 T0–T4 与工作区复验已完成，验收后测试群目标已停用。
 
 ## 10. 版本、PR 与文档同步
 
-- 包版本遵循 SemVer；当前为 `0.1.0`，兼容的 DSH 版本写入 `dsh.compatibility.dshReleases`。
+- 包版本遵循 SemVer；当前为 `0.2.0`，兼容的 DSH 版本写入 `dsh.compatibility.dshReleases`。
 - 分支使用 `feat/...`，提交遵循 Conventional Commits；PR 模板要求目标、方案、影响面、测试证据、风险和文档同步。
 - 任何共享合约变化必须同步：`settings.ts`、`fields.ts`、`api.ts`、`models.ts`、locale、`docs/011-settings-contract.md` 和契约测试。
 - 合并前必须有 `pnpm check`、`node scripts/check-pack.mjs` 和干净工作区；合并与安装到 profile 由人工执行，不由实现代理自动完成。

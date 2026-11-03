@@ -6,7 +6,7 @@
 
 - 本机安装 `dws`（个人授权 CLI）。通道按 **v1.0.66 的 help 契约**实现；其它版本先按第 2 节核对事件键与参数。
 - 个人授权已完成（`dws auth login`），且授权账号就是希望鲸鱼酱代为读取/发言的本人账号。
-- 插件运行在 DSH 宿主进程中，`dws` 必须在宿主继承的 `PATH` 里，或在设置 `dws.binaryPath` 中写成可执行文件的绝对路径。
+- 插件运行在 DSH 宿主进程中。Windows 下通道会自动解析 npm 全局 shim（见 §2.2），也可以把设置 `dws.binaryPath` 写成可执行文件的绝对路径来显式覆盖。
 
 ## 2. 版本与登录检查
 
@@ -46,6 +46,25 @@ dws auth login
 ### 2.1 owner 身份
 
 插件启动订阅前必须知道“本人”的账号 id：宿主调用 `probeAuth()`，把返回的 `userId` 作为 `ownerUserId` 注入通道。没有该值时 `start` 抛 `owner-unknown` 并拒绝订阅——通道不会用群目标 id 回退猜测，否则助手可能把自己的回复当成新消息形成回环。该 id 只用于过滤自己发出的消息，不写日志、不持久化。排障时先确认 `dws auth status --format json` 能返回账号 id 字段（`user_id`/`userId`/`staff_id` 等别名，真机字段名待 T1 确认）。
+
+### 2.2 Windows：npm shim 与 `binaryPath` 覆盖
+
+Windows 上 `npm i -g @dingtalk/dws` 留下的可执行入口是 `%APPDATA%\npm\dws.cmd`，而 DSH 宿主进程的 `PATH` 不一定包含该目录。插件按以下顺序自动解析裸命令 `dws`：
+
+1. `PATH`（兼容 `Path`）中的 `<command>.cmd`、`.exe`、`.bat`、无扩展名原文件；
+2. `%APPDATA%\npm`；
+3. `%ProgramFiles%\nodejs`；
+4. `%LOCALAPPDATA%\Programs\nodejs`（目录存在时）。
+
+命中后使用绝对路径 spawn，并把解析结果写进通道日志与 health（只有路径，没有账号/token）。若非 win32、命令本身含路径分隔符或已带 `.exe|.cmd|.bat|.ps1`，则原样使用。找不到时保留原命令，让错误信息指向配置值。
+
+仍然启动失败时，用绝对路径覆盖：
+
+```text
+设置 → dws.binaryPath = C:\Users\<user>\AppData\Roaming\npm\dws.cmd
+```
+
+先用 `where.exe dws` 确认 shim 的真实位置；若使用非 npm 安装（例如自解压目录），同样把 `binaryPath` 指向那个 `.cmd`/`.exe`。解析失败不会猜测其他候选，也不会读取账号信息。
 
 ## 3. 目标发现与 `--dry-run` 验证
 
@@ -297,6 +316,8 @@ WS5a 起设置与领域状态一起持久化在 SQLite；WS5a 只打开数据库
 | `executor` | `degraded`（unknown，仅 API-only 模式） | 正常插件运行时应为 `ok`；检查两套 preset 是否生效                         |
 
 `dws.available`/`dws.authenticated` 是顶层汇总；`monitor.running` 是真实通道状态。日志不包含消息正文、账号 id 或 token。
+
+Windows 上 `auth` 为 `error` 但终端里 `dws --version` 正常时，先看通道日志里打印的解析后 `dws command`：若它仍是 `dws` 而不是绝对路径，说明宿主 `PATH` 与 npm 目录都没命中，按 §2.2 检查 `where.exe dws` 或直接设置 `dws.binaryPath`。
 
 ### 10.4 单实例与 v1 限制
 

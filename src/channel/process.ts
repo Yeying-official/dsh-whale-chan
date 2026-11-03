@@ -13,6 +13,7 @@
  */
 import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import crossSpawn from 'cross-spawn'
+import { resolveDwsCommand } from './command.ts'
 import { ChannelError } from './errors.ts'
 import { describeError, truncate } from './log.ts'
 import type { CommandResult, CommandRunner } from './types.ts'
@@ -103,6 +104,9 @@ export interface RunOnceOptions {
  */
 export function runOnce(options: RunOnceOptions): Promise<CommandResult> {
   const spawnImpl = options.spawn ?? defaultSpawn
+  // Resolve once for every one-shot invocation; `createRunner` and all callers
+  // (probeAuth, send, discover, validate) share this spawn path.
+  const command = resolveDwsCommand(options.command, options.env ?? process.env)
   const timeoutMs = options.timeoutMs ?? 15_000
   const settleGraceMs = options.graceMs ?? 2_000
   const maxOutput = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES
@@ -111,7 +115,7 @@ export function runOnce(options: RunOnceOptions): Promise<CommandResult> {
   return new Promise<CommandResult>((resolve) => {
     let child: ChildProcess
     try {
-      child = spawnImpl(options.command, args, {
+      child = spawnImpl(command, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
         env: options.env,
@@ -249,6 +253,7 @@ export class DwsProcess {
   readonly #graceMs: number
   readonly #termMs: number
   #child: ChildProcess | undefined
+  #resolvedCommand: string | undefined
   #state: 'idle' | 'running' | 'stopped' | 'orphaned' = 'idle'
   #stopping = false
   #stopPromise: Promise<StopOutcome> | undefined
@@ -267,6 +272,11 @@ export class DwsProcess {
 
   get pid(): number | undefined {
     return this.#child?.pid
+  }
+
+  /** The executable actually spawned (the Windows shim resolved when needed). */
+  get command(): string {
+    return this.#resolvedCommand ?? this.#options.command
   }
 
   get ready(): ReadyInfo | undefined {
@@ -291,7 +301,9 @@ export class DwsProcess {
       throw new ChannelError('invalid-state', 'dws subscription process is already running')
     }
     const spawnImpl = this.#options.spawn ?? defaultSpawn
-    const child = spawnImpl(this.#options.command, this.#args, {
+    const command = resolveDwsCommand(this.#options.command, this.#options.env ?? process.env)
+    this.#resolvedCommand = command
+    const child = spawnImpl(command, this.#args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
       env: this.#options.env,

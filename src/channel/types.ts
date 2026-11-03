@@ -51,6 +51,8 @@ export interface TargetHealth {
   /** Accepted messages waiting for the sink, and lines rejected by normalization. */
   readonly pending: number
   readonly malformed: number
+  /** Executable actually spawned; a Windows shim is resolved here, never a secret. */
+  readonly command?: string
 }
 
 /** Aggregate channel health. */

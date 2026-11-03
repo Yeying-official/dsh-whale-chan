@@ -119,6 +119,8 @@ export interface ResearchOptions {
   readonly cache?: ResearchCache
   /** Injected clock in epoch milliseconds. */
   readonly now?: () => number
+  /** Explicit budget, overriding both the setting and the floor; tests use it. */
+  readonly timeoutMs?: number
 }
 
 function degradedResult(
@@ -143,6 +145,22 @@ function buildResult(query: string, hit: ResearchHit, includeCitations: boolean,
     includeCitations,
     ...(degraded ? { reason: 'empty' as const } : {}),
   }
+}
+
+/**
+ * Lowest budget a retrieval call is given.
+ *
+ * Retrieval is a network call, and the settings default (8s, capped at 20s by
+ * `LIMITS.research.timeoutMs`) is below what a cold provider round trip needs.
+ * The effective budget is `max(settings.timeoutMs, this)`, so raising the
+ * setting still widens it; `ResearchOptions.timeoutMs` overrides both, which is
+ * how tests get a deadline short enough to observe.
+ */
+export const DEFAULT_RESEARCH_TIMEOUT_MS = 30_000
+
+/** The budget actually handed to the port and the deadline. */
+export function researchTimeoutMs(settings: { readonly timeoutMs: number }, override?: number): number {
+  return override ?? Math.max(settings.timeoutMs, DEFAULT_RESEARCH_TIMEOUT_MS)
 }
 
 /**
@@ -171,6 +189,7 @@ export async function research(
   if (normalizedQuery.length === 0) return degradedResult(normalizedQuery, 'empty', includeCitations)
 
   const at = options.now?.() ?? Date.now()
+  const timeoutMs = researchTimeoutMs(settings, options.timeoutMs)
   const ttlMs = settings.cacheMinutes * 60_000
   const cache = options.cache
   const cacheKey = `${settings.maxResults}\u0000${normalizedQuery}`
@@ -181,9 +200,9 @@ export async function research(
   }
 
   const outcome = await withDeadline(
-    (inner) => port.search(normalizedQuery, { limit: settings.maxResults, timeoutMs: settings.timeoutMs }, inner),
+    (inner) => port.search(normalizedQuery, { limit: settings.maxResults, timeoutMs }, inner),
     signal,
-    settings.timeoutMs,
+    timeoutMs,
   )
   if (!outcome.ok) {
     const reason: ResearchFailureReason =

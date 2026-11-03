@@ -32,8 +32,8 @@ import type {
 /** Below this confidence the classifier is treated as undecided. */
 export const DEFAULT_MIN_CONFIDENCE = 0.55
 
-/** Wall-clock budget for one classification call. */
-export const DEFAULT_CLASSIFY_TIMEOUT_MS = 15_000
+/** Wall-clock budget for one classification call; a real first call can take 15–40s. */
+export const DEFAULT_CLASSIFY_TIMEOUT_MS = 60_000
 
 /** Response budget hint: the contract fits well inside this. */
 export const CLASSIFY_MAX_RESPONSE_CHARS = 800

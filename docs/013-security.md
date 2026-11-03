@@ -1,6 +1,6 @@
 # 013 安全基线
 
-> 状态：**v1 安全基线（2026-11-03）**。随 WS8 真机验收更新；实现或威胁模型变化时，先改本文与对应测试，再改代码。
+> 状态：**v1.0 安全基线（2026-11-03）**，WS8 Windows 真机 T0–T4 已完成。实现或威胁模型变化时，先改本文与对应测试，再改代码。
 >
 > 范围：`dsh-whale-chan-assistant` 插件本身的授权、发送、任务、数据与事件响应。DSH 宿主、`dws` 供应链、钉钉服务端与操作系统安全不在本文保证范围内，只在“明确不防御”一节列出。
 
@@ -38,21 +38,22 @@
 
 ## 2. 控制
 
-| 控制         | 实现                                                                                                           | 证据/位置                                                                   |
-| ------------ | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| 单实例       | 启动先获取 `<stateDir>/.lock`；第二个实例直接失败，不排队重试；stale 10 秒                                     | `src/app/runtime.ts`、`tests/runtime-lock.spec.ts`                          |
-| 状态目录权限 | 以 `mode: 0o700` 创建（POSIX；Windows 由用户目录 ACL 约束）；数据库、WAL、锁都在该目录                         | `src/app/runtime.ts`、`docs/006-deployment.md` §9                           |
-| 日志脱敏     | 默认不含消息正文、token、账号 id、clientSecret、完整 payload；调试摘要只输出字段名与白名单截断值               | `docs/009-dws-protocol.md` §4.4、`tests/channel-log.spec.ts`                |
-| 幂等与未知态 | 每条 Outbound 唯一 `idempotencyKey`；退出 0 无回执/超时/无法分类记 `unknown`，终态不自动重发                   | `docs/009` §5、`tests/core-outbound.spec.ts`、`tests/pipeline-chat.spec.ts` |
-| 人工批准     | 领域只给 `awaiting-approval` 且 Approval `pending` 的任务建派工；执行器建会话前再查 task/approval/assignment   | `docs/003` §2、`tests/pipeline-task.spec.ts`、`tests/executor-task.spec.ts` |
-| 工作区与权限 | 工作区必须是绝对路径；回退 `taskId` 拒绝 `/`、`\`、`..`；worker 权限只接受两个预设，其它值按 `workspace-write` | `docs/003` §5、`docs/006` §5.2、`tests/executor-task.spec.ts`               |
-| AI 角标      | 发送命令固定追加 `--ai-tag`，代码追加，模型输出无法移除或伪造                                                  | `docs/009` §5、`tests/channel-send.spec.ts`                                 |
-| 提示注入边界 | 消息/引用/检索结果是数据；分类器只接受严格 JSON；回复删除身份声明、凭证脱敏、URL 白名单、系统提示回声弃稿      | `docs/004` §5/§8、`prompts/safety.md`、`tests/brain-*.spec.ts`              |
-| 发送者名单   | `blockedSenders` 优先；`allowedSenders` 非空时只允许名单内 userId；只做去空白后的全等匹配，不按昵称            | `docs/002` §6、`tests/brain-policy.spec.ts`                                 |
-| 同源 API     | 所有管理请求要求 `x-whale-chan-request: 1`；服务不发送 CORS 允许头，跨源页面无法伪造                           | `src/shared/api.ts`、`tests/api-routes.spec.ts`                             |
-| 失败关闭     | 模板缺失/空白、授权缺失、状态目录不可写、数据库版本更高时，不启动订阅或任务                                    | `docs/006` §10、`tests/runtime-pipeline.spec.ts`                            |
-| 演练         | `advanced.dryRun` 下发送返回 `skipped`，不 spawn、不改 Outbound 状态                                           | `docs/006` §6、`tests/channel-send.spec.ts`                                 |
-| 媒体         | v1 没有附件字段；纯媒体事件按 `unsupported` 跳过，state.db 不保存媒体原文件                                    | `docs/009` §4.3                                                             |
+| 控制         | 实现                                                                                                           | 证据/位置                                                                        |
+| ------------ | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| 单实例       | 启动先获取 `<stateDir>/.lock`；第二个实例直接失败，不排队重试；stale 10 秒                                     | `src/app/runtime.ts`、`tests/runtime-lock.spec.ts`                               |
+| 状态目录权限 | 以 `mode: 0o700` 创建（POSIX；Windows 由用户目录 ACL 约束）；数据库、WAL、锁都在该目录                         | `src/app/runtime.ts`、`docs/006-deployment.md` §9                                |
+| 日志脱敏     | 默认不含消息正文、token、账号 id、clientSecret、完整 payload；调试摘要只输出字段名与白名单截断值               | `docs/009-dws-protocol.md` §4.4、`tests/channel-log.spec.ts`                     |
+| 幂等与未知态 | 每条 Outbound 唯一 `idempotencyKey`；退出 0 无回执/超时/无法分类记 `unknown`，终态不自动重发                   | `docs/009` §5、`tests/core-outbound.spec.ts`、`tests/pipeline-chat.spec.ts`      |
+| 人工批准     | 领域只给 `awaiting-approval` 且 Approval `pending` 的任务建派工；执行器建会话前再查 task/approval/assignment   | `docs/003` §2、`tests/pipeline-task.spec.ts`、`tests/executor-task.spec.ts`      |
+| 工作区与权限 | 工作区必须是绝对路径；回退 `taskId` 拒绝 `/`、`\`、`..`；worker 权限只接受两个预设，其它值按 `workspace-write` | `docs/003` §5、`docs/006` §5.2、`tests/executor-task.spec.ts`                    |
+| AI 角标      | 发送命令固定追加 `--ai-tag`，代码追加，模型输出无法移除或伪造                                                  | `docs/009` §5、`tests/channel-send.spec.ts`                                      |
+| 结果文本脱敏 | 任务结果只保留标题与摘要，不输出内部路由、工具名、会话 ID、工作区路径；worker prompt 与结果模板双重约束        | `src/executor/task.ts`、`src/app/effects-task.ts`、`tests/pipeline-task.spec.ts` |
+| 提示注入边界 | 消息/引用/检索结果是数据；分类器只接受严格 JSON；回复删除身份声明、凭证脱敏、URL 白名单、系统提示回声弃稿      | `docs/004` §5/§8、`prompts/safety.md`、`tests/brain-*.spec.ts`                   |
+| 发送者名单   | `blockedSenders` 优先；`allowedSenders` 非空时只允许名单内 userId；只做去空白后的全等匹配，不按昵称            | `docs/002` §6、`tests/brain-policy.spec.ts`                                      |
+| 同源 API     | 所有管理请求要求 `x-whale-chan-request: 1`；服务不发送 CORS 允许头，跨源页面无法伪造                           | `src/shared/api.ts`、`tests/api-routes.spec.ts`                                  |
+| 失败关闭     | 模板缺失/空白、授权缺失、状态目录不可写、数据库版本更高时，不启动订阅或任务                                    | `docs/006` §10、`tests/runtime-pipeline.spec.ts`                                 |
+| 演练         | `advanced.dryRun` 下发送返回 `skipped`，不 spawn、不改 Outbound 状态                                           | `docs/006` §6、`tests/channel-send.spec.ts`                                      |
+| 媒体         | v1 没有附件字段；纯媒体事件按 `unsupported` 跳过，state.db 不保存媒体原文件                                    | `docs/009` §4.3                                                                  |
 
 ## 3. 明确不防御
 
@@ -108,9 +109,10 @@
 - 备份 `stateDir` 与设置；升级前先备份，降级时不要用新 schema 的库打开旧插件。
 - 不在不受控的共用电脑上登录 `dws`；离开时锁屏。
 
-## 7. 已知缺口（WS8 更新）
+## 7. 已知缺口（v0.1.0）
 
-- 真机尚未验证 `dws auth logout` 后的通道行为、Windows 关闭 stdin 的优雅退出，以及 `unknown` 回执的人工对账流程。
+- 真机 T0–T4 未覆盖 `dws auth logout` 后的通道行为、Windows 关闭 stdin 的优雅退出，以及 `unknown` 回执的人工对账流程。
+- 单聊 o2o 链路未真机触发；群事件与群发送已真机确认，单聊仍按同一策略与归一化路径处理。
 - `advanced.auditRetentionDays` 没有自动清理实现；v1 的审计/消息是只增的。
 - 没有应用层数据库加密；依赖 OS 账户与磁盘加密。
 - 没有对 `dws` 可执行文件做签名/哈希校验；只做路径解析与 `binaryPath` 覆盖。

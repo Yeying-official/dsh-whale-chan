@@ -1,22 +1,23 @@
 # 兼容矩阵
 
-> 适用范围：`dsh-whale-chan-assistant` `0.1.0-dev.0`（WS0–WS6 已合并，WS8 真机验收未完成）。
+> 适用范围：`dsh-whale-chan-assistant` `0.1.0`（WS0–WS8 完成，Windows 真机 T0–T4 通过）。
 > 最后核对：2026-11-03（Asia/Shanghai）。
 >
-> **权威顺序**：`package.json` 的 `dsh.compatibility` 与 WS8 的 T0–T3 记录 > 本文 > 其它说明。本文中的“已验证”只表示在本机 Windows 环境实际跑过，不表示在所有同版本环境都成立。
+> **权威顺序**：`package.json` 的 `dsh.compatibility` 与 WS8 的 T0–T4 记录 > 本文 > 其它说明。本文中的“已验证”只表示在本机 Windows 环境实际跑过，不表示在所有同版本环境都成立。
 
 ## 1. 结论
 
-| 组件          | 已验证                                                        | 状态                                               |
-| ------------- | ------------------------------------------------------------- | -------------------------------------------------- |
-| DSH Desktop   | `0.2.1-rc.5`（Windows x64）                                   | **compatible**，`dsh.compatibility` 正式声明       |
-| DSH 其它版本  | 无                                                            | 未验证；不要假设向前/向后兼容                      |
-| `dws`         | `1.0.66`（`f215043e`，2026-10-28）                            | 通道按该版本 help 契约实现；字段名部分 provisional |
-| Windows       | 10/11                                                         | 已实测（开发机与桌面端）                           |
-| macOS / Linux | 无                                                            | **未验证**，不作为支持承诺                         |
-| Node.js       | 24.15.0（开发）、24.21.0（DSH Desktop 自带）                  | 已实测；`engines` 允许 `^22.19.0 \|\| >=24.0.0`    |
-| 单实例        | 同一 `stateDir` 一个进程                                      | 已实现并由测试覆盖；崩溃后锁 stale 10 秒           |
-| 模型路由      | 宿主默认；或按回复器/执行器分别指定 provider + model + effort | 代码路径已测；未逐一验证所有 provider              |
+| 组件          | 已验证                                                        | 状态                                                            |
+| ------------- | ------------------------------------------------------------- | --------------------------------------------------------------- |
+| DSH Desktop   | `0.2.1-rc.5`（Windows x64）                                   | **compatible**，`dsh.compatibility` 正式声明                    |
+| DSH 其它版本  | 无                                                            | 未验证；不要假设向前/向后兼容                                   |
+| `dws`         | `1.0.66`（`f215043e`，2026-10-28）                            | 群事件/发送回执已真机确认；单聊与其它版本仍 provisional         |
+| Windows       | 10/11                                                         | 已实测（开发机与桌面端）                                        |
+| 真机验收      | T0–T4（Windows 10/11、DSH `0.2.1-rc.5`、`dws` `1.0.66`）      | 通过；测试群目标已停用，见 [WS8 报告](test-reports/WS8-live.md) |
+| macOS / Linux | 无                                                            | **未验证**，不作为支持承诺                                      |
+| Node.js       | 24.15.0（开发）、24.21.0（DSH Desktop 自带）                  | 已实测；`engines` 允许 `^22.19.0 \|\| >=24.0.0`                 |
+| 单实例        | 同一 `stateDir` 一个进程                                      | 已实现并由测试覆盖；崩溃后锁 stale 10 秒                        |
+| 模型路由      | 宿主默认；或按回复器/执行器分别指定 provider + model + effort | 代码路径已测；未逐一验证所有 provider                           |
 
 ## 2. DSH 版本
 
@@ -37,7 +38,7 @@
 
 1. 在干净 profile（非生产状态目录）安装同版本插件；
 2. 跑 `pnpm check` 与 `node scripts/check-pack.mjs`；
-3. 按 [012 发布](012-release.md) 的 T0–T3 重新验收；
+3. 按 [012 发布](012-release.md) 的 T0–T4 重新验收；
 4. 确认 `state.db` schema 没有被新宿主改写；降级时不要用新库打开旧插件。
 
 ## 3. `dws` 版本
@@ -48,17 +49,14 @@
 | 其它 1.0.x | ⚠️ provisional | 解析器对 snake_case / camelCase 做别名兼容，但字段集合、回执字段与 `--ttl` 语义未逐版验证；先跑 T1 只读观察       |
 | 更早版本   | ❌ 未验证      | 事件键或 `--ai-tag`/`--idempotency-key` 可能不存在；不要降级后直接订阅                                            |
 
-实现按 **v1.0.66 的 help 契约**编写，以下内容仍是 provisional，真机 T1/T2 必须逐项核对（详见 [009 DWS 协议](009-dws-protocol.md) §9）：
+WS8 已在 Windows + `1.0.66` 上确认：群事件键与 snake_case 扁平字段（`message_id`、`conversation_id`、`sender_open_dingtalk_id`、`content`、`event_time`、`create_time`）、`@ownerNick` 文本判定、`+chat-search`、`--ttl` 需 Go duration、非交互发送需 `--yes`、`openMessageId`/`deliveryStatus` 回执，以及重复幂等键返回 `CONFLICT_ERROR` 时按 `unknown` 处理。以下内容仍 provisional，真机 T1/T2 必须逐项核对（详见 [009 DWS 协议](009-dws-protocol.md) §9）：
 
-- 三个 `user_im_message_receive_*` 事件键在登录态下的实际可用性；
-- NDJSON 原始字段名（`senderStaffId`、`conversationType`、`atUsers` 元素结构、`createAt` 单位、会话标题字段）；
-- `+chat-list --types p2p` 的响应结构与分页；
-- `auth status --format json` 的账号 id 字段别名与过期时间格式；
-- `+messages-send` 的成功回执字段与 `--wait-delivery` 行为；
+- 单聊（o2o）事件链路，以及 `+chat-list --types p2p` 的响应结构与分页；
+- `auth status --format json` 的账号 id 字段别名与过期时间格式（T0 只用 `user_name` 做 ownerNick）；
 - Windows 上关闭 stdin 能否优雅结束订阅，以及 `event stop <id> --yes` 的实际语法；
-- `--ttl` 的单位与补跑窗口语义；
 - `--profile` 在 `event consume` / `auth status` / `send` 上的位置；
-- 群目标“订阅全部消息 + 本地 mention 过滤”的权限前提。
+- 群目标“订阅全部消息 + 本地 mention 过滤”的权限前提；
+- 群事件不含 `staffId`/`atUsers`/`conversationType`/`title`；发送者白名单在群场景需按 `sender_open_dingtalk_id` 配置。
 
 ## 4. 操作系统与运行时
 

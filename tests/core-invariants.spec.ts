@@ -359,6 +359,9 @@ describe('user error categories', () => {
       assignmentNotPending: 'refused',
       assignmentNotRunning: 'refused',
       outboundMissing: 'refused',
+      emptyOutbound: 'invalid',
+      emptyIdempotencyKey: 'invalid',
+      outboundTargetMismatch: 'invalid',
       invalidTime: 'invalid',
     }
     const actual = Object.fromEntries(Object.entries(USER_ERRORS).map(([code, [category]]) => [code, category]))

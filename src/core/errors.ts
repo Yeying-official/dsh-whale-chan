@@ -25,6 +25,14 @@ export const USER_ERRORS = {
   missingTaskDetail: ['refused', 'A task decision needs the captured task title'],
   missingApprovalTtl: ['refused', 'A task decision needs a positive approval TTL'],
   missingWorkspace: ['refused', 'Approving a task needs the workspace its assignment runs in'],
+  /**
+   * The workspace named at approval time is not an absolute path.
+   *
+   * It is a user-correctable input error, not an internal one: the panel must
+   * ask the owner for another directory instead of reporting a bug, and the API
+   * maps it like every other refusal the owner can act on.
+   */
+  invalidWorkspace: ['refused', 'The approved workspace must be an absolute path'],
   alreadyDecided: ['refused', 'The task approval was already decided'],
   approvalExpired: ['refused', 'The task approval expired; the task must expire instead of running'],
   notAwaitingApproval: ['refused', 'The task is not awaiting approval'],

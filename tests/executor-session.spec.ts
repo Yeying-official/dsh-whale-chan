@@ -1,0 +1,215 @@
+/**
+ * The turn-boundary matcher and the wait around it.
+ *
+ * `DshSessionHost.awaitTurnEnd` is these two pieces plus a `ctx.on(
+ * 'session/event')` subscription, so this file verifies the behaviour that
+ * matters — matching the right turn, surviving a turn that ended before the
+ * subscription, closing the subscribe/scan race, the timeout and the abort —
+ * against a fake event source instead of a live DSH session.
+ *
+ * The DSH adapter itself (`DshSessionHost`) is verified by the type checker
+ * against the shipped `@deepseek-ai/*` declarations; every call it makes is
+ * recorded with its signature in `docs/test-reports/WS4.md`, because a real
+ * session cannot be created in a unit test without starting a model call.
+ */
+import { describe, expect, it } from 'vitest'
+import { TurnTracker, awaitTurn, type TrackedSessionEvent } from '../src/executor/index.ts'
+
+function start(turn: number): TrackedSessionEvent {
+  return { type: 'turn/start', data: { turn } }
+}
+
+function end(turn: number, kind = 'completed', cause?: string): TrackedSessionEvent {
+  return {
+    type: 'turn/end',
+    data: { turn, reason: cause === undefined ? { kind } : { kind, reason: { kind: cause } } },
+  }
+}
+
+function userMessage(id: string): TrackedSessionEvent {
+  return { type: 'user/message', data: { id } }
+}
+
+/** A fake session event source: durable history plus live subscription. */
+class FakeEventLog {
+  readonly events: TrackedSessionEvent[] = []
+  unsubscribed = 0
+  /** Called synchronously when a listener subscribes, which reproduces the subscribe/scan race. */
+  onSubscribe: (() => void) | undefined
+  private readonly listeners = new Set<(event: TrackedSessionEvent) => void>()
+
+  history(): readonly TrackedSessionEvent[] {
+    return [...this.events]
+  }
+
+  readonly subscribe = (listener: (event: TrackedSessionEvent) => void): (() => void) => {
+    this.listeners.add(listener)
+    const onSubscribe = this.onSubscribe
+    this.onSubscribe = undefined
+    onSubscribe?.()
+    return () => {
+      this.listeners.delete(listener)
+      this.unsubscribed += 1
+    }
+  }
+
+  push(event: TrackedSessionEvent): void {
+    this.events.push(event)
+    for (const listener of [...this.listeners]) listener(event)
+  }
+}
+
+describe('TurnTracker', () => {
+  it('settles on the turn end of the turn that carried the delivery', () => {
+    const tracker = new TurnTracker(
+      [start(1), end(1), start(2), userMessage('dsh-whale-chan:task:task-1'), start(3), end(3)],
+      'dsh-whale-chan:task:task-1',
+    )
+    // The message was recorded inside turn 2; the turn 3 end is somebody else's turn.
+    expect(tracker.settled).toBe(false)
+    expect(tracker.observe(end(2))).toBe(true)
+    expect(tracker.settled).toBe(true)
+    expect(tracker.outcome()).toEqual({ status: 'completed' })
+  })
+
+  it('ignores a turn end that arrives before the delivery was claimed', () => {
+    const tracker = new TurnTracker([start(1), end(1)], 'dsh-whale-chan:task:task-1')
+    expect(tracker.observe(end(2))).toBe(false)
+    expect(tracker.observe(start(2))).toBe(false)
+    expect(tracker.observe(userMessage('dsh-whale-chan:task:task-1'))).toBe(false)
+    expect(tracker.turn).toBe(2)
+    expect(tracker.observe(end(2))).toBe(true)
+  })
+
+  it('is settled when the history already ends the turn', () => {
+    const tracker = new TurnTracker(
+      [start(1), userMessage('dsh-whale-chan:task:task-1'), end(1)],
+      'dsh-whale-chan:task:task-1',
+    )
+    expect(tracker.settled).toBe(true)
+    expect(tracker.outcome()).toEqual({ status: 'completed' })
+  })
+
+  it('reports an aborted turn as a failure with its cancellation cause', () => {
+    const tracker = new TurnTracker([start(1), userMessage('id'), end(1, 'aborted', 'hook')], 'id')
+    expect(tracker.outcome()).toEqual({ status: 'failed', detail: 'aborted by hook' })
+  })
+
+  it('reports a failed turn as a failure with its reason kind', () => {
+    const tracker = new TurnTracker([start(1), userMessage('id'), end(1, 'failed')], 'id')
+    expect(tracker.outcome()).toEqual({ status: 'failed', detail: 'failed' })
+  })
+
+  it('waits for the next observed turn end when no request id is given', () => {
+    const tracker = new TurnTracker([start(1), end(1)])
+    expect(tracker.settled).toBe(false)
+    expect(tracker.observe(end(2))).toBe(true)
+  })
+})
+
+describe('awaitTurn', () => {
+  it('resolves on the live turn end that belongs to the delivery', async () => {
+    const log = new FakeEventLog()
+    log.events.push(start(1))
+    const waiting = awaitTurn({
+      history: log.history(),
+      subscribe: log.subscribe,
+      requestId: 'msg-1',
+      timeoutMs: 1_000,
+      signal: new AbortController().signal,
+    })
+    log.push(start(1))
+    log.push(userMessage('other'))
+    log.push(start(1))
+    log.push(userMessage('msg-1'))
+    log.push(end(1))
+    expect(await waiting).toEqual({ status: 'completed' })
+  })
+
+  it('returns immediately when the turn already ended before the subscription', async () => {
+    const log = new FakeEventLog()
+    log.events.push(start(1), userMessage('msg-1'), end(1))
+    const outcome = await awaitTurn({
+      history: log.history(),
+      subscribe: log.subscribe,
+      requestId: 'msg-1',
+      timeoutMs: 1_000,
+      signal: new AbortController().signal,
+    })
+    expect(outcome).toEqual({ status: 'completed' })
+    expect(log.unsubscribed).toBe(1)
+  })
+
+  it('replays an event that arrived between subscribing and scanning the history', async () => {
+    const log = new FakeEventLog()
+    log.events.push(start(1), userMessage('msg-1'))
+    log.onSubscribe = () => log.push(end(1))
+    const outcome = await awaitTurn({
+      history: log.history(),
+      subscribe: log.subscribe,
+      requestId: 'msg-1',
+      timeoutMs: 1_000,
+      signal: new AbortController().signal,
+    })
+    expect(outcome).toEqual({ status: 'completed' })
+  })
+
+  it('reports a timeout when the turn never ends', async () => {
+    const log = new FakeEventLog()
+    log.events.push(start(1), userMessage('msg-1'))
+    const outcome = await awaitTurn({
+      history: log.history(),
+      subscribe: log.subscribe,
+      requestId: 'msg-1',
+      timeoutMs: 20,
+      signal: new AbortController().signal,
+    })
+    expect(outcome).toEqual({ status: 'timeout' })
+    expect(log.unsubscribed).toBe(1)
+  })
+
+  it('reports an abort and unsubscribes', async () => {
+    const log = new FakeEventLog()
+    log.events.push(start(1), userMessage('msg-1'))
+    const controller = new AbortController()
+    const waiting = awaitTurn({
+      history: log.history(),
+      subscribe: log.subscribe,
+      requestId: 'msg-1',
+      timeoutMs: 10_000,
+      signal: controller.signal,
+    })
+    controller.abort()
+    expect(await waiting).toEqual({ status: 'aborted' })
+    expect(log.unsubscribed).toBe(1)
+  })
+
+  it('does not subscribe when the signal is already aborted', async () => {
+    const log = new FakeEventLog()
+    const controller = new AbortController()
+    controller.abort()
+    const outcome = await awaitTurn({
+      history: [],
+      subscribe: log.subscribe,
+      timeoutMs: 10_000,
+      signal: controller.signal,
+    })
+    expect(outcome).toEqual({ status: 'aborted' })
+    expect(log.unsubscribed).toBe(0)
+  })
+
+  it('ignores unrelated event types', async () => {
+    const log = new FakeEventLog()
+    log.events.push(start(1), userMessage('msg-1'))
+    const waiting = awaitTurn({
+      history: log.history(),
+      subscribe: log.subscribe,
+      requestId: 'msg-1',
+      timeoutMs: 20,
+      signal: new AbortController().signal,
+    })
+    log.push({ type: 'assistant/message', data: { turn: 1, step: 1 } })
+    log.push({ type: 'tool/call', data: { turn: 1, step: 1 } })
+    expect(await waiting).toEqual({ status: 'timeout' })
+  })
+})

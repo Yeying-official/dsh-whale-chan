@@ -123,15 +123,18 @@ bundle 在 `cordis.patch.yml` 里声明两个 `@deepseek-ai/dsh-agent-preset` �
 
 ### 5.1 目录
 
-| 路径                               | 内容                                                           |
-| ---------------------------------- | -------------------------------------------------------------- |
-| `~/.dsh-whale-chan/state.db`       | 领域状态、审计事件、effect 队列                                |
-| `~/.dsh-whale-chan/tasks/<taskId>` | 一个任务的 worker 工作区（`tasks.workspaceRoot` 可覆盖根目录） |
-| `~/.dsh-whale-chan/workspace`      | 回复器会话共用工作区（不写业务文件）                           |
+| 路径                               | 内容                                                       |
+| ---------------------------------- | ---------------------------------------------------------- |
+| `~/.dsh-whale-chan/state.db`       | 领域状态、审计事件、effect 队列                            |
+| 批准人选择的目录                   | 任务工作区（`Assignment.workspace`，**优先**）             |
+| `~/.dsh-whale-chan/tasks/<taskId>` | 没有选择目录时的回退（`tasks.workspaceRoot` 可覆盖根目录） |
+| `~/.dsh-whale-chan/workspace`      | 回复器会话共用工作区（不写业务文件）                       |
 
+- **工作区以批准为准**：批准任务时主人选的目录就是 worker 的目录；设置里的 `tasks.workspaceRoot` 只是「批准时没选目录」的默认值。相对路径会被拒绝（`invalidWorkspace`），因为 DSH 会按宿主工作目录解析它，主人无法预测文件落在哪里。
 - 工作区目录在会话创建**之前**用 `mkdir -p` 建好：DSH 的 `workspaceRegistry.create` 只接受已存在的目录，不存在的路径会被拒绝。
-- `taskId` 必须是单一安全路径段；含 `/`、`\` 或 `..` 的 id 会被执行器拒绝，不会写到根目录之外。
-- 任务会话 id 是 `whale-task-<taskId>`，回复器会话 id 是 `whale-reply-<sha1(threadKey) 前 12>`；这两类会话会出现在 DSH 的会话列表里，标题分别是 `任务 · <标题>` 与 `钉钉 · <会话标题>`。
+- 回退路径里的 `taskId` 必须是单一安全路径段；含 `/`、`\` 或 `..` 的 id 会被执行器拒绝，不会写到根目录之外。
+- 任务会话 id 是 `whale-task-<taskId>-<派工后缀>`（同一任务的每次派工都是一个新会话），回复器会话 id 是 `whale-reply-<sha1(threadKey) 前 12>`；这两类会话会出现在 DSH 的会话列表里，标题分别是 `任务 · <标题>` 与 `钉钉 · <会话标题>`。
+- 模型来自设置：worker 用 `models.worker`，回复器用 `models.reply`；两者都为空时用部署默认模型，且**不会**修改 DSH 的全局默认模型。
 
 ### 5.2 权限
 
@@ -153,6 +156,18 @@ bundle 在 `cordis.patch.yml` 里声明两个 `@deepseek-ai/dsh-agent-preset` �
 | `permissionPresets.set` 抛「unknown preset」                | 部署的 preset 名单里没有 `workspace-write`               | 检查 DSH 的权限 preset 配置；本插件只使用这两个名字                                                                             |
 
 `SessionModel` 侧的失败对回复路径表现为「模型错误」，不是任务失败：它会抛 `ModelTimeoutError` / `ModelFailedError` / `ModelAbortedError`，由调用方决定降级为「不回复」还是「回复但说明」。
+
+### 5.4 真机会话冒烟（WS8 执行）
+
+单元测试用 fake host 覆盖执行器逻辑，`DshSessionHost` 的真实行为需要一次真机冒烟。它**不发模型请求**，因此不消耗模型配额，只消耗宿主的会话与文件资源：
+
+1. 在面板批准一个测试任务（标题与说明写清「冒烟，不要改文件」），确认工作区目录已创建。
+2. 在 DSH 会话列表里确认出现 `whale-task-<taskId>-<后缀>`，标题为 `任务 · <标题>`；打开它检查系统提示里有主人的人设段落与安全规则。
+3. 观察任务消息是否只出现一次；不要让它跑到模型调用（若已开始，直接执行第 4 步）。
+4. 在面板取消该任务。预期：任务进入 `cancelled`，执行器调用 `agent.cancel(..., { keepInbox: false })`，会话的当前回合作废，队列被清空。
+5. 在 DSH 日志里确认取消后该会话没有新的 `turn/end`（除取消自身产生的那一次），也没有第二条 `user/message`。
+
+会消耗模型配额的变体（可选）：批准一个「只读一次工作区并列目录」的小任务，让它跑完一个回合，确认 `assignmentEnded` 收到 `succeeded` 且 `result.summary` 是 worker 自己的话。
 
 ## 6. 退出码与进程状态
 
@@ -178,7 +193,16 @@ bundle 在 `cordis.patch.yml` 里声明两个 `@deepseek-ai/dsh-agent-preset` �
 - `dws.debug` 或 `advanced.debugPayloads` 打开后，也只输出字段名与白名单结构字段的截断值（见 [009 DWS 协议](009-dws-protocol.md) §4.4）。
 - 审计与状态目录、备份策略、profile 隔离随 WS5/WS7 落地；本工作流不写 `~/.dsh`。
 
-## 8. 尚未覆盖（WS7）
+## 8. 已知限制与尚未覆盖
+
+已知限制（WS4 实现方式决定，不是缺陷）：
+
+- **没有关闭会话的公开 API**：DSH 的 `ctx.agents` 只有 `get/list/roots/create/resume/register`，没有销毁入口。回复器「重建」因此是：取消旧会话当前回合 → 不再引用它 → 用同一身份再 `create`，由 DSH 另发一个 sessionId（执行器采纳返回值）。旧会话作为历史留在 DSH 里，不会消失。
+- 任务重试是**新会话**（会话 id 带派工后缀），上一次的结论只通过任务消息里的「上一轮结果（供参考）」传给 worker。
+- 模型路由只在会话首次创建时写入；之后主人在面板里改的模型优先，插件不会覆盖。
+- 执行器没有全局并发上限，`tasks.maxConcurrent` 由 WS5 的调度层执行。
+
+尚未覆盖（WS7）：
 
 - bundle 安装/升级/卸载与 profile 隔离；
 - 状态目录、日志轮转、审计保留策略；

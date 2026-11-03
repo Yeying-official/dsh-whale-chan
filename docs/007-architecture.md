@@ -166,8 +166,11 @@ brain 不开 socket、不 spawn 进程、不 import DSH 包：所有外部能力
 | `DshTaskExecutor`                                                             | worker 会话生命周期、系统提示、超时/取消、结果映射                                                 |
 | `SessionModel`（`implements ModelPort`）                                      | 每个会话线程一个 replier 会话，串行、限轮、限时、限长                                              |
 | `DshResearch`（`implements ResearchPort`）                                    | `ctx.web.search` 适配，空结果/异常/中止一律降级为空                                                |
+| `seedRoleModel` / `routeSelection`                                            | 把 `settings.models.*` 播种到新会话（`model/selection` + 首次请求注入），不改全局默认              |
 
 执行器不写领域存储、不发钉钉消息；它把任务结果交给 app，由 app 写 `assignmentEnded` 并把摘要转成 Outbound。
+
+执行器也**不从 `src/index.ts` 导出**：宿主入口保持零执行器副作用（不会把 `@deepseek-ai/dsh-llm`、`dsh-session` 拉进插件模块图），由 WS5 的组合根显式 import `src/executor/index.ts`。
 
 ### 6.4 outbox（跨层）
 
@@ -191,21 +194,22 @@ brain 不开 socket、不 spawn 进程、不 import DSH 包：所有外部能力
 
 ## 8. 测试索引
 
-| 文件                              | 覆盖                                                                  |
-| --------------------------------- | --------------------------------------------------------------------- |
-| `tests/core-engine.spec.ts`       | 领域命令、事件、会话绑定与标题（23 条）                               |
-| `tests/core-invariants.spec.ts`   | 10 条硬不变量 + 中途失败回滚 + 迟到批准 + 偏移时间与非法时间（15 条） |
-| `tests/store.spec.ts`             | 打开/迁移/索引/往返/回滚/唯一约束/损坏 JSON/分页/裁剪/KV（13 条）     |
-| `tests/effects.spec.ts`           | 顺序、并发、覆盖、运行中重排、退避、上限、Later、dead、drain（10 条） |
-| `tests/passes.spec.ts`            | 间隔、runAtStart、单飞、异常隔离、stop、重复注册（6 条）              |
-| `tests/channel-*.spec.ts`         | dws 参数、解码、发送结果、重启退避、目标发现与授权（WS2）             |
-| `tests/brain-*.spec.ts`           | 分类、闸门、回复清洗、检索预算、人设与提示（WS3）                     |
-| `tests/executor-task.spec.ts`     | 批准门、工作区、会话参数、四种结局、回调次数、并发（23 条）           |
-| `tests/executor-model.spec.ts`    | 提示组装与截断、串行、轮数/空闲重建、超时与异常、dispose（17 条）     |
-| `tests/executor-research.spec.ts` | 映射、上限、非 http(s) 过滤、空结果、异常与中止降级（10 条）          |
-| `tests/executor-session.spec.ts`  | 回合匹配、订阅/扫描竞态、超时、中止（13 条）                          |
-| `tests/presets.spec.ts`           | 宿主行仍在、两套 preset 的字段与工具集、无重复 id（15 条）            |
-| `tests/contract.spec.ts`          | 分层依赖规则、共享合约、文档数量                                      |
+| 文件                                | 覆盖                                                                              |
+| ----------------------------------- | --------------------------------------------------------------------------------- |
+| `tests/core-engine.spec.ts`         | 领域命令、事件、会话绑定与标题（23 条）                                           |
+| `tests/core-invariants.spec.ts`     | 10 条硬不变量 + 中途失败回滚 + 迟到批准 + 偏移时间与非法时间（15 条）             |
+| `tests/store.spec.ts`               | 打开/迁移/索引/往返/回滚/唯一约束/损坏 JSON/分页/裁剪/KV（13 条）                 |
+| `tests/effects.spec.ts`             | 顺序、并发、覆盖、运行中重排、退避、上限、Later、dead、drain（10 条）             |
+| `tests/passes.spec.ts`              | 间隔、runAtStart、单飞、异常隔离、stop、重复注册（6 条）                          |
+| `tests/channel-*.spec.ts`           | dws 参数、解码、发送结果、重启退避、目标发现与授权（WS2）                         |
+| `tests/brain-*.spec.ts`             | 分类、闸门、回复清洗、检索预算、人设与提示（WS3）                                 |
+| `tests/executor-task.spec.ts`       | 批准门、工作区（批准目录优先）、模型路由、四种结局、回调次数、并发、重试（28 条） |
+| `tests/executor-model.spec.ts`      | 提示组装与截断、串行、模型路由、轮数/空闲重建、超时与异常、dispose（19 条）       |
+| `tests/executor-research.spec.ts`   | 映射、上限、非 http(s) 过滤、空结果、异常与中止降级（10 条）                      |
+| `tests/executor-session.spec.ts`    | 回合匹配、订阅/扫描竞态、超时、中止（13 条）                                      |
+| `tests/executor-role-model.spec.ts` | 模型路由映射、空配置不注入、已有选择不覆盖、解析失败回退（12 条）                 |
+| `tests/presets.spec.ts`             | 宿主行仍在、两套 preset 的字段与工具集、中性人设前缀、无重复 id（17 条）          |
+| `tests/contract.spec.ts`            | 分层依赖规则、共享合约、文档数量                                                  |
 
 ## 相关文档
 

@@ -1,7 +1,7 @@
 # WS4 · 任务执行器、回复器会话与 agent preset
 
 - 分支：`feat/ws4-executor`（从 `main` `6fcacb0` 创建）
-- 范围：`src/executor/**`、`src/index.ts`（仅新增一条 `export *`）、`cordis.patch.yml`（追加两套 preset）、
+- 范围：`src/executor/**`（新增；`src/index.ts` 不改）、`cordis.patch.yml`（追加两套 preset）、
   `package.json`（新增 devDependency `yaml`）、`tests/executor-*.spec.ts`、`tests/presets.spec.ts`、
   `tests/fixtures/executor.ts`、`docs/003-execution.md`、`docs/006-deployment.md`、`docs/007-architecture.md`
 - 不做：HTTP 路由、设置持久化、面板、组合根接线（WS5）；不发真实钉钉消息、不调真实模型；
@@ -21,16 +21,17 @@
 
 ## 2. 模块
 
-| 文件                           | 职责                                                                                         |
-| ------------------------------ | -------------------------------------------------------------------------------------------- |
-| `src/executor/types.ts`        | `ExecutorRequest/Result`、`SessionHost`、`TaskExecutor`、preset 常量与 id 派生               |
-| `src/executor/errors.ts`       | `ExecutorError` 与 `ModelTimeoutError`/`ModelAbortedError`/`ModelFailedError`（带 `reason`） |
-| `src/executor/session-host.ts` | `DshSessionHost`（DSH 适配）、`TurnTracker`（回合匹配）、`awaitTurn`（超时/中止等待）        |
-| `src/executor/task.ts`         | `DshTaskExecutor`：批准门、工作区、系统提示、投递、结局映射、取消、并发                      |
-| `src/executor/model.ts`        | `SessionModel implements ModelPort`：按 thread 复用会话、串行、轮数/空闲重建、提示组装       |
-| `src/executor/research.ts`     | `DshResearch implements ResearchPort`：`ctx.web.search` 适配与降级                           |
-| `src/executor/index.ts`        | 公开出口                                                                                     |
-| `cordis.patch.yml`             | `dsh-whale-chan-replier-preset`、`dsh-whale-chan-worker-preset`                              |
+| 文件                           | 职责                                                                                             |
+| ------------------------------ | ------------------------------------------------------------------------------------------------ |
+| `src/executor/types.ts`        | `ExecutorRequest/Result`、`SessionHost`、`TaskExecutor`、preset 常量与 id 派生                   |
+| `src/executor/errors.ts`       | `ExecutorError` 与 `ModelTimeoutError`/`ModelAbortedError`/`ModelFailedError`（带 `reason`）     |
+| `src/executor/session-host.ts` | `DshSessionHost`（DSH 适配）、`TurnTracker`（回合匹配）、`awaitTurn`（超时/中止等待）            |
+| `src/executor/task.ts`         | `DshTaskExecutor`：批准门、工作区、系统提示、投递、结局映射、取消、并发                          |
+| `src/executor/model.ts`        | `SessionModel implements ModelPort`：按 thread 复用会话、串行、轮数/空闲重建、提示组装           |
+| `src/executor/research.ts`     | `DshResearch implements ResearchPort`：`ctx.web.search` 适配与降级                               |
+| `src/executor/role-model.ts`   | 把 `settings.models.reply/worker` 播种到新会话（`model/selection` + 首次请求注入，不改全局默认） |
+| `src/executor/index.ts`        | 公开出口（**只**从这一层拿执行器；宿主入口 `src/index.ts` 不导出它）                             |
+| `cordis.patch.yml`             | `dsh-whale-chan-replier-preset`、`dsh-whale-chan-worker-preset`                                  |
 
 ## 3. 实测到的 DSH API（不是猜的）
 
@@ -74,6 +75,11 @@
    `dsh-tool-web` 等都随 DSH 发布（读 `app.asar` 头可确认 `dsh/node_modules/@deepseek-ai/<pkg>`
    存在），patch 里只写包名，与 DSH 自带的 `minimal`/`standard` preset 写法一致。
 
+| 模型选择 | `ctx.llm.resolveCallConfig({provider, model, reasoningEffort?})` |
+| 会话事件写入 | `agent.session.append('model/selection', selection)`；`model/selection` 由 `dsh-api-session-controller` 扩展进 `SessionEventMap` |
+| 首个请求注入 | `agent.ctx.on('system-prompt/assemble', …, { prepend: true })` + `agent.ctx.on('agent/request', …, { prepend: true })` |
+| 持久化确认 | `ctx.sessionPersistence.flush()` |
+
 ## 4. 关键决策
 
 | 决策                         | 选择                                                         | 理由                                                                 |
@@ -92,11 +98,19 @@
 | 检索失败                     | 一律空结果 + 一行 warn                                       | brain 的降级路径就是「当作没搜到」，不该抛到调用方                   |
 | worker 系统提示              | agent 级 `systemPrompt.section`（非 complete）               | preset 的 persona/指令段保留，本段追加在后                           |
 | 回复器 preset 含 tool-web    | 按任务书保留（`fetch:false`）                                | 与宿主检索预算对齐；写文字的安全边界由「无 shell/fs」保证            |
+| 工作区优先级                 | `Assignment.workspace` 优先，缺省用设置                      | 人选的目录必须就是任务目录；设置只是「没选」时的默认                 |
+| 相对路径工作区               | 拒绝（`ExecutorError('invalidWorkspace')`）                  | DSH 会按宿主工作目录解析它，主人无法预测文件落到哪里                 |
+| 重试会话                     | 新会话（id 带派工后缀）                                      | 领域把重试当新派工；复用失败会话会把上一次的错误上下文带进来         |
+| 重试上下文                   | 消息里附「上一轮结果（供参考）」                             | 新会话看不到历史，唯一能避免重复劳动的信息就是上次的结论             |
+| 模型路由来源                 | 每个角色各用 `settings.models.*`，不改全局默认               | `selectModel` 会改全局默认，回复路由会污染所有新会话                 |
+| 模型路由时机                 | 会话首次创建后、首个回合前写入；已有选择不覆盖               | 主人后来在面板换的模型必须赢                                         |
+| preset 人设前缀              | 中性一句，身份交给动态人设段                                 | 硬编码名字会在主人改名后与设置里的人设冲突                           |
+| 宿主入口                     | 不导出执行器                                                 | 否则插件加载即把 `dsh-llm`/`dsh-session` 拉进模块图，即使从不跑任务  |
 
 ## 5. 测试
 
-- 新增 **78** 条：`executor-task` 23、`executor-model` 17、`executor-research` 10、
-  `executor-session` 13、`presets` 15。仓库总数 335 → **413**。
+- 新增 **99** 条：`executor-task` 28、`executor-model` 19、`executor-role-model` 12、
+  `executor-research` 10、`executor-session` 13、`presets` 17。仓库总数 335 → **434**。
 - 5 个变异实验全部被杀死：关掉批准门（3 条失败）、回合匹配改成「任意 turn/end」（3 条）、
   去掉按 thread 的互斥（1 条）、忽略提示预算（3 条）、`onFinished` 重复调用（3 条）。
 - `DshSessionHost` 无法在单测里真跑（会真的建会话并呼唤模型），因此它的验证方式是
@@ -107,18 +121,21 @@
 
 ## 6. 影响面与风险
 
-- `src/index.ts` 只新增 `export * from './executor/index.ts'`，`apply()` 未改；执行器不会被自动创建。
+- `src/index.ts` 未改：执行器只在 `src/executor/index.ts` 导出，由 WS5 的组合根显式 import。入口 bundle 因此保持
+  19.94 kB（`lib/index.d.ts` 0.75 kB），不再包含执行器，也不 import `@deepseek-ai/dsh-llm`／`dsh-session`。
 - 新增 devDependency `yaml`（仅测试解析用），runtime 依赖仍是 `cross-spawn`、`proper-lockfile`、`zod`。
   构建产物外部 import 只有 `zod`、`@deepseek-ai/schemastery`、`@deepseek-ai/dsh-llm`、
   `@deepseek-ai/dsh-session` 与 Node 内置（声明在 peerDependencies）。
 - 风险 1：worker 会话的权限来自设置，若被设成 `danger-full-access`，提示词注入的危害面会变大。
   代码只做「非法值回退到 `workspace-write`」，不能替代主人的判断。
-- 风险 2：`whale-task-*` 会话会被复用（同一任务重试沿用同一会话），worker 能看到上一次的上下文。
-  这是刻意的（重试通常需要前情），但意味着重试不是干净环境。
+- 风险 2：重试是**新会话**，只通过任务消息里的「上一轮结果（供参考）」继承上下文；上一次的其余对话不会带过去。
+  这是刻意的（重试应当是干净环境），代价是 worker 需要重新读工作区。
 - 风险 3：两套 preset 依赖 DSH 随包插件。DSH 大版本升级改名时要同步改 patch（测试会立刻发现
   名字不合语法，但不会发现「包被改名」）。
 - 风险 4：回复器会话按 thread 复用 DSH 历史；如果主人把同一个 thread 交给两个进程，两个进程会
   各自建会话（DSH 的 writer 锁会让第二个 `create` 走新身份），不会互相踩，但也不共享历史。
+- 风险 5：模型路由只在会话首次创建时写入。若主人在设置里改了 `models.worker`，已有会话仍用旧路由，
+  直到该任务的下一次派工（新会话）才生效；回复器则在下次轮数/空闲重建时生效。
 
 ## 7. 已知缺口
 
@@ -138,7 +155,7 @@
 | ②   | 投递幂等、无重复回合            | 消息 id 派生自 requestId，投递前查日志与 inbox；模型层 requestId 每次递增 |
 | ③   | 超时/取消/失败都恰好一次回调    | `finally` + `started` 标志；变异 M5（重复回调）被杀死                     |
 | ④   | 会话复用不串话                  | 按 `SessionRef` 寻址；回复器按 thread 串行；变异 M3（去互斥）被杀死       |
-| ⑤   | preset 用真实字段且依赖包存在   | 与 DSH 自带 preset 同构；包名在 `app.asar` 中逐个确认；15 条 preset 测试  |
+| ⑤   | preset 用真实字段且依赖包存在   | 与 DSH 自带 preset 同构；包名在 `app.asar` 中逐个确认；17 条 preset 测试  |
 | ⑥   | 模型/检索失败可被 brain 映射    | `ModelTimeoutError.reason='timeout'` 等；检索失败返回空结果               |
 | ⑦   | 不碰真实钉钉/模型               | 测试全部用 fake host / fake web；无网络、无子进程                         |
 | ⑧   | API 实测而非猜测                | §3 的表格 + `tsc` + `cordis_inspect_query`                                |
@@ -147,6 +164,8 @@
 
 ## 9. 提交
 
+第一轮（初版实现，5 个提交）：
+
 | 提交                                                | 内容                                         |
 | --------------------------------------------------- | -------------------------------------------- |
 | `feat(executor): session host and task executor`    | `types`、`errors`、`session-host`、`task`    |
@@ -154,6 +173,19 @@
 | `feat(preset): replier and worker presets`          | `cordis.patch.yml`、`package.json`、lock     |
 | `test: cover executor, model, research and presets` | 5 个 spec + fixture                          |
 | `docs: execution, architecture and deployment`      | 003/007/006 与本文、测试报告                 |
+
+第二轮（审核整改，5 个提交）：
+
+| 提交                                                            | 内容                                                                                |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `fix(executor): honour approved workspace and fresh retries`    | 批准目录优先、相对路径拒绝、派工后缀会话、上一轮结果；`src/index.ts` 不再导出执行器 |
+| `feat(executor): seed role models from settings`                | `role-model.ts`、宿主播种、`SessionModel` 的 reply 路由                             |
+| `feat(preset): neutral persona prefix`                          | 两套 preset 的中性人设前缀                                                          |
+| `test: cover approved workspace, role models and fresh retries` | 新增 `executor-role-model.spec.ts`、工作区/路由/前缀/重试断言（+21 条）             |
+| `docs: approved workspace, model routes and smoke test`         | 003/006/007 与本文、测试报告                                                        |
+
+第二轮按「代码 → preset → 测试 → 文档」排序：前三个提交各自 `pnpm typecheck` 通过，但由于
+会话 id 与断言同批改动，测试文件在 `test:` 提交之前会失败（这是提交切分的代价，最终 HEAD 全绿）。
 
 分支未合并、未 push；`pnpm check`、`check-pack`、`git status` 结果见
 [WS4 测试报告](../test-reports/WS4.md)。

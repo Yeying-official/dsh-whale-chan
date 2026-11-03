@@ -2,9 +2,10 @@
 
 - 环境：Windows，Node `v24.15.0`，pnpm `11.4.0`，vitest `4.1.8`
 - 分支：`feat/ws4-executor`（从 `main` `6fcacb0` 创建）
-- 范围：`src/executor/**`、`src/index.ts`、`cordis.patch.yml`、`package.json`（devDependency `yaml`）、
+- 范围：`src/executor/**`、`cordis.patch.yml`、`package.json`（devDependency `yaml`）、
   `tests/executor-*.spec.ts`、`tests/presets.spec.ts`、`tests/fixtures/executor.ts`、
   `docs/003-execution.md`、`docs/006-deployment.md`、`docs/007-architecture.md`
+  第二轮（审核整改）未改 `src/index.ts`，执行器不再从宿主入口导出
 
 ## 1. 门禁命令与真实输出
 
@@ -18,20 +19,21 @@ $ tsc --noEmit
 （无输出，退出码 0）
 
 $ pnpm test
- ✓ tests/executor-session.spec.ts (13 tests) 72ms
- ✓ tests/executor-research.spec.ts (10 tests) 51ms
- ✓ tests/executor-task.spec.ts (23 tests) 67ms
- ✓ tests/executor-model.spec.ts (17 tests) 35ms
- ✓ tests/presets.spec.ts (15 tests) 20ms
+ ✓ tests/executor-session.spec.ts (13 tests) 91ms
+ ✓ tests/executor-research.spec.ts (10 tests) 53ms
+ ✓ tests/executor-task.spec.ts (28 tests) 49ms
+ ✓ tests/executor-model.spec.ts (19 tests) 40ms
+ ✓ tests/presets.spec.ts (17 tests) 21ms
+ ✓ tests/executor-role-model.spec.ts (12 tests) 14ms
 （另有既有 27 个 spec 文件）
 
- Test Files  32 passed (32)
-      Tests  413 passed (413)
+ Test Files  33 passed (33)
+      Tests  434 passed (434)
 
 $ pnpm build
 ℹ [CJS] lib\client.js    42.04 kB │ gzip: 12.48 kB
-ℹ [ESM] lib\index.js    70.51 kB │ gzip: 22.67 kB
-ℹ [ESM] lib\index.d.ts  32.01 kB │ gzip:  9.56 kB
+ℹ [ESM] lib\index.js    19.94 kB │ gzip:  6.32 kB
+ℹ [ESM] lib\index.d.ts   0.75 kB │ gzip:  0.33 kB
 ✔ Build complete
 
 $ pnpm format:check
@@ -50,15 +52,16 @@ $ git status --porcelain
 
 ## 2. 新增测试
 
-| 文件                              | 条数 | 覆盖                                                                                                                                                                                                             |
-| --------------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tests/executor-task.spec.ts`     | 23   | 批准门（pending / 未批准任务 / 错配批准 / 不安全 id）、会话参数、工作区路径与 `~` 展开、系统提示内容、投递一次、四种结局、取消幂等、回调恰好一次、失败监听器不影响结果、同任务并发拒绝、重试产生新 requestId     |
-| `tests/executor-model.spec.ts`    | 17   | 提示组装与分隔、超预算丢最旧、单条超长截断、system 永不丢、会话 id/标题/工作区/preset、会话复用、`forThread` 隔离、串行互斥、轮数重建（`fresh` + 旧会话取消）、空闲重建、超时/失败/中止三类错误、空文本、dispose |
-| `tests/executor-research.spec.ts` | 10   | 事实/来源映射、hostname 兜底、非 http(s) 丢弃与去重、limit 上限、长事实截断、空结果、异常、中止、预算耗尽、空查询不调用                                                                                          |
-| `tests/executor-session.spec.ts`  | 13   | `TurnTracker` 归属回合、早于投递的 `turn/end`、历史已结束、aborted/failed 详情、无 requestId 的下一回合；`awaitTurn` 实时匹配、立即返回、订阅/扫描竞态补放、超时、中止、已中止不订阅、忽略无关事件               |
-| `tests/presets.spec.ts`           | 15   | 宿主行仍在、无重复 loader id、两套 preset 的 id/name/order、回复器工具集与「无 shell/fs/jobs/skill」、执行器工具集、shell 平台门控、jobs 5 秒、compaction 隔离、插件名语法、`!!js` 位置                          |
+| 文件                                | 条数 | 覆盖                                                                                                                                                                                                                                                     |
+| ----------------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/executor-task.spec.ts`       | 28   | 批准门（pending / 未批准任务 / 错配批准 / 不安全 id）、会话参数与模型路由、批准目录优先 / `~` 展开 / 空值回退 / 相对路径拒绝、系统提示内容、投递一次、四种结局、取消幂等、回调恰好一次、失败监听器不影响结果、同任务并发拒绝、重试新会话与「上一轮结果」 |
+| `tests/executor-model.spec.ts`      | 19   | 提示组装与分隔、超预算丢最旧、单条超长截断、system 永不丢、会话 id/标题/工作区/preset、回复路由透传与缺省、会话复用、`forThread` 隔离、串行互斥、轮数重建（`fresh` + 旧会话取消）、空闲重建、超时/失败/中止三类错误、空文本、dispose                     |
+| `tests/executor-role-model.spec.ts` | 12   | 路由映射（含 effort、半配置、设置默认值）、`needsSeeding` 四种判断、空配置不注入、已有选择不覆盖、成功才 append + wire + flush、解析失败回退宿主默认                                                                                                     |
+| `tests/executor-research.spec.ts`   | 10   | 事实/来源映射、hostname 兜底、非 http(s) 丢弃与去重、limit 上限、长事实截断、空结果、异常、中止、预算耗尽、空查询不调用                                                                                                                                  |
+| `tests/executor-session.spec.ts`    | 13   | `TurnTracker` 归属回合、早于投递的 `turn/end`、历史已结束、aborted/failed 详情、无 requestId 的下一回合；`awaitTurn` 实时匹配、立即返回、订阅/扫描竞态补放、超时、中止、已中止不订阅、忽略无关事件                                                       |
+| `tests/presets.spec.ts`             | 17   | 宿主行仍在、无重复 loader id、两套 preset 的 id/name/order、回复器工具集与「无 shell/fs/jobs/skill」、执行器工具集、shell 平台门控、jobs 5 秒、compaction 隔离、插件名语法、`!!js` 位置、两套 preset 的中性人设前缀                                      |
 
-合计 **78** 条；仓库总数 335 → **413**。
+合计 **99** 条；仓库总数 335 → **434**。
 
 ## 3. 变异实验
 
@@ -99,6 +102,8 @@ systemPrompt | Registry service for the prompt inputs assembled before each mode
    section(section: PromptSection): () => void
 sessionPersistence | Durable append-only session storage …
    abstract flush(): Promise<void>
+llm | …
+   resolveCallConfig(config: LlmCallConfig, signal?: AbortSignal): Promise<LlmCallConfig>
 ```
 
 对应的声明文件片段（`dsh-agent/lib/types/runtime-types.d.ts`）：
@@ -112,6 +117,11 @@ whenIdle(): Promise<void>
 readonly inbox: Inbox          // nextTurn / nextStep / clear / append / prepend / remove
 readonly status: AgentStatus   // 'idle' | 'running'
 ```
+
+`dsh-api-session-controller/lib/types/types.d.ts`：`declare module '@deepseek-ai/dsh-session/types'`
+把 `'model/selection': ModelSelection` 加进 `SessionEventMap`（所以 `session.append('model/selection', …)`
+是有类型的）。`dsh-system-prompt` 的 `system-prompt/assemble` 与 `dsh-agent` 的 `agent/request` 都是
+waterfall，`ctx.on(..., { prepend: true })` 是 Cordis 的 `EventOptions.prepend`。
 
 `dsh-session/lib/types/types.d.ts`：`'turn/end': { turn: number; reason: TurnEndReason }`，
 `TurnEndReasonMap` 含 `completed` / `aborted({reason})` / `blocked` / `failed({error})`；
@@ -135,6 +145,10 @@ readonly status: AgentStatus   // 'idle' | 'running'
 - 没有真实钉钉消息与真实模型调用；端到端留给 WS8。
 - 没有测试 DSH 的账号/模型未配置时的行为（这会在 `create` 或首个回合上失败，表现为
   `failed` 结局或抛错）。
+- 模型播种没有对着真实 provider 跑过：`role-model` 的测试替换了 `resolveCallConfig`，
+  只验证「注入什么、什么时候跳过、失败如何回退」。真实路由由 DSH 的 `ctx.llm` 决定。
+- 真机会话冒烟（创建会话、取消、观察 `turn/end`）写在
+  [006 部署 §5.4](../006-deployment.md)，由 WS8 执行，本工作流未跑。
 
 ## 6. 复核清单
 

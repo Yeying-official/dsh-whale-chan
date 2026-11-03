@@ -53,6 +53,24 @@ describe('gateReply', () => {
     expect(gateReply(makeGateInput({ settings: allowed }))).toEqual({ act: true, mode: 'auto', reason: 'allowed' })
   })
 
+  it('never authorizes by display name, so a rename cannot borrow an identity', () => {
+    // The same display name as the allow-listed person, but a different user id.
+    const allowed = settingsWithTarget({ reply: { allowedSenders: ['user-1'] } })
+    const impostor = makeGateInput({
+      settings: allowed,
+      message: { senderId: 'user-9', senderName: '小明' },
+    })
+    expect(gateReply(impostor)).toEqual({ act: false, reason: 'sender_not_allowed' })
+
+    // A name in the block list is not an id either: it matches nobody.
+    const blockedByName = settingsWithTarget({ reply: { blockedSenders: ['小明'] } })
+    expect(gateReply(makeGateInput({ settings: blockedByName }))).toEqual({
+      act: true,
+      mode: 'auto',
+      reason: 'allowed',
+    })
+  })
+
   it('requires a mention in groups unless the owner turned that off', () => {
     const settings = settingsWithTarget()
     const unaddressed = makeGateInput({ settings, message: { conversationType: 'group' } })
@@ -111,6 +129,23 @@ describe('gateReply', () => {
         act: true,
         mode: 'auto',
         reason: 'allowed',
+      })
+    }
+  })
+
+  it('keeps a quiet-hours reply at review so nothing can be queued automatically', () => {
+    const settings = settingsWithTarget({
+      monitor: { quietHours: { enabled: true, start: '22:00', end: '08:00' } },
+    })
+    // `review` carries no send authority: the caller may only store a draft, and
+    // the owner decides in the panel whether to send it. Quiet hours ending later
+    // cannot turn this decision into an `auto` send, because the gate does not run
+    // again for a message that was already decided.
+    for (const hour of [22, 23, 0, 3, 7]) {
+      expect(gateReply(makeGateInput({ settings, now: localTime(hour) })), String(hour)).toStrictEqual({
+        act: true,
+        mode: 'review',
+        reason: 'quiet_hours',
       })
     }
   })

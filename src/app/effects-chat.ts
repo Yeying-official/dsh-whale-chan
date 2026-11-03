@@ -227,7 +227,9 @@ export class ChatEffects {
         approvalTtlMs: settings.tasks.approvalTtlHours * 3_600_000,
       })
       // v1 has no DSH inbox conversation; the audit trail is where a person sees it.
-      this.notice({
+      // This is written directly, not as a `notify` effect: the capture notice is
+      // part of this step and must not depend on the queue running again.
+      this.deps.store.appendEvent('notice', this.deps.clock.now().toISOString(), {
         kind: 'task_captured',
         threadKey: decision.threadKey,
         decisionId,

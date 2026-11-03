@@ -154,6 +154,17 @@ export interface RuntimeOptions {
   readonly timers?: RuntimeTimers
 }
 
+/** Object-style initializer used by the Cordis entry point. */
+export interface RuntimeInit {
+  readonly ctx: Context
+  readonly config: DeploymentConfig
+  readonly options?: Omit<RuntimeOptions, 'ctx'>
+}
+
+function isRuntimeInit(value: DeploymentConfig | RuntimeInit): value is RuntimeInit {
+  return typeof value === 'object' && value !== null && 'config' in value && 'ctx' in value
+}
+
 const DEFAULT_TIMERS: RuntimeTimers = {
   setTimeout: (callback, delayMs) => {
     const handle = setTimeout(callback, delayMs)
@@ -295,7 +306,12 @@ export class Runtime {
   private closing = false
   private stopping: Promise<void> | undefined
 
-  constructor(config: DeploymentConfig, options: RuntimeOptions = {}) {
+  constructor(config: DeploymentConfig, options?: RuntimeOptions)
+  constructor(init: RuntimeInit)
+  constructor(first: DeploymentConfig | RuntimeInit, second: RuntimeOptions = {}) {
+    const init = isRuntimeInit(first) ? first : undefined
+    const config = init === undefined ? (first as DeploymentConfig) : init.config
+    const options: RuntimeOptions = init === undefined ? second : { ...(init.options ?? {}), ctx: init.ctx }
     this.stateDir = resolveStateDir(config.stateDir)
     this.logLevel = config.logLevel
     this.startedAt = (options.now?.() ?? new Date()).toISOString()

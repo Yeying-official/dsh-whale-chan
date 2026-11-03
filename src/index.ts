@@ -43,7 +43,7 @@ export { Config }
 export type { DeploymentConfig }
 
 export async function apply(ctx: Context, config: DeploymentConfig): Promise<void> {
-  const runtime = new Runtime(config, { ctx })
+  const runtime = new Runtime({ ctx, config })
 
   // Register unload before startup so a failed mkdir or a taken lock cannot
   // leave a half-mounted plugin behind. The HTTP route is mounted before `ready`

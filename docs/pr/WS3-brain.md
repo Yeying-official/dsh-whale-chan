@@ -83,6 +83,8 @@ conversationType/addressed/broadcast/at`）。`broadcast` 与 `kind` 由通道�
   policy 18、rate-limit 9、loop-guard 11、contract 8），仓库总数 107 → **224**。
 - 5 个变异自测全部被杀死（去掉 loop guard、去掉 need_search 归一、放开 URL 白名单、
   不丢示例、缺失模板返回空串）。
+- 5 个实现/测试提交逐一导出后执行 `tsc --noEmit` 与全量测试，历史可独立构建（142 / 178 /
+  216 / 224 条）。
 - 详细命令输出、策略矩阵与自评见 [WS3 测试报告](../test-reports/WS3.md)。
 
 ## 6. 影响面与风险
@@ -102,8 +104,8 @@ conversationType/addressed/broadcast/at`）。`broadcast` 与 `kind` 由通道�
   safety 段声明优先，但这是提示层约束，不是代码约束；真正兜底是任务批准与 review 模式。
 - `research.md` 的“事实/来源”长度按 400 字符/条截断，长文档摘要需要 WS4 在检索侧先压缩。
 - 分类与回复各一次模型调用；没有做“低置信二次确认”的第二次采样。
-- `docs/PROGRESS.md` 在基线提交 `a7d68d6` 上本身未通过 `prettier --check`（表格对齐），
-  不在 WS3 可改范围内；WS3 触及的所有文件均通过 `format:check`。建议合并前单独修一次。
+- 整仓 `format:check` 依赖 `main` 的 `b69177d`（单独格式化了 `docs/PROGRESS.md`）；本分支已
+  合并该提交，WS3 自身没有编辑 `PROGRESS.md`。
 
 ## 8. 自评（审核清单）
 
@@ -122,5 +124,17 @@ conversationType/addressed/broadcast/at`）。`broadcast` 与 `kind` 由通道�
 
 ## 9. 提交
 
-按切片提交（详见 `git log`）：提示词/人设/分类 → 回复/检索 → 策略/限速/防环 → 契约测试 →
-文档。`pnpm check` 与 `node scripts/check-pack.mjs` 结果见测试报告。
+按切片提交（`git log --oneline a7d68d6..HEAD`）：
+
+| 提交      | 内容                                                                |
+| --------- | ------------------------------------------------------------------- |
+| `a2f13eb` | `feat(brain): prompts, persona and classifier`                      |
+| `1aaa32c` | `feat(brain): reply composition and research`                       |
+| `bbf13de` | `feat(brain): reply policy, rate limit and loop guard`              |
+| `bbe1544` | `test(brain): prompt contracts and layering guard`                  |
+| `71d3b9b` | `docs: prompts and authorization`                                   |
+| `f32bed5` | `Merge branch 'main' into feat/ws3-brain`（仅格式化 `PROGRESS.md`） |
+
+`pnpm check`、`node scripts/check-pack.mjs` 与 `git status` 结果见测试报告；分支未 push、未合并。
+合并 `main` 后另有一个 `docs: record the final gate after merging main` 提交，只更新本文件与
+测试报告里的门禁记录。

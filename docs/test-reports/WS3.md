@@ -1,7 +1,7 @@
 # WS3 测试报告
 
 - 环境：Windows，Node `v24.15.0`，pnpm `11.4.0`，vitest `4.1.8`
-- 分支：`feat/ws3-brain`（基于 `main` `a7d68d6`）
+- 分支：`feat/ws3-brain`（从 `main` `a7d68d6` 创建，最终门禁前合并 `main` `b69177d`）
 - 范围：`src/brain/**`、`prompts/*.md`、`tests/brain-*.spec.ts`、`tests/fixtures/brain.ts`、
   `docs/004-prompts.md`、`docs/002-authorization.md`
 
@@ -9,7 +9,8 @@
 
 ```text
 $ pnpm install --frozen-lockfile
-Done in 1m 31.8s using pnpm v11.4.0
+Already up to date
+Done in 405ms using pnpm v11.4.0
 
 $ pnpm typecheck
 $ tsc --noEmit
@@ -29,12 +30,16 @@ $ pnpm test
 
  Test Files  18 passed (18)
       Tests  224 passed (224)
-   Duration  3.03s
+   Duration  2.95s
 
 $ pnpm build
 ✔ Build complete in 1214ms
 ℹ [ESM] lib\index.js    19.94 kB │ gzip: 6.32 kB
 ℹ [ESM] lib\index.d.ts   0.75 kB │ gzip: 0.33 kB
+
+$ pnpm format:check
+Checking formatting...
+All matched files use Prettier code style!
 
 $ node scripts/check-pack.mjs
 pack check passed: 15 artifacts, icon 711 bytes
@@ -43,10 +48,9 @@ $ git status --porcelain
 （提交后为空）
 ```
 
-**`pnpm format:check` 的基线问题**：该命令在 `main` 的 `a7d68d6` 上就会失败，原因是
-`docs/PROGRESS.md` 的表格没有按 Prettier 对齐（`git diff HEAD -- docs/PROGRESS.md` 为空，
-说明它在基线提交里就没格式化）。`PROGRESS.md` 不在 WS3 可改范围内，因此未修改。WS3 触及的
-文件单独检查通过：
+`format:check` 曾因基线里未格式化的 `docs/PROGRESS.md` 失败；编排方在 `main` 的 `b69177d`
+单独修复，本分支已合并该提交（`f32bed5`），所以整仓检查现在通过，且 WS3 没有编辑
+`PROGRESS.md`。保留的单独检查命令供审计用：
 
 ```text
 $ pnpm exec prettier --check "src/brain/**/*.ts" "prompts/*.md" "tests/brain-*.spec.ts" \
@@ -54,7 +58,32 @@ $ pnpm exec prettier --check "src/brain/**/*.ts" "prompts/*.md" "tests/brain-*.s
 All matched files use Prettier code style!
 ```
 
-建议合并前由维护者单独执行一次 `pnpm exec prettier --write docs/PROGRESS.md`。
+打包产物（`npm pack --dry-run --json --ignore-scripts`）含全部五份模板：
+
+```text
+prompts/classifier.md
+prompts/persona.md
+prompts/reply.md
+prompts/research.md
+prompts/safety.md
+total artifacts: 15
+```
+
+### 1.1 逐提交验证
+
+每个提交都导出到仓库内的临时目录（复用本 worktree 的 `node_modules`），分别执行
+`tsc --noEmit` 与全量 `vitest run tests`，确认历史可以独立构建：
+
+| 提交      | 内容                    | tsc | 测试       |
+| --------- | ----------------------- | --- | ---------- |
+| `a2f13eb` | 提示词 / 人设 / 分类    | 0   | 142 passed |
+| `1aaa32c` | 回复 / 检索             | 0   | 178 passed |
+| `bbf13de` | 策略 / 限速 / 防环      | 0   | 216 passed |
+| `bbe1544` | 契约测试                | 0   | 224 passed |
+| `71d3b9b` | 文档                    | 0   | 224 passed |
+| `f32bed5` | 合并 `main`（仅格式化） | 0   | 224 passed |
+
+另做导入闭包检查覆盖 5 个提交：每个提交引用的相对模块与 `prompts/` 都存在于该提交的树中。
 
 自测结果：通过（见第 3 节）。
 
@@ -184,12 +213,14 @@ all mutations killed
 
 - `src/brain/index.ts` 未接入 `src/index.ts`（分工要求不改），因此 `pnpm build` 产物暂不含
   brain 代码；类型检查与测试覆盖全部源码。接线方式见 `docs/pr/WS3-brain.md` §3。
-- `format:check` 的 `docs/PROGRESS.md` 基线失败（见 §1），需要维护者单独修。
+- `format:check` 现在整仓通过（`main` `b69177d` 已格式化 `PROGRESS.md`，本分支合并于
+  `f32bed5`）。
 - 提示词层无法阻止“主人在人设里授予越权规则”；代码层只保证发送/任务批准不由提示决定。
 - 分类与回复各一次模型调用，没有低置信重采样；`research.md` 以 400 字符/条截断事实，
   长文档摘要需检索侧先压缩。
-- `check-pack` 只验证 `prompts/` 至少有一个文件被打包，不验证五份模板齐全；模板缺失由
-  `PromptStore.preload()` 在启动时暴露。
+- `check-pack` 只验证 `prompts/` 至少有一个文件被打包，不逐份计数；本次另行用
+  `npm pack --dry-run` 确认五份模板都在（见 §1）。模板缺失由 `PromptStore.preload()`
+  在启动时暴露。
 
 ## 5. 自评
 

@@ -1,7 +1,7 @@
 # WS4 · 任务执行器、回复器会话与 agent preset
 
 - 分支：`feat/ws4-executor`（从 `main` `6fcacb0` 创建）
-- 范围：`src/executor/**`（新增；`src/index.ts` 不改）、`cordis.patch.yml`（追加两套 preset）、
+- 范围：`src/executor/**`（新增；`src/index.ts` 不改）、`src/core/errors.ts`（新增 `invalidWorkspace` 一个码）、`cordis.patch.yml`（追加两套 preset）、
   `package.json`（新增 devDependency `yaml`）、`tests/executor-*.spec.ts`、`tests/presets.spec.ts`、
   `tests/fixtures/executor.ts`、`docs/003-execution.md`、`docs/006-deployment.md`、`docs/007-architecture.md`
 - 不做：HTTP 路由、设置持久化、面板、组合根接线（WS5）；不发真实钉钉消息、不调真实模型；
@@ -99,7 +99,7 @@
 | worker 系统提示              | agent 级 `systemPrompt.section`（非 complete）               | preset 的 persona/指令段保留，本段追加在后                           |
 | 回复器 preset 含 tool-web    | 按任务书保留（`fetch:false`）                                | 与宿主检索预算对齐；写文字的安全边界由「无 shell/fs」保证            |
 | 工作区优先级                 | `Assignment.workspace` 优先，缺省用设置                      | 人选的目录必须就是任务目录；设置只是「没选」时的默认                 |
-| 相对路径工作区               | 拒绝（`ExecutorError('invalidWorkspace')`）                  | DSH 会按宿主工作目录解析它，主人无法预测文件落到哪里                 |
+| 相对路径工作区               | 拒绝（`UserError('invalidWorkspace')`）                      | 用户可纠正的输入错误；由领域承载后 API 才能与其他拒绝统一映射        |
 | 重试会话                     | 新会话（id 带派工后缀）                                      | 领域把重试当新派工；复用失败会话会把上一次的错误上下文带进来         |
 | 重试上下文                   | 消息里附「上一轮结果（供参考）」                             | 新会话看不到历史，唯一能避免重复劳动的信息就是上次的结论             |
 | 模型路由来源                 | 每个角色各用 `settings.models.*`，不改全局默认               | `selectModel` 会改全局默认，回复路由会污染所有新会话                 |

@@ -130,7 +130,7 @@ bundle 在 `cordis.patch.yml` 里声明两个 `@deepseek-ai/dsh-agent-preset` �
 | `~/.dsh-whale-chan/tasks/<taskId>` | 没有选择目录时的回退（`tasks.workspaceRoot` 可覆盖根目录） |
 | `~/.dsh-whale-chan/workspace`      | 回复器会话共用工作区（不写业务文件）                       |
 
-- **工作区以批准为准**：批准任务时主人选的目录就是 worker 的目录；设置里的 `tasks.workspaceRoot` 只是「批准时没选目录」的默认值。相对路径会被拒绝（`invalidWorkspace`），因为 DSH 会按宿主工作目录解析它，主人无法预测文件落在哪里。
+- **工作区以批准为准**：批准任务时主人选的目录就是 worker 的目录；设置里的 `tasks.workspaceRoot` 只是「批准时没选目录」的默认值。相对路径会被拒绝（领域错误 `invalidWorkspace`，属用户可纠正的 `refused` 组），因为 DSH 会按宿主工作目录解析它，主人无法预测文件落在哪里。
 - 工作区目录在会话创建**之前**用 `mkdir -p` 建好：DSH 的 `workspaceRegistry.create` 只接受已存在的目录，不存在的路径会被拒绝。
 - 回退路径里的 `taskId` 必须是单一安全路径段；含 `/`、`\` 或 `..` 的 id 会被执行器拒绝，不会写到根目录之外。
 - 任务会话 id 是 `whale-task-<taskId>-<派工后缀>`（同一任务的每次派工都是一个新会话），回复器会话 id 是 `whale-reply-<sha1(threadKey) 前 12>`；这两类会话会出现在 DSH 的会话列表里，标题分别是 `任务 · <标题>` 与 `钉钉 · <会话标题>`。

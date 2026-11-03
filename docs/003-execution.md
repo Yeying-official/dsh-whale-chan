@@ -89,7 +89,7 @@ interface ExecutorResult {
 
 1. 批准门（§2）。
 2. `runs` 里已存在同一 `taskId` → 抛 `ExecutorError('alreadyRunning')`，不碰会话。
-3. 工作区：批准人选择的 `Assignment.workspace` 优先（展开 `~`，必须是绝对路径，否则抛 `ExecutorError('invalidWorkspace')` 且不建任何东西）；没有选择时才回退到 `tasks.workspaceRoot`（展开 `~`）或 `<stateDir>/tasks` 拼上 `task.id`。然后 `mkdir -p`。回退路径里 `task.id` 必须是单一安全路径段，含 `/`、`\`、`..` 时抛 `ExecutorError('unsafeTaskId')`。
+3. 工作区：批准人选择的 `Assignment.workspace` 优先（展开 `~`，必须是绝对路径，否则抛 `UserError('invalidWorkspace')`（领域错误码，API 按用户可纠正错误映射）且不建任何东西）；没有选择时才回退到 `tasks.workspaceRoot`（展开 `~`）或 `<stateDir>/tasks` 拼上 `task.id`。然后 `mkdir -p`。回退路径里 `task.id` 必须是单一安全路径段，含 `/`、`\`、`..` 时抛 `ExecutorError('unsafeTaskId')`。
 4. `ensureSession`：会话 id `whale-task-<taskId>-<assignmentId 后 8 位>`、preset `dsh-whale-chan-worker`、权限 `settings.tasks.permissionPreset`（默认 `workspace-write`）、标题 `任务 · <title>`、系统提示与模型路由（见 §5）。
 5. 投递任务消息，`requestId = task:<taskId>:<assignmentId|initial>`；同一个派工重复投递不会产生第二条消息（§6）。`task.result.summary` 非空时，消息里追加「上一轮结果（供参考）」段落——重试是全新会话，这是它唯一能看到上次结论的途径。
 6. `awaitTurnEnd`，预算 `settings.tasks.timeoutMinutes` 分钟。
@@ -110,7 +110,7 @@ interface ExecutorResult {
 
 - **系统提示**由 `renderPersona(persona, …)` 渲染的人设块加任务段组成，通过 `agent.ctx.systemPrompt.section({ name: 'dsh-whale-chan-task', order: 900, interpolate: false })` 注册。它不是 `complete` 段：preset 自带的 persona 与指令段落保留，本段追加在后。`interpolate: false` 保证主人写进人设的字面 `{{…}}` 不会被 DSH 变量替换。
 - **权限**只取设置里的两个值；其它值一律按 `workspace-write` 处理。
-- **工作区以批准为准**：`ExecutorRequest.workspace` 由 WS5 从 `Assignment.workspace` 传入，优先于 `tasks.workspaceRoot`；两者都没有配置时用 `<stateDir>/tasks/<taskId>`。相对路径一律拒绝（`ExecutorError('invalidWorkspace')`），因为 DSH 会按宿主工作目录解析它，主人无法预测任务落在哪里。
+- **工作区以批准为准**：`ExecutorRequest.workspace` 由 WS5 从 `Assignment.workspace` 传入，优先于 `tasks.workspaceRoot`；两者都没有配置时用 `<stateDir>/tasks/<taskId>`。相对路径一律拒绝（`UserError('invalidWorkspace')`，属领域 `refused` 组），因为 DSH 会按宿主工作目录解析它，主人无法预测任务落在哪里。
 - **模型**来自设置的两个独立路由：worker 用 `settings.models.worker`，回复器用 `settings.models.reply`。路由在会话创建后、首个回合前写入会话日志（`model/selection`），并只注入第一次模型请求；`provider` 或 `model` 为空则跳过，用部署默认模型。它**不修改** DSH 的全局默认模型，所以回复路由不会变成所有新会话的默认；会话已有选择或已开过请求头时也不覆盖，主人在面板里换的模型始终优先。
 - 会话按需重建：`whale-reply-*` 在满 20 轮或空闲 30 分钟后重建（先取消旧会话的回合，再以 `fresh` 请求新会话）；`whale-task-*` 的 id 带派工后缀，因此**重试是新会话**，不会复用上次失败的对话。
 

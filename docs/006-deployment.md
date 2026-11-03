@@ -241,7 +241,6 @@ WS5a 起设置与领域状态一起持久化在 SQLite；WS5a 只打开数据库
 | `<stateDir>/state.db-shm`   | WAL 共享内存索引                                               |
 | `<stateDir>/.lock`          | 状态目录锁（目录，不是文件）；运行时存在                       |
 | `<stateDir>/tasks/<taskId>` | 未指定工作区时的任务目录（`tasks.workspaceRoot` 可覆盖根目录） |
-| `<stateDir>/workspace`      | 回复器会话共用工作区                                           |
 
 `stateDir` 默认 `~/.dsh-whale-chan`，由部署配置 `stateDir` 覆盖；相对路径会被拒绝，`~` 会展开。
 
@@ -287,7 +286,7 @@ WS5a 起设置与领域状态一起持久化在 SQLite；WS5a 只打开数据库
 2. 加载 `SettingsService`、`Engine`、`Effects` 与持久计数器；
 3. `PromptStore.preload()` 读取 `prompts/*.md` 五份模板。**缺失或空白属于包完整性问题：health `prompts: error`，通道、流水线与 effect 队列都不装配**（不会回落到通用提示词，也不会半运行制造无效重试）；
 4. `probeAuth()`：`available`、`authenticated`、`token_valid`、**账号 id**（`user_id`/`userId` 等别名）缺一不可。缺账号 id 时 health 的 `auth` 检查为 error，通道不订阅；
-5. 装配 `DshSessionHost`、`SessionModel`、`DshResearch`、`DshTaskExecutor`，注册全部 effect handler；
+5. 装配 `DshSessionHost`（worker 执行）、`replyModelFor(ctx, settings.models.reply)`（`LlmModel`，直接 LLM、无会话/工具）、`DshResearch`、`DshTaskExecutor`，注册全部 effect handler；
 6. `Effects.start` → `Passes.start`（过期扫描 60 s、授权探测 5 min）→ `channel.start`；
 7. 通道启动后立即把 `pending` 的 Outbound 重新入队（崩溃恢复）。
 
@@ -298,7 +297,7 @@ WS5a 起设置与领域状态一起持久化在 SQLite；WS5a 只打开数据库
 - 面板 `POST /whale-chan/api/monitor/pause`（`{paused:true}`）写 `monitor.paused`；组合根立即 `channel.stop()`，不再接收新消息。
 - `{paused:false}` 立即重新 `channel.start()` 并把 `pending` Outbound 重新入队。暂停期间收到/已入队的 Outbound 不会丢。
 - **暂停只停订阅，不取消正在运行的任务**；任务取消仍走面板的任务取消，或停止插件（停机时执行器会中止运行中的回合）。
-- 修改 `targets` 或 `dws` 会在 500 ms 防抖后重启订阅；修改 `persona`/`models` 会重建回复器会话。
+- 修改 `targets` 或 `dws` 会在 500 ms 防抖后重启订阅；修改 `persona` 不需要重建（随每次请求渲染），修改 `models` 会用新路由重建 `LlmModel`。
 
 ### 10.3 健康排查顺序
 

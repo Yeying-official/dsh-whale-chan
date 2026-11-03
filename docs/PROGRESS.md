@@ -17,26 +17,27 @@
 | WS2 dws 通道                                                    | **完成并合并** | `main` `e5742d3`              |
 | WS3 人设/提示/分类/检索/策略                                    | **完成并合并** | `main` `5da9601`              |
 | WS4 任务执行器 + agent preset                                   | **完成并合并** | `main` `226847e`              |
-| WS5a 设置持久化 + 19 条 API + 视图/任务动作                     | 进行中         | worktree `E:/DSHWork/wt-ws5a` |
-| WS5b 组合根 + 流水线 + 收件箱/健康                              | 未开始         | 依赖 WS5a                     |
-| WS6 面板 UI 全页签                                              | 未开始         | 依赖 WS5 契约                 |
+| WS5a 设置持久化 + 19 条 API + 视图/任务动作                     | **完成并合并** | `main` `8dc9b93`              |
+| WS5b 组合根 + 流水线 + 收件箱/健康                              | 进行中         | worktree `E:/DSHWork/wt-ws5b` |
+| WS6 面板 UI 全页签                                              | 进行中         | worktree `E:/DSHWork/wt-ws6`  |
 | WS7 文档 / 安装 / 兼容矩阵 / CHANGELOG                          | 未开始         | 可与 WS6 并行                 |
 | WS8 端到端 + 真机 T0–T3 验收                                    | 未开始         | 最后收口                      |
 
-已安装状态：`dsh-whale-chan-assistant` 已装入 `desktop` profile（link 到本仓库）；WS1 合并后已重建并重载，面板与路由（`:59916`）复验通过；WS4 的两套 preset 行已出现在宿主配置目录（`status: schema`），真机会话冒烟留到 WS8。
+已安装状态：`dsh-whale-chan-assistant` 已装入 `desktop` profile（link 到本仓库）；WS1 面板/路由复验通过；WS4 两套 preset 行在宿主配置目录就绪；WS5a 合并后已重载——现网已创建 `state.db`（schema v2、13 张表），health 的 state/stateDir/database/lock/settings 全绿，channel/executor 暂为 unknown（WS5b 填充）；真机 T0–T3 留到 WS8。
 
 ---
 
 ## 2. 分支与提交坐标
 
-| 分支                 | HEAD      | 说明                                                       |
-| -------------------- | --------- | ---------------------------------------------------------- |
-| `main`               | `226847e` | WS4 合并；此前 WS3 `5da9601`、WS2 `e5742d3`、WS1 `e700ad8` |
-| `feat/ws0-bootstrap` | `b22118c` | 保留用于审计；内容已全部在 main                            |
-| `feat/ws1-core`      | `5bc1e4b` | 已合并；保留分支用于审计                                   |
-| `feat/ws2-dws`       | `dfd9e68` | 已合并；保留分支用于审计                                   |
-| `feat/ws3-brain`     | `b31b72e` | 已合并；保留分支用于审计                                   |
-| `feat/ws4-executor`  | `d8c81e7` | 已合并；保留分支用于审计                                   |
+| 分支                 | HEAD      | 说明                                                        |
+| -------------------- | --------- | ----------------------------------------------------------- |
+| `main`               | `8dc9b93` | WS5a 合并；此前 WS4 `226847e`、WS3 `5da9601`、WS2 `e5742d3` |
+| `feat/ws0-bootstrap` | `b22118c` | 保留用于审计；内容已全部在 main                             |
+| `feat/ws1-core`      | `5bc1e4b` | 已合并；保留分支用于审计                                    |
+| `feat/ws2-dws`       | `dfd9e68` | 已合并；保留分支用于审计                                    |
+| `feat/ws3-brain`     | `b31b72e` | 已合并；保留分支用于审计                                    |
+| `feat/ws4-executor`  | `d8c81e7` | 已合并；保留分支用于审计                                    |
+| `feat/ws5a-app-api`  | `776d01a` | 已合并；保留分支用于审计                                    |
 
 WS1 提交：
 

@@ -34,14 +34,14 @@
 ## 3. 订阅命令 **[H]**
 
 ```text
-dws event consume <event_key> --flatten -f ndjson --ttl <hours>
+dws event consume <event_key> --flatten -f ndjson --ttl <hours>h
     [--group <openConversationId>]
     [--user <userId> | --open-dingtalk-id <openDingTalkId>]
     [--profile <profile>]
 ```
 
 - **目标只用显式 ID**：`group` 用 `openConversationId`；`dm` 用 `userId`；只拿到 open id 时目标 id 写成 `open:<id>`，订阅走 `--open-dingtalk-id`。名称从不在订阅路径上被解析。
-- **TTL** 取 `settings.dws.eventTtlHours`（默认 24，范围 1–720），断线重连只补收有界窗口。
+- **TTL** 取 `settings.dws.eventTtlHours`（默认 24，范围 1–720），以 Go duration 形式传 `<hours>h`，断线重连只补收有界窗口。**T1 实测**：`--ttl 1` 被 dws 拒绝（exit 3，`invalid argument "1" for "--ttl" flag: time: missing unit in duration "1"`），因此 v1 固定整数小时 + `h` 后缀，不接受裸数字。
 - **就绪行**（stderr）**[H]**：
   ```text
   [event] ready event_key=<key> bus_pid=<n> subscribe_id=<id>
@@ -220,7 +220,7 @@ dws chat +chat-list --types p2p --page-size 50 --format json
 4. `auth status --format json` 的字段名、`expires_at` 格式与账号 id 字段（`user_id`/`userId`/`staff_id` 等别名）。
 5. `+messages-send` 的成功回执字段（messageId / processQueryKey / errcode）与 `--wait-delivery` 的行为。
 6. Windows：`stdin.end()` 是否能优雅结束订阅；`dws event stop <id> --yes` 的实际语法与权限。
-7. `--ttl` 的单位与补收窗口语义；断线后是否重复投递旧事件。
+7. `--ttl` 的补收窗口语义（单位已由 T1 证实必须带 `h`，v1 固定整数小时）；断线后是否重复投递旧事件。
 8. `--profile` 在 `event consume` / `auth status` / `send` 上的位置与可接受性。
 9. `open:<id>` 前缀是本项目的显式约定（不是 dws 语法），用于区分 `--user` 与 `--open-dingtalk-id`。
 10. 群目标“订阅全部消息 + 本地 mention 过滤”的权限前提（是否要求管理员授权）。

@@ -6,15 +6,140 @@
     - id: dsh-whale-chan-assistant
       name: dsh-whale-chan-assistant
 
-    # WS4 将在此加入两个 agent preset：
-    # - id: dsh-whale-chan-replier
-    #   name: '@deepseek-ai/dsh-agent-preset'
-    #   config:
-    #     id: dsh-whale-chan-replier
-    #     name: 鲸鱼酱 · 回复器
-    # - id: dsh-whale-chan-worker
-    #   name: '@deepseek-ai/dsh-agent-preset'
-    #   config:
-    #     id: dsh-whale-chan-worker
-    #     name: 鲸鱼酱 · 任务执行器
-    # 这两个 preset 的 !!js 条件、工具集与人设绑定在 WS4 实测后再冻结。
+    # 回复器 Session 专用（REPLIER_PRESET in src/executor/types.ts，由
+    # SessionModel 创建）。它只写得出一段文字：没有 shell、文件系统、后台作业、
+    # skill、子智能体、todo 或压缩之外的管理工具，因此提示词注入无法把它变成
+    # 执行器。web 搜索保持可用，因为检索端口在宿主机，这里只是不禁止模型查询；
+    # fetch 关闭、搜索超时 60 秒，与宿主机的研究预算对齐。
+    # 一个 preset 行没有「从选择器隐藏」的开关，所以名称与描述写明它的用途。
+    - id: dsh-whale-chan-replier-preset
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: dsh-whale-chan-replier
+        name: 鲸鱼酱 · 回复器
+        description: 鲸鱼酱的回复 Session 专用，不供手动选择。只做钉钉对话回复：没有 shell、文件、作业与 skill。
+        order: 90
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: 你是「鲸鱼酱」，主人授权你以主人的身份在钉钉上回复消息。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: false
+              searchTimeoutMs: 60000
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+
+    # 任务执行器 Session 专用（WORKER_PRESET in src/executor/types.ts，由
+    # DshTaskExecutor 创建）。这是 DSH `standard` preset 的子集：只保留完成一项
+    # 已批准任务所需的工具。前台命令最多等 5 秒就转入后台作业，后台作业的等待
+    # 同样是 5 秒，因此一条慢命令不会卡住下一次唤醒；省略了向人提问、计划模式、
+    # 插件管理与市场、定时、目标、工作流、子智能体、web fetch 与文档工具。
+    - id: dsh-whale-chan-worker-preset
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: dsh-whale-chan-worker
+        name: 鲸鱼酱 · 任务执行器
+        description: 鲸鱼酱的任务执行 Session 专用，不供手动选择。前台命令超 5 秒转入后台，只含执行工作所需的工具。
+        order: 91
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: 你是「鲸鱼酱」的任务执行器，在一个受限工作区内完成主人批准的任务。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          # 前台命令最多等 5 秒，之后 shell 工具把它转成后台作业。
+          - id: shell
+            name: cordis:group
+            group: true
+            isolate:
+              shell: true
+            config:
+              - id: bash-sandbox
+                name: '@deepseek-ai/dsh-bash-sandbox'
+                disabled: !!js process.platform === 'win32'
+                config:
+                  timeoutMs: 5000
+                  maxTimeoutMs: 5000
+              - id: pwsh-sandbox
+                name: '@deepseek-ai/dsh-pwsh-sandbox'
+                disabled: !!js process.platform !== 'win32'
+                config:
+                  timeoutMs: 5000
+                  maxTimeoutMs: 5000
+              - id: tool-bash
+                name: '@deepseek-ai/dsh-tool-bash'
+                disabled: !!js process.platform === 'win32'
+              - id: tool-pwsh
+                name: '@deepseek-ai/dsh-tool-pwsh'
+                disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          # 等待后台作业也在 5 秒结束；作业结束时它带着结果唤醒执行器。
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+            config:
+              waitTimeoutMs: 5000
+              maxWaitTimeoutMs: 5000
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: false
+              searchTimeoutMs: 60000
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024

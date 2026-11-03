@@ -1,6 +1,6 @@
 # 011 设置合约
 
-> 状态：WS0 已冻结。生成来源：`src/shared/fields.ts`；默认值来源：`src/shared/settings.ts`。
+> 状态：WS0 冻结字段，WS5a 起持久化（schema v2）。生成来源：`src/shared/fields.ts`；默认值来源：`src/shared/settings.ts`；持久化实现：`src/app/settings.ts`。
 
 本文件是设置字段的唯一人读表格，由 `scripts/generate-settings-docs.mjs` 生成。机器可读的唯一真源是：
 
@@ -92,6 +92,41 @@ pnpm docs:settings
 - 人设唯一写入口是 `PUT settings/persona`；`GET persona` 只读；原 `PUT persona` 已删除。
 - 所有管理请求要求 `x-whale-chan-request: 1`，缺失为 403 且不回传 `stateDir`。
 
+## 持久化、revision 与 history（WS5a）
+
+设置自 schema v2 起持久化在 `<stateDir>/state.db`，不再是内存 canary。表结构：
+
+| 表                | 列                                                                          | 说明                                        |
+| ----------------- | --------------------------------------------------------------------------- | ------------------------------------------- |
+| `settings`        | `block` PK、`value_json`、`revision`、`updated_at`                          | 每个 block 一行，JSON 是该 block 的唯一真源 |
+| `settings_history` | `id` 自增 PK、`block`、`value_json`、`revision`、`source`、`saved_at`        | 每次成功写入追加一行，永不改写              |
+| `settings_meta`    | `id`（固定 1）、`revision`、`updated_at`                                     | 全局 revision；迁移时插入初始行             |
+
+语义：
+
+- **启动加载**：每个 block 从表读取 JSON 并用 `SettingsSchema` 校验。缺失的 block 用默认值；损坏、不可读或不再匹配 schema 的行回退默认值并记录健康警告（`SettingsService.warnings()`），启动不失败。`SettingsView.blocks` 永远包含全部 9 个 block。
+- **单事务写入**：`SettingsService.update(block, patch, expectedRevision)` 在 `BEGIN IMMEDIATE` 中同时 upsert `settings`、追加 `settings_history`、把 `settings_meta.revision` 加一；任一步失败整体回滚，内存状态不变。
+- **block revision**：每个 block 独立递增，是 `PUT settings/:block` 的乐观并发令牌。`expectedRevision` 与当前值不同即 409 `settings_conflict`，并回传 `actualRevision`。
+- **全局 revision**：`settings_meta.revision` 每次成功写入加一；缺失或低于任一 block revision 时启动会向上修复（健康视图记为 `meta` 警告），不会回退。
+- **history**：`SettingsService.history(block?)` 按写入顺序倒序返回 `{ block, value, revision, source, savedAt }`；`source` 为 `panel`（面板写入）或 `internal`（宿主系统写入，如 `POST monitor/pause`）。
+- **系统写入**：`patchInternal(block, patch, source = 'internal')` 不要求 expected revision，但仍做 strict 校验、仍递增 revision、仍写 history。
+- **变更通知**：`onChange(listener)` 在每次成功写入后同步通知；监听器抛错不会回滚已提交的写入。
+
+## 错误码
+
+| HTTP | code                          | 触发                                                                    |
+| ---- | ----------------------------- | ----------------------------------------------------------------------- |
+| 400  | `invalid_settings`            | 合并后的 block 不满足 `SettingsSchema`；响应带 `issues[]`                 |
+| 400  | `revision_required`           | `PUT settings/:block` 缺少非负整数 `revision`                             |
+| 409  | `settings_conflict`           | block revision 已变化；响应带 `actualRevision`                             |
+| 404  | `unknown_block`               | 路径中的 block 不在 9 个冻结 block 内                                     |
+| 404  | `unknown_task` / `unknown_thread` | 记录不存在                                                              |
+| 400  | 领域 `UserError.code`          | 命令被拒绝（如 `notFailed`、`invalidWorkspace`、`alreadyDecided`）；响应带 `values` |
+| 400  | `channel_error`               | 通道一次性调用失败（消息已脱敏）                                          |
+| 503  | `channel_unavailable`         | WS5a 未接入通道时的 `targets/discover` / `targets/validate`               |
+| 503  | `state_unavailable`           | 运行时尚未就绪或启动失败                                                  |
+| 403  | `forbidden`                   | 缺少 `x-whale-chan-request: 1`                                          |
+
 ## 契约测试
 
 `tests/contract.spec.ts` 证明：
@@ -112,6 +147,10 @@ pnpm docs:settings
 3. 每个数值字段的 min/max 可解析、越界与小数被拒绝；
 4. 枚举只接受声明值，错误标量类型和非法时间格式被拒绝；
 5. 目标行缺少 ID、未知字段或非法枚举被拒绝。
+
+`tests/settings-service.spec.ts` 证明持久化语义：默认值、重开数据库后不丢、block/全局 revision、409 冲突、深合并与数组替换、损坏行降级、v1→v2 迁移幂等、history 与变更通知。
+
+`tests/api-routes.spec.ts` 与 `tests/task-actions.spec.ts` 证明 19 条路由、分页边界、错误码、审批/拒绝/取消/重试与 launch effect。
 
 ## 相关文档
 

@@ -1,6 +1,6 @@
 # 007 架构
 
-> 当前状态：WS1 建立 core 领域层、SQLite 存储、持久 effect 队列与 pass 调度器；WS2 实现 dws 通道；WS3 实现人设、提示、分类、检索与回复策略；WS4 实现 DSH 任务执行器、回复器会话模型与两套 agent preset。HTTP 路由、设置持久化与组合根接线仍属 WS5。**本文是各层整合的统一入口**：每层对外提供什么端口、依赖允许指向哪里，以本文为准。
+> 当前状态：WS1 建立 core 领域层、SQLite 存储、持久 effect 队列与 pass 调度器；WS2 实现 dws 通道；WS3 实现人设、提示、分类、检索与回复策略；WS4 实现 DSH 任务执行器、回复器会话模型与两套 agent preset；WS5a 实现持久化设置服务（schema v2）、19 条管理 API、视图与状态目录锁。WS5b 负责把通道、执行器与流水线接到组合根。**本文是各层整合的统一入口**：每层对外提供什么端口、依赖允许指向哪里，以本文为准。
 
 ## 1. 分层与依赖方向
 
@@ -73,7 +73,7 @@
 ### 4.1 `Store`
 
 - `Store.open(stateDir)` 打开 `<stateDir>/state.db`，创建父目录，设置 `journal_mode=WAL`、`synchronous=FULL`、`foreign_keys=ON`、`busy_timeout=5000`。
-- 用 `PRAGMA user_version` 记录 schema 版本（当前 `SCHEMA_VERSION = 1`）。`migrate()` 是前向、幂等的：版本相同直接返回，版本更低逐级升级，版本更高直接拒绝（不降级）。
+- 用 `PRAGMA user_version` 记录 schema 版本（当前 `SCHEMA_VERSION = 2`）。`migrate()` 是前向、幂等的：版本相同直接返回，版本更低逐级升级，版本更高直接拒绝（不降级）。v1→v2 只新增设置三表，可重复执行。
 - `atomic(fn)`：`BEGIN IMMEDIATE` / `COMMIT` / `ROLLBACK`；嵌套调用抛错。
 - JSON 列读取失败抛 `StoreCorruptionError(table, column, id)`，消息不含 SQL 与文件路径。
 - `close()` 关闭句柄；`trimThread(key, keep)` 只裁剪消息，不删 Decision/Task；`appendEvent` 写审计事件。
@@ -81,18 +81,21 @@
 
 ### 4.2 表与索引
 
-| 表            | 关键列                                                                                                                                   | 索引                                   |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| `messages`    | `id` PK、`thread_key`、`kind`、`sender_*`、`text`、`addressed`、`at`、`received_at`、`mentions_json`；WS1 增列 `sender_open_id`、`title` | `messages(thread_key, at)`             |
-| `threads`     | `key` PK、`peer_json`、`last_message_at`、`counts_json`                                                                                  | —                                      |
-| `decisions`   | `id` PK、`message_id UNIQUE`、`status`、`draft_json`、`outbound_id`、`task_id`、`confidence`（WS1 增列）、`updated_at`                   | `decisions(thread_key, at)`            |
-| `tasks`       | `id` PK、`status`、`approval_id`、`assignment_id`、`result_json`、`reason`（WS1 增列）、`updated_at`                                     | `tasks(status, updated_at)`            |
-| `approvals`   | `id` PK、`task_id UNIQUE`、`status`、`expires_at`                                                                                        | `approvals(status, expires_at)`        |
-| `assignments` | `id` PK、`task_id`、`state`、`session_id`、`workspace`、`outcome`                                                                        | —                                      |
-| `outbound`    | `id` PK、`idempotency_key UNIQUE`、`status`、`attempts`                                                                                  | `outbound(status)`                     |
-| `events`      | `seq` 自增 PK、`type`、`at`、`data_json`                                                                                                 | `events(at)`                           |
-| `kv`          | `k` PK、`v_json`                                                                                                                         | —                                      |
-| `effects`     | 见 §5                                                                                                                                    | `effects(state, due_at)`、部分唯一索引 |
+| 表                 | 关键列                                                                                                                                   | 索引                                   |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `messages`         | `id` PK、`thread_key`、`kind`、`sender_*`、`text`、`addressed`、`at`、`received_at`、`mentions_json`；WS1 增列 `sender_open_id`、`title` | `messages(thread_key, at)`             |
+| `threads`          | `key` PK、`peer_json`、`last_message_at`、`counts_json`                                                                                  | —                                      |
+| `decisions`        | `id` PK、`message_id UNIQUE`、`status`、`draft_json`、`outbound_id`、`task_id`、`confidence`（WS1 增列）、`updated_at`                   | `decisions(thread_key, at)`            |
+| `tasks`            | `id` PK、`status`、`approval_id`、`assignment_id`、`result_json`、`reason`（WS1 增列）、`updated_at`                                     | `tasks(status, updated_at)`            |
+| `approvals`        | `id` PK、`task_id UNIQUE`、`status`、`expires_at`                                                                                        | `approvals(status, expires_at)`        |
+| `assignments`      | `id` PK、`task_id`、`state`、`session_id`、`workspace`、`outcome`                                                                        | —                                      |
+| `outbound`         | `id` PK、`idempotency_key UNIQUE`、`status`、`attempts`                                                                                  | `outbound(status)`                     |
+| `events`           | `seq` 自增 PK、`type`、`at`、`data_json`                                                                                                 | `events(at)`                           |
+| `kv`               | `k` PK、`v_json`                                                                                                                         | —                                      |
+| `settings`         | `block` PK、`value_json`、`revision`、`updated_at`                                                                                       | —                                      |
+| `settings_history` | `id` 自增 PK、`block`、`value_json`、`revision`、`source`、`saved_at`                                                                    | `settings_history(block, id)`          |
+| `settings_meta`    | `id`（固定 1）、`revision`、`updated_at`                                                                                                 | —                                      |
+| `effects`          | 见 §5                                                                                                                                    | `effects(state, due_at)`、部分唯一索引 |
 
 标量列只用于索引与筛选，聚合的嵌套值以 JSON 列为准；写入时由 Store 同时维护两者。
 
@@ -103,6 +106,13 @@
 ### 4.4 KV（`kv.ts`）
 
 `kv` 表是通用持久键值区。`Kv` 提供 `get/set/delete/keys`；`record`/`family` 给后续工作流（设置、游标）注册类型化键。WS1 不预设业务键，避免与 WS5 的设置键冲突。
+
+### 4.5 设置服务（`settings.ts`，WS5a）
+
+- `SettingsService(store, clock)`：启动时把 `settings` 表读入内存；缺失/损坏/不再匹配 schema 的行回退默认值并记入 `warnings()`，启动不失败，`view()` 仍包含全部 9 个 block。
+- `update(block, patch, expectedRevision)`：块内深合并（数组/标量/null 替换）+ `SettingsSchema` strict 校验 + **单事务**写 `settings`、`settings_history`、`settings_meta`；revision 不匹配抛 `SettingsConflictError`（HTTP 409）。
+- `patchInternal(block, patch, source = 'internal')`：宿主系统写入（如暂停），不要求 expected revision，仍校验、仍记 history。
+- `view()`、`persona()`、`current()`、`history(block?)`、`onChange(listener)`；全局 revision 缺失或落后时启动会向上修复。
 
 ## 5. app：Effects（持久副作用队列）
 
@@ -182,6 +192,12 @@ brain 不开 socket、不 spawn 进程、不 import DSH 包：所有外部能力
 
 `unknown` 永不自动重发：投递结果不可证明时，宁可让人对账，也不重复打扰对方。
 
+### 6.5 app：HTTP 与组合根（WS5a）
+
+`createHttpHandler(HttpDeps)` 实现 19 条冻结路由；`httpDeps(runtime)` 用 getter 惰性取 `settings`/`store`/`engine`/`effects`/`clock`，因此路由可以在启动完成前挂载，未就绪时统一返回 503。`Runtime` 打开 `<stateDir>/state.db`、`SettingsService`、`Engine`、`Effects`（构造但不 `start`），并持有 `<stateDir>/.lock`（proper-lockfile，stale 10 s）。通道端口 `ChannelPort` 由 WS5b 注入；WS5a 对 `targets/discover|validate` 返回 503 `channel_unavailable`，任务动作只 `enqueue('launch', …)`，不执行。
+
+视图全部由 `src/app/views.ts` 从领域对象投影到 `src/shared/models.ts`：domain `approved` → 面板 `queued`，审计行来自 `events` 表（引擎事件由 Runtime 的 `emit` 写入）。
+
 ## 7. 与其它工作流的边界
 
 | 工作流          | 交界                                                                                                                                                                                                          |
@@ -210,6 +226,10 @@ brain 不开 socket、不 spawn 进程、不 import DSH 包：所有外部能力
 | `tests/executor-role-model.spec.ts` | 模型路由映射、空配置不注入、已有选择不覆盖、解析失败回退（12 条）                 |
 | `tests/presets.spec.ts`             | 宿主行仍在、两套 preset 的字段与工具集、中性人设前缀、无重复 id（17 条）          |
 | `tests/contract.spec.ts`            | 分层依赖规则、共享合约、文档数量                                                  |
+| `tests/settings-service.spec.ts`    | 默认值、持久化、revision、冲突、深合并、损坏降级、v1→v2、history（16 条）         |
+| `tests/api-routes.spec.ts`          | 19 条路由、分页、错误码、audit、channel 503/400（22 条）                          |
+| `tests/task-actions.spec.ts`        | 批准/拒绝/取消/重试、默认工作区、launch effect（9 条）                            |
+| `tests/runtime-lock.spec.ts`        | 打开/持久化/锁冲突/释放/启动失败（6 条）                                          |
 
 ## 相关文档
 

@@ -22,6 +22,7 @@ awaiting-approval ──────────> approved ───────
 - 创建：`classify(decisionId, { intent: 'task', task, approvalTtlMs })` 在**同一事务**写入 Task、Approval 和 Decision 链接，并把 Thread 的 `tasks` 计数加一。缺少任务标题或正数 TTL 时抛 `UserError` 并完整回滚。
 - 推进：只有人（`by: 'owner'`）可以批准或拒绝；只有执行器可以通过 `assignmentStarted` / `assignmentEnded` 推进运行态。
 - 终止：终态任务不在 `openTasks()` 中，也不能被取消、批准或再次启动。
+- 重试：只有 `failed` 可以重试，且重试是**新的派工**而不是复活旧派工（§8.1）；`cancelled` 不会被自动重试。
 
 ## 2. 批准门
 
@@ -141,6 +142,18 @@ interface ExecutorResult {
 | 执行器失败/超时 | `assignmentEnded` 以 `failed`/`timeout` 结束任务，结果落库；重试是新的派工，不是复活旧任务                                                               |
 
 取消与过期都不删除任何记录：任务、Approval、Assignment 与 Outbound 都保留，供面板与审计追溯。
+
+### 8.1 重试（WS5a）
+
+`Engine.retryTask(taskId, { by: 'owner', at, workspace, note? })`：
+
+1. 任务必须存在且 `status === 'failed'`，否则 `UserError('notFailed')`（`refused` 组）。`cancelled` 是主人主动结束的，不自动重试；`succeeded`、`awaiting-approval`、`approved`、`running` 同样拒绝。
+2. `workspace` 必须是非空绝对路径，否则 `missingWorkspace` / `invalidWorkspace`；与批准一样，相对路径不会被解析。
+3. 同一事务内写入：新的 `Assignment`（`pending`、新 id、`workspace`）、任务回到 `approved` 且 `assignmentId` 指向新派工；原 `Approval` 保持 `approved`，`task.result` 保留（执行器把上一次 `summary` 作为「上一轮结果（供参考）」传给新会话）。
+4. 发出 `task.retried`（`{ taskId, assignmentId }`）。
+5. 旧派工保留在 `assignments` 表里（`ended`、`failed`），审计链不丢。
+
+HTTP `POST tasks/:id/retry` 在命令提交后 `effects.enqueue('launch', taskId, { assignmentId, workspace })`；`launch` 处理器由 WS5b 注册，WS5a 只保留 `waiting` 行。工作区缺省规则与批准相同：`tasks.workspaceRoot` 或 `<stateDir>/tasks` 加 `<taskId>`，`~` 展开且必须为绝对路径。
 
 ## 9. 并发
 

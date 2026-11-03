@@ -208,6 +208,55 @@ bundle 在 `cordis.patch.yml` 里声明两个 `@deepseek-ai/dsh-agent-preset` �
 - 状态目录、日志轮转、审计保留策略；
 - 版本兼容矩阵与 CHANGELOG。
 
+## 9. 状态目录、数据库与锁（WS5a）
+
+WS5a 起设置与领域状态一起持久化在 SQLite；WS5a 只打开数据库、设置服务、领域引擎与 effect 队列，不启动通道/执行器（WS5b）。
+
+### 9.1 文件
+
+| 路径                        | 内容                                                           |
+| --------------------------- | -------------------------------------------------------------- |
+| `<stateDir>/state.db`       | 领域状态、设置、设置历史、审计事件、effect 队列                |
+| `<stateDir>/state.db-wal`   | WAL 日志；运行时存在，正常关闭后合并                           |
+| `<stateDir>/state.db-shm`   | WAL 共享内存索引                                               |
+| `<stateDir>/.lock`          | 状态目录锁（目录，不是文件）；运行时存在                       |
+| `<stateDir>/tasks/<taskId>` | 未指定工作区时的任务目录（`tasks.workspaceRoot` 可覆盖根目录） |
+| `<stateDir>/workspace`      | 回复器会话共用工作区                                           |
+
+`stateDir` 默认 `~/.dsh-whale-chan`，由部署配置 `stateDir` 覆盖；相对路径会被拒绝，`~` 会展开。
+
+### 9.2 schema v2
+
+- `PRAGMA user_version = 2`。v1 数据库在打开时**前向**迁移到 v2，迁移步骤可重复执行（`CREATE TABLE IF NOT EXISTS` + `INSERT OR IGNORE`）。
+- v2 新增三张表：`settings`（每个 block 一行 + block revision）、`settings_history`（追加写入）、`settings_meta`（全局 revision）。
+- 数据库版本**高于**本插件支持时拒绝打开，不降级；此时只能升级插件或换一个新的 `stateDir`。
+- 设置行损坏或不再匹配 schema 时**不会**阻止启动：该 block 回退默认值并在 `GET health` 的 `settings` 检查里显示降级；用 `GET settings` 确认当前值后重新保存即可。
+
+### 9.3 锁与单实例
+
+- 启动顺序：创建目录 → 获取 `<stateDir>/.lock` → 打开 `state.db` 并迁移 → 构造设置/引擎/effect 队列。任一步失败都会释放已获取的资源。
+- 锁的 stale 阈值是 10 秒：进程崩溃后，最多 10 秒内新的实例可以接管。锁被占用时启动直接失败，日志写明 `state directory is already in use`，HTTP 返回 503；**不会**循环重启。
+- 不要在插件运行时手动删除 `.lock`：那会让第二个实例与第一个实例同时写库。确认进程已退出且等待 10 秒后再处理。
+- `stop()` 会释放锁并关闭数据库；`ready` 与 `stop()` 都可重复调用。
+
+### 9.4 备份与恢复
+
+- **停机备份**：停止插件，等 `state.db-wal` 消失（或已合并），再复制整个 `stateDir`。
+- **在线备份**：WAL 模式下不能只复制 `state.db`。使用 `sqlite3 <stateDir>/state.db ".backup '<backup>.db'"`，或同时复制 `state.db`、`state.db-wal`、`state.db-shm` 三个文件。
+- 恢复时把备份放回一个**没有** `.lock` 的目录；若备份里残留 `.lock`，确认没有进程占用后删除它。
+- `settings_history` 与 `events` 只增不减；`advanced.auditRetentionDays` 的清理由后续工作流实现。
+
+### 9.5 故障排查
+
+| 现象                                               | 原因 / 处理                                                                               |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| 启动日志 `state directory is already in use`       | 另一个实例仍持有锁；停掉它，或把本实例的 `stateDir` 指到别处                              |
+| `GET health` 的 `settings` 检查为 `degraded`       | 某个设置行损坏或不再匹配 schema，已回退默认值；查看 `detail` 里的 block，重新保存该 block |
+| `Store schema N is newer than this build supports` | 数据库来自更新版本的插件；升级插件，或换新目录，不要手改 `user_version`                   |
+| `database is locked` / 写入超时                    | 有第二个进程打开了同一个 `state.db`；检查锁与残留进程，`busy_timeout` 为 5 秒             |
+| 重启后设置回到默认值                               | 确认 `stateDir` 没变、`state.db` 没有被替换；`GET settings` 的 revision 是否从 0 开始     |
+| `GET state` / 其它路由返回 503 `state_unavailable` | 启动失败（目录不可写、锁被占用、迁移失败）；看插件启动日志里的 `failed to start`          |
+
 ## 相关文档
 
 - [009 DWS 协议](009-dws-protocol.md)

@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { screen, waitFor, within } from '@testing-library/react'
 import { userEvent } from '@testing-library/user-event'
+import { readFileSync } from 'node:fs'
 import { zh } from '../src/client/locale.ts'
 import {
   overviewFixture,
@@ -66,6 +67,26 @@ describe('panel shell', () => {
     expect(screen.getByRole('tab', { name: zh['tabs.audit'] }).getAttribute('aria-selected')).toBe('true')
     await user.keyboard('{Home}')
     expect(screen.getByRole('tab', { name: zh['tabs.overview'] }).getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('keeps all seven tabs reachable while the strip can scroll', async () => {
+    const user = userEvent.setup()
+    renderPanel(overviewHandler())
+    const tabs = screen.getAllByRole('tab')
+    expect(tabs).toHaveLength(7)
+    tabs[0]?.focus()
+    for (let index = 0; index < 6; index += 1) {
+      await user.keyboard('{ArrowRight}')
+    }
+    const audit = screen.getByRole('tab', { name: zh['tabs.audit'] })
+    expect(audit.getAttribute('aria-selected')).toBe('true')
+    expect(audit.tabIndex).toBe(0)
+    expect(tabs.filter((tab) => tab.tabIndex === 0)).toHaveLength(1)
+    const styles = readFileSync('src/client/client.css', 'utf8')
+    const block = styles.slice(styles.indexOf('.wc-tabs {'), styles.indexOf('.wc-tab {'))
+    expect(block).toContain('overflow-x: auto')
+    expect(block).toContain('scrollbar-width: none')
+    expect(block).toContain('background: var(--dsw-alias-bg-base)')
   })
 
   it('shows the health badge and refreshes it from the header', async () => {

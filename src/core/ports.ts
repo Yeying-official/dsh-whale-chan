@@ -108,6 +108,7 @@ export interface DomainEvents {
   'task.approved': { taskId: string; approvalId: string; assignmentId: string }
   'task.rejected': { taskId: string; approvalId: string }
   'task.cancelled': { taskId: string; reason: string }
+  'task.retried': { taskId: string; assignmentId: string }
   'task.expired': { taskId: string; approvalId: string }
   'assignment.started': { taskId: string; assignmentId: string }
   'assignment.ended': { taskId: string; assignmentId: string; outcome: AssignmentOutcome }

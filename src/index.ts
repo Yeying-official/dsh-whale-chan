@@ -1,9 +1,10 @@
 /**
  * Cordis host entry of 鲸鱼酱 · 钉钉助理.
  *
- * WS0 mounts the runtime, the state route, and in-memory settings/persona
- * contract routes. No DingTalk event subscription, sender, task executor or
- * model call is started here.
+ * WS5a opens the state database, the durable settings service, the domain
+ * engine and the effects queue (not started), takes the state-directory lock,
+ * and mounts the full management API. No DingTalk event subscription, sender,
+ * task executor or model call is started here; WS5b composes those.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
@@ -27,9 +28,9 @@ export type { DeploymentConfig }
 export async function apply(ctx: Context, config: DeploymentConfig): Promise<void> {
   const runtime = new Runtime(config)
 
-  // Register unload before startup so a failed mkdir cannot leave a half-mounted
-  // plugin behind. The HTTP route is mounted before `ready` settles and answers
-  // 503 while startup is still pending or failed.
+  // Register unload before startup so a failed mkdir or a taken lock cannot
+  // leave a half-mounted plugin behind. The HTTP route is mounted before `ready`
+  // settles and answers 503 while startup is still pending or failed.
   ctx.effect(() => () => runtime.stop())
   ctx.effect(() => registerHttp(ctx, runtime))
 
@@ -47,5 +48,12 @@ export async function apply(ctx: Context, config: DeploymentConfig): Promise<voi
     )
     throw error
   }
-  ctx.logger.info('dsh-whale-chan-assistant ready; state directory: %s', runtime.stateDir)
+  const facts = runtime.facts()
+  ctx.logger.info(
+    'dsh-whale-chan-assistant ready; state.db schema v%s, settings loaded (%s warnings), lock %s; state directory: %s',
+    String(facts.schemaVersion),
+    String(runtime.settings.warnings().length),
+    facts.lockHeld ? 'held' : 'missing',
+    runtime.stateDir,
+  )
 }

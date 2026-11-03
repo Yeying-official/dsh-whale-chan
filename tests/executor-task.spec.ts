@@ -127,10 +127,10 @@ describe('session and workspace', () => {
     expect(result.sessionId).toBe(taskSessionId('task-1', 'assignment-1'))
   })
 
-  it('keeps invalidWorkspace in the domain table as a refused code', () => {
-    // The classification lives in core, so the API maps it with every other
-    // refusal; a move back into the executor would be caught here.
-    expect(USER_ERRORS.invalidWorkspace[0]).toBe('refused')
+  it('keeps invalidWorkspace in the domain table as an invalid input', () => {
+    // The classification lives in core, so the API maps it to 400 with the
+    // other correctable inputs; a move back into the executor would be caught here.
+    expect(USER_ERRORS.invalidWorkspace[0]).toBe('invalid')
   })
 
   it('defaults the permission to workspace-write', async () => {

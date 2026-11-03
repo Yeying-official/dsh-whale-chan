@@ -84,6 +84,15 @@ export interface CancelOptions {
   readonly at: IsoTime
 }
 
+export interface RetryOptions {
+  readonly by: 'owner'
+  readonly note?: string
+  /** When the person asked for the retry, as the panel recorded it. */
+  readonly at: IsoTime
+  /** Workspace the new assignment must run in. */
+  readonly workspace: string
+}
+
 export interface EndAssignmentOptions {
   readonly outcome: AssignmentOutcome
   readonly result?: TaskResult
@@ -488,6 +497,52 @@ export class Engine {
   }
 
   /**
+   * A person retries a failed task.
+   *
+   * A retry is a new assignment, not a revival: the task keeps its result (the
+   * executor quotes the previous summary as context for the fresh session), its
+   * original approval stays `approved`, and a new pending assignment becomes
+   * the task's current one. Only `failed` qualifies; a cancelled task was ended
+   * on purpose and is never retried implicitly.
+   */
+  retryTask(taskId: string, options: RetryOptions): { task: Task; assignment: Assignment } {
+    return this.command((emit) => {
+      const at = this.now()
+      const task = this.requireTask(taskId)
+      if (task.status !== 'failed') throw new UserError('notFailed')
+      this.instant(options.at)
+      if (options.workspace.trim().length === 0) throw new UserError('missingWorkspace')
+      const workspace = options.workspace.trim()
+      if (!isAbsolutePath(workspace)) throw new UserError('invalidWorkspace')
+      const approval = this.repos.approvals.byTaskId(taskId)
+      if (!approval) throw new UserError('unknownApproval')
+      if (approval.status !== 'approved') throw new UserError('notApproved')
+
+      const assignment: Assignment = {
+        id: this.options.ids.next('assignment'),
+        taskId,
+        state: 'pending',
+        sessionId: null,
+        workspace,
+        startedAt: null,
+        endedAt: null,
+        outcome: null,
+        error: null,
+      }
+      const retried: Task = {
+        ...task,
+        status: 'approved',
+        assignmentId: assignment.id,
+        updatedAt: at,
+      }
+      this.repos.assignments.save(assignment)
+      this.repos.tasks.save(retried)
+      emit({ type: 'task.retried', at, data: { taskId, assignmentId: assignment.id } })
+      return { task: retried, assignment }
+    })
+  }
+
+  /**
    * Expire every pending approval whose `expiresAt` has passed, together with
    * its still-awaiting task. A second sweep over an unchanged clock returns an
    * empty list, because the approvals are no longer pending.
@@ -697,4 +752,16 @@ function advanceThread(thread: Thread, message: InboundMessage): Thread {
     lastMessageAt: message.at > thread.lastMessageAt ? message.at : thread.lastMessageAt,
     counts: { ...thread.counts, inbound: thread.counts.inbound + 1 },
   }
+}
+
+/**
+ * Whether a workspace path is absolute on the platform that produced it.
+ *
+ * `src/core` may not import `node:path`, so this accepts the three forms the
+ * domain can meet: a POSIX path, a Windows drive path and a UNC share. The
+ * executor repeats the check with the host's own path module before it creates
+ * anything; the domain refuses early so a refused retry leaves no write behind.
+ */
+function isAbsolutePath(value: string): boolean {
+  return value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\')
 }

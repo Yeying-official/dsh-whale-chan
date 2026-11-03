@@ -5,19 +5,24 @@
 import { describe, expect, it } from 'vitest'
 import { join } from 'node:path'
 import {
-  DROPPED_MARKER,
   ExecutorError,
-  MAX_PROMPT_CHARS,
   MODEL_TURN_TIMEOUT_MS,
-  REPLY_TIMEOUT_MS,
   ModelAbortedError,
   ModelFailedError,
   ModelTimeoutError,
   REPLIER_PRESET,
+} from '../src/executor/index.ts'
+// The session-based reply path is not part of the public surface any more: the
+// replier calls the model directly (`llm-model.ts`). These tests keep covering
+// the session model so a future tool-using reply starts from something known.
+import {
+  DROPPED_MARKER,
+  MAX_PROMPT_CHARS,
+  REPLY_TIMEOUT_MS,
   SessionModel,
   assemblePrompt,
   threadDigest,
-} from '../src/executor/index.ts'
+} from '../src/executor/model.ts'
 import { FakeSessionHost, RecordingLogger } from './fixtures/executor.ts'
 
 function learning(): { host: FakeSessionHost; model: SessionModel; logger: RecordingLogger } {

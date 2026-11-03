@@ -131,10 +131,10 @@ dws event stop <subscribe_id> --yes   # 手动清理遗留订阅
 
 bundle 在 `cordis.patch.yml` 里声明两个 `@deepseek-ai/dsh-agent-preset` 行，除此之外什么也不注册。它们由执行器按 id 选择，**不出现在手动选择器里**：preset 行没有「隐藏」开关，所以两行的 `description` 都写明「不供手动选择」，顺序（`order` 90/91）只决定名单内的排列。
 
-| preset id                | 谁创建                        | 用途                                 | 工具集                                                                                                                     |
-| ------------------------ | ----------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| `dsh-whale-chan-replier` | `SessionModel`（回复路径）    | 钉钉对话回复；完整指示随用户消息投递 | persona、agent-instructions、time-context、tool-web（`fetch:false`）、compaction                                           |
-| `dsh-whale-chan-worker`  | `DshTaskExecutor`（任务路径） | 执行一项已批准任务                   | 上表 + shell（bash/pwsh 按平台二选一）、tool-fs、tool-fs-search、tool-jobs（5 s）、skill-filesystem、tool-skill、tool-todo |
+| preset id                | 谁创建                             | 用途                                               | 工具集                                                                                                                     |
+| ------------------------ | ---------------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `dsh-whale-chan-replier` | 暂不使用（未来「需要工具的回复」） | 会话版回复参考实现；当前回复走 `LlmModel` 直接调用 | persona、agent-instructions、time-context、tool-web（`fetch:false`）、compaction                                           |
+| `dsh-whale-chan-worker`  | `DshTaskExecutor`（任务路径）      | 执行一项已批准任务                                 | 上表 + shell（bash/pwsh 按平台二选一）、tool-fs、tool-fs-search、tool-jobs（5 s）、skill-filesystem、tool-skill、tool-todo |
 
 - **回复器没有 shell、文件、作业、skill 与 todo**。提示词注入最多让模型写一段文字，无法让它执行命令或改文件。
 - **执行器前台命令最多等 5 秒**，之后由 shell 工具转入后台作业；`job_output` 的等待同样 5 秒。这样一条慢命令不会长期占住一次回合。
@@ -147,19 +147,19 @@ bundle 在 `cordis.patch.yml` 里声明两个 `@deepseek-ai/dsh-agent-preset` �
 | `~/.dsh-whale-chan/state.db`       | 领域状态、审计事件、effect 队列                            |
 | 批准人选择的目录                   | 任务工作区（`Assignment.workspace`，**优先**）             |
 | `~/.dsh-whale-chan/tasks/<taskId>` | 没有选择目录时的回退（`tasks.workspaceRoot` 可覆盖根目录） |
-| `~/.dsh-whale-chan/workspace`      | 回复器会话共用工作区（不写业务文件）                       |
+| `~/.dsh-whale-chan/workspace`      | 会话版回复器（未接入运行时）的共用工作区                   |
 
 - **工作区以批准为准**：批准任务时主人选的目录就是 worker 的目录；设置里的 `tasks.workspaceRoot` 只是「批准时没选目录」的默认值。相对路径会被拒绝（领域错误 `invalidWorkspace`，属用户可纠正的 `refused` 组），因为 DSH 会按宿主工作目录解析它，主人无法预测文件落在哪里。
 - 工作区目录在会话创建**之前**用 `mkdir -p` 建好：DSH 的 `workspaceRegistry.create` 只接受已存在的目录，不存在的路径会被拒绝。
 - 回退路径里的 `taskId` 必须是单一安全路径段；含 `/`、`\` 或 `..` 的 id 会被执行器拒绝，不会写到根目录之外。
-- 任务会话 id 是 `whale-task-<taskId>-<派工后缀>`（同一任务的每次派工都是一个新会话），回复器会话 id 是 `whale-reply-<sha1(threadKey) 前 12>`；这两类会话会出现在 DSH 的会话列表里，标题分别是 `任务 · <标题>` 与 `钉钉 · <会话标题>`。
+- 任务会话 id 是 `whale-task-<taskId>-<派工后缀>`（同一任务的每次派工都是一个新会话），标题 `任务 · <标题>`。**回复不建会话**：分类与草稿走 `ctx.llm.stream`，所以 DSH 的会话列表里只会出现任务会话。
 - 模型来自设置：worker 用 `models.worker`，回复器用 `models.reply`；两者都为空时用部署默认模型，且**不会**修改 DSH 的全局默认模型。
 - 单回合上限 **90 秒**（`MODEL_TURN_TIMEOUT_MS`）：本机模型首 token 可能 15–30 秒，这是为了让慢但健康的回合不被误判超时；任务总预算仍是 `tasks.timeoutMinutes`，只是不会低于这个值。
 
 ### 5.2 权限
 
 - worker 会话的权限预设取 `tasks.permissionPreset`（默认 `workspace-write`）。只有 `danger-full-access` 会被原样使用，其它值一律按 `workspace-write` 处理——设置写坏了也不会把执行器放宽。
-- 回复器会话固定 `workspace-write`。
+- 回复路径不触碰文件系统，只调用模型服务，因此没有权限预设可设。
 - 执行器通过 `ctx.permissionPresets.set(session, name)` 在会话创建后立即设置；权限预设名写错会在这个调用上抛错，而不是在模型调用时才失败。
 
 ### 5.3 会话创建失败怎么排查
@@ -175,7 +175,7 @@ bundle 在 `cordis.patch.yml` 里声明两个 `@deepseek-ai/dsh-agent-preset` �
 | 结果 `cancelled`                                            | 主人在面板取消，或插件在停机时清理运行中的任务           | 正常路径；`error` 里带取消原因                                                                                                  |
 | `permissionPresets.set` 抛「unknown preset」                | 部署的 preset 名单里没有 `workspace-write`               | 检查 DSH 的权限 preset 配置；本插件只使用这两个名字                                                                             |
 
-`SessionModel` 侧的失败对回复路径表现为「模型错误」，不是任务失败：它会抛 `ModelTimeoutError` / `ModelFailedError` / `ModelAbortedError`，由调用方决定降级为「不回复」还是「回复但说明」。
+回复路径的失败对 brain 表现为「模型错误」，不是任务失败：`LlmModel` 会抛 `ModelFailedError` / `ModelAbortedError`（会话版还会抛 `ModelTimeoutError`），由调用方决定降级为「不回复」还是「回复但说明」。
 
 ### 5.4 真机会话冒烟（WS8 执行）
 

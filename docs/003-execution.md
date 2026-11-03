@@ -100,9 +100,9 @@ interface ExecutorResult {
 
 ## 5. 会话、工作区与权限
 
-| 项       | 任务执行会话                                                    | 回复器会话                               |
+| 项       | 任务执行会话                                                    | 回复器                                   |
 | -------- | --------------------------------------------------------------- | ---------------------------------------- |
-| 会话 id  | `whale-task-<taskId>-<assignmentId 后 8 位>`                    | `whale-reply-<sha1(threadKey) 前 12>`    |
+| 会话 id  | `whale-task-<taskId>-<assignmentId 后 8 位>`                    | **无**（直接 LLM 调用，不建会话）        |
 | 工作区   | `Assignment.workspace`，缺省用 `<tasks.workspaceRoot>/<taskId>` | `~/.dsh-whale-chan/workspace`            |
 | preset   | `dsh-whale-chan-worker`                                         | `dsh-whale-chan-replier`                 |
 | 权限预设 | `settings.tasks.permissionPreset`（默认窄）                     | `workspace-write`                        |
@@ -113,8 +113,9 @@ interface ExecutorResult {
 - **系统提示**由 `renderPersona(persona, …)` 渲染的人设块加任务段组成，通过 `agent.ctx.systemPrompt.section({ name: 'dsh-whale-chan-task', order: 900, interpolate: false })` 注册。它不是 `complete` 段：preset 自带的 persona 与指令段落保留，本段追加在后。`interpolate: false` 保证主人写进人设的字面 `{{…}}` 不会被 DSH 变量替换。
 - **权限**只取设置里的两个值；其它值一律按 `workspace-write` 处理。
 - **工作区以批准为准**：`ExecutorRequest.workspace` 由 WS5 从 `Assignment.workspace` 传入，优先于 `tasks.workspaceRoot`；两者都没有配置时用 `<stateDir>/tasks/<taskId>`。相对路径一律拒绝（`UserError('invalidWorkspace')`，属领域 `refused` 组），因为 DSH 会按宿主工作目录解析它，主人无法预测任务落在哪里。
-- **模型**来自设置的两个独立路由：worker 用 `settings.models.worker`，回复器用 `settings.models.reply`。路由在会话创建后、首个回合前写入会话日志（`model/selection`），并只注入第一次模型请求；`provider` 或 `model` 为空则跳过，用部署默认模型。它**不修改** DSH 的全局默认模型，所以回复路由不会变成所有新会话的默认；会话已有选择或已开过请求头时也不覆盖，主人在面板里换的模型始终优先。
-- 会话按需重建：`whale-reply-*` 在满 20 轮或空闲 30 分钟后重建（先取消旧会话的回合，再以 `fresh` 请求新会话）；`whale-task-*` 的 id 带派工后缀，因此**重试是新会话**，不会复用上次失败的对话。
+- **模型**来自设置的两个独立路由：worker 用 `settings.models.worker`（会话创建后、首个回合前写入 `model/selection`，只注入第一次请求）；回复器用 `settings.models.reply`（`LlmModel` 每次调用前用它解析路由；为空则用宿主默认 `agentDefaultModel`）。两者都不**修改** DSH 的全局默认模型。
+- 任务会话按需创建：`whale-task-*` 的 id 带派工后缀，因此**重试是新会话**，不会复用上次失败的对话。
+- **回复器不建会话**（T3 真机结论）：回复曾经跑在一个 DSH 会话里，但会话会带上 preset 挂载的全部工具 schema，实测 141k token，prefill 超过 60 秒。分类与草稿不需要任何工具，所以回复路径改为 `LlmModel`：一次 `ctx.llm.stream`，只带 `system` 与一条 user 消息，不注册工具、不建工作区、不落 session。`SessionModel` 仍留在 `src/executor/model.ts`（不公开导出）作为将来「需要工具的回复」的参考实现。
 
 ## 6. 投递与幂等
 

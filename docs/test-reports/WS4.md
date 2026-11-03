@@ -23,16 +23,17 @@ $ pnpm test
  ✓ tests/executor-research.spec.ts (10 tests) 53ms
  ✓ tests/executor-task.spec.ts (31 tests) 52ms
  ✓ tests/executor-model.spec.ts (21 tests) 44ms
+ ✓ tests/executor-llm-model.spec.ts (16 tests) 21ms
  ✓ tests/presets.spec.ts (17 tests) 21ms
  ✓ tests/executor-role-model.spec.ts (12 tests) 14ms
 （另有既有 27 个 spec 文件）
 
- Test Files  33 passed (33)
-      Tests  439 passed (439)
+ Test Files  34 passed (34)
+      Tests  455 passed (455)
 
 $ pnpm build
 ℹ [CJS] lib\client.js    42.04 kB │ gzip: 12.48 kB
-ℹ [ESM] lib\index.js    19.94 kB │ gzip:  6.32 kB
+ℹ [ESM] lib\index.js    20.17 kB │ gzip:  6.44 kB
 ℹ [ESM] lib\index.d.ts   0.75 kB │ gzip:  0.33 kB
 ✔ Build complete
 
@@ -56,12 +57,13 @@ $ git status --porcelain
 | ----------------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `tests/executor-task.spec.ts`       | 31   | 批准门（pending / 未批准任务 / 错配批准 / 不安全 id）、会话参数与模型路由、批准目录优先 / `~` 展开 / 空值回退 / 相对路径拒绝、系统提示内容、投递一次、四种结局、取消幂等、回调恰好一次、失败监听器不影响结果、同任务并发拒绝、重试新会话与「上一轮结果」 |
 | `tests/executor-model.spec.ts`      | 21   | 提示组装与分隔、超预算丢最旧、单条超长截断、system 永不丢、会话 id/标题/工作区/preset、回复路由透传与缺省、会话复用、`forThread` 隔离、串行互斥、轮数重建（`fresh` + 旧会话取消）、空闲重建、超时/失败/中止三类错误、空文本、dispose                     |
+| `tests/executor-llm-model.spec.ts`  | 16   | 回复直接调用：请求形状（`system` / 一条 user / `maxTokens` / `signal`、无 `tools`）、路由优先级与回退、delta 拼接与 reasoning 忽略、流错误/中止、只访问 `llm`+`agentDefaultModel`（代理上下文）、`maxChars`→`maxTokens` 映射与上限                       |
 | `tests/executor-role-model.spec.ts` | 12   | 路由映射（含 effort、半配置、设置默认值）、`needsSeeding` 四种判断、空配置不注入、已有选择不覆盖、成功才 append + wire + flush、解析失败回退宿主默认                                                                                                     |
 | `tests/executor-research.spec.ts`   | 10   | 事实/来源映射、hostname 兜底、非 http(s) 丢弃与去重、limit 上限、长事实截断、空结果、异常、中止、预算耗尽、空查询不调用                                                                                                                                  |
 | `tests/executor-session.spec.ts`    | 13   | `TurnTracker` 归属回合、早于投递的 `turn/end`、历史已结束、aborted/failed 详情、无 requestId 的下一回合；`awaitTurn` 实时匹配、立即返回、订阅/扫描竞态补放、超时、中止、已中止不订阅、忽略无关事件                                                       |
 | `tests/presets.spec.ts`             | 17   | 宿主行仍在、无重复 loader id、两套 preset 的 id/name/order、回复器工具集与「无 shell/fs/jobs/skill」、执行器工具集、shell 平台门控、jobs 5 秒、compaction 隔离、插件名语法、`!!js` 位置、两套 preset 的中性人设前缀                                      |
 
-合计 **104** 条；仓库总数 335 → **439**。
+合计 **120** 条；仓库总数 335 → **455**。
 
 ## 3. 变异实验
 
@@ -162,6 +164,25 @@ waterfall，`ctx.on(..., { prepend: true })` 是 Cordis 的 `EventOptions.prepen
 
 一条教训：60 秒的回合上限对本机模型不够。测试无法发现这个问题——它需要真实的首 token 延迟，
 所以这条上限的表达方式是「常量 + 断言」，方便下次直接调数值而不是散落在调用点。
+
+## 5.2 T3 根因：会话带着 141k token 的工具 schema
+
+T3 的 `contextBreakdown.toolsTokens=141579` 说明问题不在超时，而在回复走了 DSH 会话：
+preset 挂载的工具 schema 每次都被塞进 classification/draft 的 prefill，首 token 自然要 60 秒以上。
+brain 的分类与草稿**不需要任何工具**，所以回复路径改为直接调用模型：
+
+- `src/executor/llm-model.ts` 的 `LlmModel implements ModelPort`：`system` 作为 `system` 字段，
+  messages 拼成一条 user 消息，调用 `ctx.llm.stream`；不注册工具、不建工作区、不落 session、
+  不写全局默认模型。路由先用 `settings.models.reply`，为空回退宿主 `agentDefaultModel`。
+- `src/executor/index.ts` 不再导出 `SessionModel`（会话版留在 `model.ts`，测试直接 import 它）；
+  `src/app/runtime.ts` 的文件头写明「回复是直接模型调用，不是会话」。
+- 新增 16 条测试，其中一条用 Proxy 上下文断言只访问 `llm` 与 `agentDefaultModel`，
+  `sessionController` / `agents` / `sessionPersistence` 一次都不碰。
+- 预算：`LlmModel` 不带自己的计时器，超时由 brain 的 `withDeadline` 控制；`maxChars/4`
+  映射为 `maxTokens`（上限 4096）。
+
+预期效果：一次分类请求从「prefill 141k 工具 schema」变成「system + 一条 user 消息」，
+T3 应在 1–3 秒内返回。
 
 ## 6. 复核清单
 

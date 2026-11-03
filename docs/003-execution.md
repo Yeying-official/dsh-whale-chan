@@ -108,9 +108,10 @@ interface ExecutorResult {
 | 权限预设 | `settings.tasks.permissionPreset`（默认窄）                     | `workspace-write`                                      |
 | 模型     | `settings.models.worker`                                        | `settings.models.reply`                                |
 | 标题     | `任务 · <title>`                                                | `钉钉 · <thread 标题>`                                 |
-| 系统提示 | 人设 + 任务 brief/要求/发起人 + 安全规则 + 汇报                 | preset 的 persona 段；完整指示随消息投递               |
+| 系统提示 | 人设 + 任务 brief/要求/发起人 + 安全规则 + 汇报（面向发起人）   | preset 的 persona 段；完整指示随消息投递               |
 
 - **系统提示**由 `renderPersona(persona, …)` 渲染的人设块加任务段组成，通过 `agent.ctx.systemPrompt.section({ name: 'dsh-whale-chan-task', order: 900, interpolate: false })` 注册。它不是 `complete` 段：preset 自带的 persona 与指令段落保留，本段追加在后。`interpolate: false` 保证主人写进人设的字面 `{{…}}` 不会被 DSH 变量替换。
+- **汇报是给人看的**：`## 汇报` 段要求 worker 只写结果摘要（做了什么、改了哪些文件、怎么验证、还有什么没做完），并明确禁止 `Route:`/`Aegis` 等内部分类、会话 id（`whale-task-…`）、工作区绝对路径、工具名/函数名、推理旁白与 emoji。这段汇报会原样进群回复，模板层脱敏只是第二道防线。
 - **权限**只取设置里的两个值；其它值一律按 `workspace-write` 处理。
 - **工作区以批准为准**：`ExecutorRequest.workspace` 由 WS5 从 `Assignment.workspace` 传入，优先于 `tasks.workspaceRoot`；两者都没有配置时用 `<stateDir>/tasks/<taskId>`。相对路径一律拒绝（`UserError('invalidWorkspace')`，属领域 `refused` 组），因为 DSH 会按宿主工作目录解析它，主人无法预测任务落在哪里。
 - **模型**来自设置的两个独立路由：worker 用 `settings.models.worker`（会话创建后、首个回合前写入 `model/selection`，只注入第一次请求）；回复器用 `settings.models.reply`（`SessionModel` 在 `ensureSession` 时传入，会话内沿用）。两者都不**修改** DSH 的全局默认模型。

@@ -135,6 +135,25 @@ describe('session and workspace', () => {
     expect(USER_ERRORS.invalidWorkspace[0]).toBe('invalid')
   })
 
+  it('tells the worker to keep its report free of internal detail', async () => {
+    const { host, executor } = harness()
+    const task = makeTask()
+    await executor.execute({
+      task,
+      approval: makeApproval(task),
+      settings: makeSettings(),
+      signal: new AbortController().signal,
+    })
+    const prompt = host.ensured[0]?.systemPrompt ?? ''
+    // The report is posted to the group verbatim, so the prompt has to forbid
+    // router/agent internals before the model writes them.
+    expect(prompt).toContain('不要写 `Route:`')
+    expect(prompt).toContain('Aegis')
+    expect(prompt).toContain('会话 id')
+    expect(prompt).toContain('推理过程')
+    expect(prompt).toContain('不要使用 emoji')
+  })
+
   it('defaults the permission to workspace-write', async () => {
     const { host, executor } = harness()
     const task = makeTask()

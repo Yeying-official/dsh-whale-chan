@@ -143,17 +143,22 @@ bundle 在 `cordis.patch.yml` 里声明两个 `@deepseek-ai/dsh-agent-preset` �
 
 ### 5.1 目录
 
-| 路径                               | 内容                                                       |
-| ---------------------------------- | ---------------------------------------------------------- |
-| `~/.dsh-whale-chan/state.db`       | 领域状态、审计事件、effect 队列                            |
-| 批准人选择的目录                   | 任务工作区（`Assignment.workspace`，**优先**）             |
-| `~/.dsh-whale-chan/tasks/<taskId>` | 没有选择目录时的回退（`tasks.workspaceRoot` 可覆盖根目录） |
-| `~/.dsh-whale-chan/workspace`      | 回复器会话的共用工作区（运行时使用）                       |
+| 路径                                               | 内容                                                                                   |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `~/.dsh-whale-chan/state.db`                       | 领域状态、审计事件、effect 队列                                                        |
+| 批准人选择的目录                                   | 任务工作区（`Assignment.workspace`，**优先**，人工逃生口）                             |
+| `<root>/conversation-<sha256(threadKey) 前 16 位>` | 会话工作区：该会话的回复器与任务共用；`<root>` 默认 `~/.dsh-whale-chan/workspaces`     |
+| `~/.dsh-whale-chan/workspaces`                     | `tasks.workspaceRoot` 留空时的会话工作区根                                             |
+| `~/.dsh-whale-chan/tasks/<taskId>`                 | 旧回退（只在组合根没有注入工作区解析器时使用）                                         |
+| `~/.dsh-whale-chan/workspace`                      | 旧回复器共用工作区（仅 `SessionModel` 没有 `workspaceFor` 时使用，当前运行时不会走到） |
 
-- **工作区以批准为准**：批准任务时主人选的目录就是 worker 的目录；设置里的 `tasks.workspaceRoot` 只是「批准时没选目录」的默认值。相对路径会被拒绝（领域错误 `invalidWorkspace`，属用户可纠正的 `refused` 组），因为 DSH 会按宿主工作目录解析它，主人无法预测文件落在哪里。
-- 工作区目录在会话创建**之前**用 `mkdir -p` 建好：DSH 的 `workspaceRegistry.create` 只接受已存在的目录，不存在的路径会被拒绝。
-- 回退路径里的 `taskId` 必须是单一安全路径段；含 `/`、`\` 或 `..` 的 id 会被执行器拒绝，不会写到根目录之外。
-- 任务会话 id 是 `whale-task-<taskId>-<派工后缀>`（同一任务的每次派工都是一个新会话），标题 `任务 · <标题>`。**回复器也建会话**：每个线程一个 `whale-reply-<threadDigest 前 12 位>`，标题 `钉钉 · <thread 标题>`，工作区 `<stateDir>/workspace`；因此 DSH 会话列表里会同时出现任务会话与回复器会话，交互过程可查看。
+- **会话工作区按 threadKey 命名**：目录名是 `conversation-<sha256(threadKey) 前 16 位>`，不是标题、不是 domain id，所以路径段永远安全（Windows 与 POSIX 都不会出现分隔符、保留名或 `..`）。同一个会话的回复器与任务因此落在同一个目录，任务写下的文件后续回复能直接看到；不同会话即使标题相同也互不干扰。
+- **工作区仍以批准为准**：批准任务时主人显式选的目录就是 worker 的目录，优先于会话工作区；没选目录时，HTTP 在批准/重试时就把该任务会话的工作区路径写进 `Assignment.workspace`，执行器记录并运行在这个实际路径上。相对路径会被拒绝（领域错误 `invalidWorkspace`，属用户可纠正的 `refused` 组），因为 DSH 会按宿主工作目录解析它，主人无法预测文件落在哪里。
+- **`tasks.workspaceRoot` 是回复与任务共用的根**：它不再表示「每个任务一个子目录的根」，而是会话工作区的根；相对路径会被记录 warning 并回退到 `<stateDir>/workspaces`。修改它之后只影响新解析出的路径，旧目录与注册记录保留。
+- **启用目标时预建**：`group` 与普通 `dm` 目标在启动及设置热应用时创建目录并在 `workspaceRegistry` 注册（标题 `钉钉 · <目标 label>`）；`at-me` 是全局订阅、`open:` 单聊只有发送用 id，两者都在首条消息时惰性创建。重复目标按会话去重；禁用/删除目标**不删除**目录或注册记录，因为同一会话可能仍经其他目标到达，历史也属于主人。
+- 工作区目录在会话创建**之前**用 `mkdir -p` 建好：DSH 的 `workspaceRegistry.create` 只接受已存在的目录，不存在的路径会被拒绝。`ensureSession` 对已注册的目录是幂等的；标题变了只调用 `setTitle`。
+- 旧回退路径里的 `taskId` 必须是单一安全路径段；含 `/`、`\` 或 `..` 的 id 会被执行器拒绝，不会写到根目录之外。
+- 任务会话 id 是 `whale-task-<taskId>-<派工后缀>`（同一任务的每次派工都是一个新会话），标题 `任务 · <标题>`。**回复器也建会话**：每个线程一个 `whale-reply-<threadDigest 前 12 位>`，标题 `钉钉 · <thread 标题>`，工作区就是该会话的 `conversation-<digest>`；因此 DSH 会话列表里会同时出现任务会话与回复器会话，交互过程可查看。会话 id 的哈希输入从 v2 起包含布局版本（`<threadKey>\0v2`），所以升级后第一次回复会新建会话，旧会话与历史原样保留。
 - 模型来自设置：worker 用 `models.worker`，回复器用 `models.reply`；两者都为空时用部署默认模型，且**不会**修改 DSH 的全局默认模型。
 - 单回合上限 **90 秒**（`MODEL_TURN_TIMEOUT_MS`）：本机模型首 token 可能 15–30 秒，这是为了让慢但健康的回合不被误判超时；任务总预算仍是 `tasks.timeoutMinutes`，只是不会低于这个值。
 
@@ -236,13 +241,13 @@ WS5a 起设置与领域状态一起持久化在 SQLite；WS5a 只打开数据库
 
 ### 9.1 文件
 
-| 路径                        | 内容                                                           |
-| --------------------------- | -------------------------------------------------------------- |
-| `<stateDir>/state.db`       | 领域状态、设置、设置历史、审计事件、effect 队列                |
-| `<stateDir>/state.db-wal`   | WAL 日志；运行时存在，正常关闭后合并                           |
-| `<stateDir>/state.db-shm`   | WAL 共享内存索引                                               |
-| `<stateDir>/.lock`          | 状态目录锁（目录，不是文件）；运行时存在                       |
-| `<stateDir>/tasks/<taskId>` | 未指定工作区时的任务目录（`tasks.workspaceRoot` 可覆盖根目录） |
+| 路径                                          | 内容                                                               |
+| --------------------------------------------- | ------------------------------------------------------------------ |
+| `<stateDir>/state.db`                         | 领域状态、设置、设置历史、审计事件、effect 队列                    |
+| `<stateDir>/state.db-wal`                     | WAL 日志；运行时存在，正常关闭后合并                               |
+| `<stateDir>/state.db-shm`                     | WAL 共享内存索引                                                   |
+| `<stateDir>/.lock`                            | 状态目录锁（目录，不是文件）；运行时存在                           |
+| `<stateDir>/workspaces/<conversation-digest>` | 会话工作区的默认根（`tasks.workspaceRoot` 可覆盖；回复与任务共用） |
 
 `stateDir` 默认 `~/.dsh-whale-chan`，由部署配置 `stateDir` 覆盖；相对路径会被拒绝，`~` 会展开。
 
@@ -288,7 +293,7 @@ WS5a 起设置与领域状态一起持久化在 SQLite；WS5a 只打开数据库
 2. 加载 `SettingsService`、`Engine`、`Effects` 与持久计数器；
 3. `PromptStore.preload()` 读取 `prompts/*.md` 五份模板。**缺失或空白属于包完整性问题：health `prompts: error`，通道、流水线与 effect 队列都不装配**（不会回落到通用提示词，也不会半运行制造无效重试）；
 4. `probeAuth()`：`available`、`authenticated`、`token_valid`、**账号 id**（`user_id`/`userId` 等别名）缺一不可。缺账号 id 时 health 的 `auth` 检查为 error，通道不订阅；
-5. 装配 `DshSessionHost`（同时服务 worker 与回复器）、`SessionModelPool`（每线程一个可见 `whale-reply-*` 会话，工作区 `<stateDir>/workspace`）、`DshResearch`、`DshTaskExecutor`，注册全部 effect handler；
+5. 装配 `DshSessionHost`（同时服务 worker 与回复器）、`SessionModelPool`（每线程一个可见 `whale-reply-*` 会话，工作区为该会话的 `conversation-<digest>`）、`DshResearch`、`DshTaskExecutor`（批准未选目录时使用同一会话工作区），按当前目标预建启用群/单聊的工作区，注册全部 effect handler；
 6. `Effects.start` → `Passes.start`（过期扫描 60 s、授权探测 5 min）→ `channel.start`；
 7. 通道启动后立即把 `pending` 的 Outbound 重新入队（崩溃恢复）。
 

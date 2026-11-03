@@ -55,6 +55,7 @@ ${rows.join('\n')}
 ## 结构补充
 
 - \`targets.rows\` 的每个元素包含 \`kind\`（\`at-me\` / \`group\` / \`dm\`）、非空 \`id\`、\`label\`、\`mentionOnly\`、\`replyMode\`（\`auto\` / \`review\` / \`off\`）与 \`enabled\`；行对象同样拒绝未知字段。
+- \`tasks.workspaceRoot\` 是**回复器与任务共用的会话工作区根**：非空时使用它（\`~\` 展开，必须是绝对路径），为空时使用 \`<stateDir>/workspaces\`；每个会话在其下拥有 \`conversation-<sha256(threadKey) 前 16 位>\`。它不再表示「每个任务一个子目录」，字段名与默认值保持不变；相对路径会被记录 warning 并回退默认根。
 - \`models.reply\` 与 \`models.worker\` 的 \`provider\`、\`model\`、\`effort\` 为空字符串时表示使用 DSH 默认值。
 - 所有对象块均为 strict：未知键会被拒绝，而不是静默保留。
 

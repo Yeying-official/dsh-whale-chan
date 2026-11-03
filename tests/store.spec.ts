@@ -23,7 +23,11 @@ afterEach(async () => {
 })
 
 function open(): Store {
-  store?.close()
+  try {
+    store?.close()
+  } catch {
+    // A test may have closed the previous handle directly.
+  }
   store = Store.open(root)
   return store
 }
@@ -77,13 +81,14 @@ describe('store schema', () => {
     first.migrate()
     expect(Number(value(first.db.prepare('PRAGMA user_version').get(), 'user_version'))).toBe(SCHEMA_VERSION)
     first.close()
+    store = undefined
 
     const second = Store.open(root)
     expect(Number(value(second.db.prepare('PRAGMA user_version').get(), 'user_version'))).toBe(SCHEMA_VERSION)
     second.close()
 
     const raw = new DatabaseSync(join(root, 'state.db'))
-    raw.exec('PRAGMA user_version = 2')
+    raw.exec(`PRAGMA user_version = ${SCHEMA_VERSION + 1}`)
     raw.close()
     expect(() => Store.open(root)).toThrow(/newer/)
     store = undefined

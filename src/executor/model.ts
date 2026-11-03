@@ -25,6 +25,7 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { clip, codePointLength } from '../brain/format.ts'
 import type { ModelMessage, ModelPort, ModelRequest } from '../brain/types.ts'
+import type { ModelRoute } from '../shared/settings.ts'
 import { ExecutorError, ModelAbortedError, ModelFailedError, ModelTimeoutError } from './errors.ts'
 import { REPLIER_PRESET, replySessionId, type ExecutorLogger, type SessionHost, type SessionRef } from './types.ts'
 
@@ -145,6 +146,8 @@ export interface SessionModelOptions {
   readonly stateDir?: string
   /** Workspace override, when the composition root wants one shared directory. */
   readonly workspace?: string
+  /** Route from `settings.models.reply`; an empty route uses the deployment default. */
+  readonly model?: ModelRoute
   readonly homeDir?: string
   readonly timeoutMs?: number
   readonly maxTurns?: number
@@ -170,6 +173,7 @@ export class SessionModel implements ModelPort {
   private readonly maxTurns: number
   private readonly idleResetMs: number
   private readonly maxChars: number
+  private readonly model: ModelRoute | undefined
   private readonly now: () => number
   private readonly threads = new Map<string, ThreadState>()
   private readonly defaultKey: string
@@ -186,6 +190,7 @@ export class SessionModel implements ModelPort {
     this.maxTurns = options.maxTurns ?? MAX_TURNS
     this.idleResetMs = options.idleResetMs ?? IDLE_RESET_MS
     this.maxChars = options.maxChars ?? MAX_PROMPT_CHARS
+    this.model = options.model
     this.now = options.now ?? (() => Date.now())
     this.defaultKey = options.threadKey ?? 'default'
     this.defaultTitle = options.title ?? this.defaultKey
@@ -301,6 +306,7 @@ export class SessionModel implements ModelPort {
       title: `钉钉 · ${state.title}`,
       preset: REPLIER_PRESET,
       permission: 'workspace-write',
+      ...(this.model === undefined ? {} : { model: this.model }),
       // A rebuild must not resume the conversation that just went stale.
       fresh: state.turns > 0,
       signal,

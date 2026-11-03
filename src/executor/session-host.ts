@@ -47,6 +47,7 @@ declare module '@deepseek-ai/dsh-llm' {
 }
 
 import { ExecutorError } from './errors.ts'
+import { roleModelDeps, routeSelection, seedRoleModel } from './role-model.ts'
 import {
   DELIVERY_ID_PREFIX,
   DELIVERY_SOURCE,
@@ -332,6 +333,11 @@ export class DshSessionHost implements SessionHost {
     this.ctx.permissionPresets.set(agent.session, options.permission)
     await this.ctx.sessionController.rename({ sessionId: agent.id, title: options.title })
     if (options.systemPrompt !== undefined) this.adoptSystemPrompt(agent, options.systemPrompt)
+    // Seed the role's configured route before the first turn. It is skipped for
+    // a resumed session, so a person's later model choice always wins.
+    if (options.model !== undefined) {
+      await seedRoleModel(agent, routeSelection(options.model), roleModelDeps(this.ctx, agent, this.logger))
+    }
     return { sessionId: String(agent.id), workspace: options.workspace }
   }
 

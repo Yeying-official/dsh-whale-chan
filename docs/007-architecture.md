@@ -59,7 +59,7 @@
 | 模块        | 内容                                                                                                                    |
 | ----------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `model.ts`  | 领域类型：`InboundMessage`、`Thread`、`Decision`、`Draft`、`Task`、`Approval`、`Assignment`、`Outbound`，全部为只读纯值 |
-| `errors.ts` | `UserError` 与稳定错误码表；`missing` 与 `refused` 区分「找不到」与「状态不允许」                                       |
+| `errors.ts` | `UserError` 与稳定错误码表；`missing`/`invalid`/`refused` 区分「找不到」「输入可纠正」「状态不允许」                    |
 | `ports.ts`  | `Repositories`（同步、事务化）、`Ids`、`Clock`、领域事件类型、`EngineOptions`                                           |
 | `engine.ts` | 唯一写入口；每个命令一个事务；读查询不开事务                                                                            |
 | `index.ts`  | 唯一公开出口，供 app/channel/executor 引用                                                                              |

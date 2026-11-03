@@ -17,11 +17,11 @@ $ tsc --noEmit
 
 $ pnpm test
  Test Files  37 passed (37)
-      Tests  493 passed (493)
+      Tests  496 passed (496)
 
 $ pnpm build
 ℹ [CJS] lib\client.js  42.04 kB │ gzip: 12.48 kB
-ℹ [ESM] lib\index.js  113.47 kB │ gzip: 29.22 kB
+ℹ [ESM] lib\index.js  113.83 kB │ gzip: 29.35 kB
 ℹ [ESM] lib\index.d.ts  0.75 kB │ gzip:  0.33 kB
 ✔ Build complete
 
@@ -35,15 +35,16 @@ pack check passed: 15 artifacts, icon 711 bytes
 
 ## 2. 测试增量
 
-基线 `main` `a1e3f84`：33 个 spec、435 条。本次新增 4 个 spec 文件与 5 条引擎用例，共 **+58 条**（493）。
+基线 `main` `a1e3f84`：33 个 spec、435 条。本次新增 4 个 spec 文件与 6 条既有 spec 用例，共 **+61 条**（496）。
 
-| 文件                                | 条数 | 覆盖                                                                                                                                                                                             |
-| ----------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `tests/settings-service.spec.ts`    | 16   | 默认值、副本隔离、持久化重开、block/全局 revision、409 冲突、深合并与数组替换、未知键/越界、损坏行降级、schema 不匹配降级、meta 修复、history 与 source、`onChange`、v1→v2 幂等、v2 表/索引      |
-| `tests/api-routes.spec.ts`          | 22   | state/overview/targets/threads/thread/tasks/task/settings/persona/health/audit 读取；settings 写入与 400/404/409；monitor/pause；channel 503/400/成功；403/404/405/413/400；分页边界；audit 分页 |
-| `tests/task-actions.spec.ts`        | 9    | 批准（默认/显式/`~` 工作区、approval 校验、重复批准）、拒绝、取消、重试（新派工、保留结果、launch 重排、非 failed 拒绝、相对工作区、未知任务）                                                   |
-| `tests/runtime-lock.spec.ts`        | 6    | 打开 db/settings/engine/effects、锁文件、facts、跨重启持久化、第二实例拒绝与释放后重开、stop 幂等、目录/数据库启动失败                                                                           |
-| `tests/core-engine.spec.ts`（追加） | +5   | 重试生成新 assignmentId、保留 result/approval、`task.retried`、Windows 绝对路径、四种非 failed 状态拒绝、空/相对 workspace、未知任务与非法时间                                                   |
+| 文件                                    | 条数 | 覆盖                                                                                                                                                                                             |
+| --------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `tests/settings-service.spec.ts`        | 16   | 默认值、副本隔离、持久化重开、block/全局 revision、409 冲突、深合并与数组替换、未知键/越界、损坏行降级、schema 不匹配降级、meta 修复、history 与 source、`onChange`、v1→v2 幂等、v2 表/索引      |
+| `tests/api-routes.spec.ts`              | 23   | state/overview/targets/threads/thread/tasks/task/settings/persona/health/audit 读取；settings 写入与 400/404/409；monitor/pause；channel 503/400/成功；403/404/405/413/400；分页边界；audit 分页 |
+| `tests/task-actions.spec.ts`            | 10   | 批准（默认/显式/`~` 工作区、approval 校验、重复批准）、拒绝、取消、重试（新派工、保留结果、launch 重排、非 failed 拒绝、相对工作区、未知任务）                                                   |
+| `tests/runtime-lock.spec.ts`            | 6    | 打开 db/settings/engine/effects、锁文件、facts、跨重启持久化、第二实例拒绝与释放后重开、stop 幂等、目录/数据库启动失败                                                                           |
+| `tests/core-engine.spec.ts`（追加）     | +5   | 重试生成新 assignmentId、保留 result/approval、`task.retried`、Windows 绝对路径、四种非 failed 状态拒绝、空/相对 workspace、未知任务与非法时间                                                   |
+| `tests/core-invariants.spec.ts`（追加） | +1   | 全量错误码分类表（missing/invalid/refused）钉死                                                                                                                                                  |
 
 既有测试只做了两处适配：
 
@@ -60,6 +61,7 @@ pack check passed: 15 artifacts, icon 711 bytes
 - **重试仅 failed**：succeeded / cancelled / awaiting / running 全部 400 `notFailed`；失败任务重试后 `assignmentId` 变化，旧派工保持 `ended/failed`，`task.result` 保留。
 - **锁**：第二个 Runtime 的 `ready` 拒绝（`already in use`），第一个不受影响；`stop()` 后 `.lock` 消失，新 Runtime 可打开。
 - **不泄露**：health 响应不含 `stateDir`；channel 异常映射为通用 `channel_error`；未知异常 500 通用消息。
+- **错误分类**：`UserError.category` 为 `missing`/`invalid`/`refused`，HTTP 分别 404/400/409；approve 非待批任务 409 `notAwaitingApproval`、非法 workspace 400 `invalidWorkspace`、未知 task 404、retry 非 failed 409 `notFailed`。
 
 ## 4. 已知限制
 

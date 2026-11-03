@@ -111,6 +111,7 @@ pnpm docs:settings
 - **history**：`SettingsService.history(block?)` 按写入顺序倒序返回 `{ block, value, revision, source, savedAt }`；`source` 为 `panel`（面板写入）或 `internal`（宿主系统写入，如 `POST monitor/pause`）。
 - **系统写入**：`patchInternal(block, patch, source = 'internal')` 不要求 expected revision，但仍做 strict 校验、仍递增 revision、仍写 history。
 - **变更通知**：`onChange(listener)` 在每次成功写入后同步通知；监听器抛错不会回滚已提交的写入。
+- **任务状态映射**：领域 `approved` 在 wire 上是 `queued`（面板语义：已批准、等待执行）；`GET tasks?status=queued` 反向过滤 `approved`。
 
 ## 错误码
 
@@ -121,11 +122,15 @@ pnpm docs:settings
 | 409  | `settings_conflict`           | block revision 已变化；响应带 `actualRevision`                             |
 | 404  | `unknown_block`               | 路径中的 block 不在 9 个冻结 block 内                                     |
 | 404  | `unknown_task` / `unknown_thread` | 记录不存在                                                              |
-| 400  | 领域 `UserError.code`          | 命令被拒绝（如 `notFailed`、`invalidWorkspace`、`alreadyDecided`）；响应带 `values` |
+| 404  | `missing` 类（如 `unknownTask`） | 记录不存在；响应带 `code` / `values`                                      |
+| 400  | `invalid` 类（如 `invalidWorkspace`、`missingWorkspace`、`invalidTime`） | 调用方可纠正的输入；响应带 `code` / `values` |
+| 409  | `refused` 类（如 `notFailed`、`notAwaitingApproval`、`alreadyDecided`） | 记录存在但当前状态不允许；响应带 `code` / `values` |
 | 400  | `channel_error`               | 通道一次性调用失败（消息已脱敏）                                          |
 | 503  | `channel_unavailable`         | WS5a 未接入通道时的 `targets/discover` / `targets/validate`               |
 | 503  | `state_unavailable`           | 运行时尚未就绪或启动失败                                                  |
 | 403  | `forbidden`                   | 缺少 `x-whale-chan-request: 1`                                          |
+
+`UserError.category` 决定状态：`missing` → 404、`invalid` → 400、`refused` → 409。分类表由 `tests/core-invariants.spec.ts` 钉住，HTTP 映射由 `tests/api-routes.spec.ts` 钉住。
 
 ## 契约测试
 

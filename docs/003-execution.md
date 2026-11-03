@@ -147,7 +147,7 @@ interface ExecutorResult {
 
 `Engine.retryTask(taskId, { by: 'owner', at, workspace, note? })`：
 
-1. 任务必须存在且 `status === 'failed'`，否则 `UserError('notFailed')`（`refused` 组）。`cancelled` 是主人主动结束的，不自动重试；`succeeded`、`awaiting-approval`、`approved`、`running` 同样拒绝。
+1. 任务必须存在且 `status === 'failed'`，否则 `UserError('notFailed')`（`refused` 组，HTTP 409）。`cancelled` 是主人主动结束的，不自动重试；`succeeded`、`awaiting-approval`、`approved`、`running` 同样拒绝。
 2. `workspace` 必须是非空绝对路径，否则 `missingWorkspace` / `invalidWorkspace`；与批准一样，相对路径不会被解析。
 3. 同一事务内写入：新的 `Assignment`（`pending`、新 id、`workspace`）、任务回到 `approved` 且 `assignmentId` 指向新派工；原 `Approval` 保持 `approved`，`task.result` 保留（执行器把上一次 `summary` 作为「上一轮结果（供参考）」传给新会话）。
 4. 发出 `task.retried`（`{ taskId, assignmentId }`）。

@@ -55,7 +55,7 @@
 | `audit`                | `events` 表分页，映射为 `AuditEntry`                                                      |
 | `settings` / `persona` | `SettingsService`                                                                         |
 
-领域与 wire 词表不同：domain `approved` → 面板 `queued`（`src/shared/models.ts` 没有 `approved`）。`unreadCount`/`taskId` 领域没有对应事实，分别给 `0`/`null`。
+领域与 wire 词表不同：domain `approved` → 面板 `queued`（已批准、等待执行；`src/shared/models.ts` 没有 `approved`）。`unreadCount`/`taskId` 领域没有对应事实，分别给 `0`/`null`。
 
 ## 6. HTTP（`src/app/http.ts`）
 
@@ -67,7 +67,7 @@
   - `reject` / `cancel`：调用领域命令，返回 `{task, approval}` / `{task}`。
   - `retry`：仅 failed；默认 workspace 同上；成功后同样 `enqueue('launch', …)`。
 - `targets/discover|validate` 走 `ChannelPort`；无通道 503 `channel_unavailable`，通道异常 400 `channel_error`（消息脱敏）。
-- 错误映射：`HttpError` → 自身状态；`SettingsConflictError` → 409 + `actualRevision`；`SettingsValueError` → 400 + `issues`；`UserError` → `missing ? 404 : 400` + `code`/`values`；未知 → 500 通用消息。
+- 错误映射：`HttpError` → 自身状态；`SettingsConflictError` → 409 + `actualRevision`；`SettingsValueError` → 400 + `issues`；`UserError` → 按 `category` 映射 `missing` 404 / `invalid` 400 / `refused` 409 + `code`/`values`；未知 → 500 通用消息。
 
 ## 7. Runtime（`src/app/runtime.ts`）
 
@@ -81,11 +81,11 @@
 2. `ApproveTaskRequest` 只声明 `approvalId?`，但 WS5a 要求 `note?`/`workspace?`：HTTP 层在运行时接受这两个字段，类型合约保持冻结。
 3. `POST tasks/:id/retry` 合约没有 body：实现接受可选 `{ workspace?, note? }`（用于显式工作区与测试），缺省走默认工作区。
 4. `Health` 没有 channel/executor 字段：以 `checks` 中 `channel`/`executor` 的 `detail: "unknown…"` 表示，且不参与总体 `status` 汇总，避免健康主机永远 `degraded`。
-5. `src/core/errors.ts` 注释写 refused → 409，但 WS5a 任务书要求 `UserError` → 400；实现按任务书映射（404 仅用于 missing），并在 `docs/011` 错误码表记录。
+5. `UserError` 现分三类：`missing`（→404）、`invalid`（用户可纠正的输入，如 `invalidWorkspace`/`missingWorkspace`/`invalidTime`，→400）、`refused`（状态冲突，如 `notFailed`/`notAwaitingApproval`/`alreadyDecided`，→409）。HTTP 按 `category` 映射，分类表由 `tests/core-invariants.spec.ts` 钉住。
 
 ## 9. 门禁
 
-见 [WS5a 测试报告](../test-reports/WS5a.md)。
+见 [WS5a 测试报告](../test-reports/WS5a.md)。门禁以分支头为准；提交按模块拆分，中间提交不要求逐个独立绿（复审已确认）。
 
 ## 10. 未做 / 交给 WS5b
 

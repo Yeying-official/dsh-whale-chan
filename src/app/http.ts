@@ -16,7 +16,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
-import { UserError } from '../core/index.ts'
+import { UserError, type UserErrorCategory } from '../core/index.ts'
 import { API_PREFIX, API_REQUEST_HEADER, API_REQUEST_HEADER_VALUE } from '../shared/api.ts'
 import type { MonitorSettings } from '../shared/settings.ts'
 import { SettingsBlockSchema } from '../shared/settings.ts'
@@ -207,7 +207,7 @@ function workspaceFor(deps: HttpDeps, taskId: string, requested: string | undefi
   const approved = (requested ?? '').trim()
   if (approved.length > 0) {
     const expanded = expandHome(approved)
-    if (!isAbsolute(expanded)) throw new HttpError(400, 'invalid_workspace', 'The workspace must be an absolute path')
+    if (!isAbsolute(expanded)) throw new HttpError(400, 'invalidWorkspace', 'The workspace must be an absolute path')
     return resolve(expanded)
   }
   if (!safeSegment(taskId)) {
@@ -215,7 +215,7 @@ function workspaceFor(deps: HttpDeps, taskId: string, requested: string | undefi
   }
   const configured = deps.settings.current().tasks.workspaceRoot.trim()
   const root = configured.length > 0 ? expandHome(configured) : join(deps.runtime.info().stateDir, 'tasks')
-  if (!isAbsolute(root)) throw new HttpError(400, 'invalid_workspace', 'tasks.workspaceRoot must be an absolute path')
+  if (!isAbsolute(root)) throw new HttpError(400, 'invalidWorkspace', 'tasks.workspaceRoot must be an absolute path')
   return join(root, taskId)
 }
 
@@ -360,6 +360,16 @@ function listQuery(url: URL): { offset: number; limit: number } {
     offset: integerParam(url, 'offset', 0, 0, Number.MAX_SAFE_INTEGER),
     limit: integerParam(url, 'limit', DEFAULT_LIMIT, 1, MAX_LIMIT),
   }
+}
+
+/**
+ * The HTTP status one user-error category maps to.
+ *
+ * `missing` is an unknown record, `invalid` is a value the caller can correct,
+ * and `refused` is a state conflict. Exported so the guard test can pin it.
+ */
+export function userErrorStatus(category: UserErrorCategory): number {
+  return category === 'missing' ? 404 : category === 'invalid' ? 400 : 409
 }
 
 /** Route one authenticated request. Throws `HttpError` for every expected failure. */
@@ -534,9 +544,9 @@ export function createHttpHandler(deps: HttpDeps) {
         return
       }
       if (error instanceof UserError) {
-        // Missing records are 404; refused state transitions are the owner's to
-        // correct, so they answer 400 with the stable domain code.
-        const status = error.missing ? 404 : 400
+        // The category decides the status: unknown records are 404, a value
+        // the caller can correct is 400, and a state conflict is 409.
+        const status = userErrorStatus(error.category)
         sendJson(response, status, failure(status, error.code, error.message, { values: error.values }))
         return
       }

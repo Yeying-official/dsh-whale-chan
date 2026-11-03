@@ -1,6 +1,6 @@
 # 006 部署
 
-> 当前状态：WS0 冻结 `cordis.patch.yml` 的宿主机行；WS2 补充本机 `dws` 个人授权的检查、登录、验证与停止说明。完整的 bundle 安装、升级、卸载与 profile 隔离留给 WS7，本文不指导修改 `~/.dsh`。
+> 当前状态：WS0 冻结 `cordis.patch.yml` 的宿主机行；WS2 补充本机 `dws` 个人授权的检查、登录、验证与停止说明；WS4 增加两套 agent preset、插件工作区与会话创建排障。完整的 bundle 安装、升级、卸载与 profile 隔离留给 WS7，本文不指导修改 `~/.dsh`。
 
 ## 1. 前置条件
 
@@ -108,7 +108,53 @@ dws event stop <subscribe_id> --yes   # 手动清理遗留订阅
 
 面板的健康视图会显示每个目标的 `starting|ready|stopped|failed|orphaned`、`subscribe_id`、重启次数与最近错误（已脱敏）。
 
-## 5. 退出码与进程状态
+## 5. 两套 agent preset、工作区与权限
+
+bundle 在 `cordis.patch.yml` 里声明两个 `@deepseek-ai/dsh-agent-preset` 行，除此之外什么也不注册。它们由执行器按 id 选择，**不出现在手动选择器里**：preset 行没有「隐藏」开关，所以两行的 `description` 都写明「不供手动选择」，顺序（`order` 90/91）只决定名单内的排列。
+
+| preset id                | 谁创建                        | 用途                                 | 工具集                                                                                                                     |
+| ------------------------ | ----------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `dsh-whale-chan-replier` | `SessionModel`（回复路径）    | 钉钉对话回复；完整指示随用户消息投递 | persona、agent-instructions、time-context、tool-web（`fetch:false`）、compaction                                           |
+| `dsh-whale-chan-worker`  | `DshTaskExecutor`（任务路径） | 执行一项已批准任务                   | 上表 + shell（bash/pwsh 按平台二选一）、tool-fs、tool-fs-search、tool-jobs（5 s）、skill-filesystem、tool-skill、tool-todo |
+
+- **回复器没有 shell、文件、作业、skill 与 todo**。提示词注入最多让模型写一段文字，无法让它执行命令或改文件。
+- **执行器前台命令最多等 5 秒**，之后由 shell 工具转入后台作业；`job_output` 的等待同样 5 秒。这样一条慢命令不会长期占住一次回合。
+- 两套 preset 都不含 `tool-web` 的 `fetch`，也不含子智能体、计划模式、插件管理、定时与目标：任务要么在工作区内完成，要么汇报需要人介入。
+
+### 5.1 目录
+
+| 路径                               | 内容                                                           |
+| ---------------------------------- | -------------------------------------------------------------- |
+| `~/.dsh-whale-chan/state.db`       | 领域状态、审计事件、effect 队列                                |
+| `~/.dsh-whale-chan/tasks/<taskId>` | 一个任务的 worker 工作区（`tasks.workspaceRoot` 可覆盖根目录） |
+| `~/.dsh-whale-chan/workspace`      | 回复器会话共用工作区（不写业务文件）                           |
+
+- 工作区目录在会话创建**之前**用 `mkdir -p` 建好：DSH 的 `workspaceRegistry.create` 只接受已存在的目录，不存在的路径会被拒绝。
+- `taskId` 必须是单一安全路径段；含 `/`、`\` 或 `..` 的 id 会被执行器拒绝，不会写到根目录之外。
+- 任务会话 id 是 `whale-task-<taskId>`，回复器会话 id 是 `whale-reply-<sha1(threadKey) 前 12>`；这两类会话会出现在 DSH 的会话列表里，标题分别是 `任务 · <标题>` 与 `钉钉 · <会话标题>`。
+
+### 5.2 权限
+
+- worker 会话的权限预设取 `tasks.permissionPreset`（默认 `workspace-write`）。只有 `danger-full-access` 会被原样使用，其它值一律按 `workspace-write` 处理——设置写坏了也不会把执行器放宽。
+- 回复器会话固定 `workspace-write`。
+- 执行器通过 `ctx.permissionPresets.set(session, name)` 在会话创建后立即设置；权限预设名写错会在这个调用上抛错，而不是在模型调用时才失败。
+
+### 5.3 会话创建失败怎么排查
+
+先看插件日志里的 `dsh-whale-chan:` 前缀，再按下面的顺序定位：
+
+| 现象                                                        | 可能原因                                                 | 处理                                                                                                                            |
+| ----------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| 日志出现 `agent-preset/not-found` 或 `agent-preset/invalid` | preset 行没随 bundle 生效，或 `id` 拼错                  | `plugin_manager` `list_plugins` 里确认 `dsh-whale-chan-*-preset` 行的 `fiberPhase` 是 `active`；比较 `config.id` 与代码里的常量 |
+| `workspaceRegistry.create` 抛「不存在/不是目录」            | `tasks.workspaceRoot` 写成了文件、盘符不存在，或权限不足 | 手动确认该路径存在且可写；留空 `workspaceRoot` 用默认目录                                                                       |
+| 会话建好但没有回合结束，任务最终 `timeout`                  | worker 卡在一条前台命令，或模型侧长时间无响应            | 在 DSH 里打开该会话看最后一步；任务超时会在 `tasks.timeoutMinutes` 后取消回合                                                   |
+| 结果 `failed: aborted by hook`                              | 有人在 DSH 里停止了这个回合（不是本插件的取消）          | 这是外部操作，按 `failed` 上报；重新派工即可                                                                                    |
+| 结果 `cancelled`                                            | 主人在面板取消，或插件在停机时清理运行中的任务           | 正常路径；`error` 里带取消原因                                                                                                  |
+| `permissionPresets.set` 抛「unknown preset」                | 部署的 preset 名单里没有 `workspace-write`               | 检查 DSH 的权限 preset 配置；本插件只使用这两个名字                                                                             |
+
+`SessionModel` 侧的失败对回复路径表现为「模型错误」，不是任务失败：它会抛 `ModelTimeoutError` / `ModelFailedError` / `ModelAbortedError`，由调用方决定降级为「不回复」还是「回复但说明」。
+
+## 6. 退出码与进程状态
 
 插件把一次 `dws` 调用分为三类结果，部署排障时按此判断：
 
@@ -126,13 +172,13 @@ dws event stop <subscribe_id> --yes   # 手动清理遗留订阅
 
 演练模式（`advanced.dryRun`）下发送返回 `skipped`：不 spawn、不改变 Outbound 状态，也不是失败；不要按失败重试。
 
-## 6. 日志与隐私
+## 7. 日志与隐私
 
 - 默认日志不包含消息正文、token、clientSecret、账号 id 或完整原始 payload。
 - `dws.debug` 或 `advanced.debugPayloads` 打开后，也只输出字段名与白名单结构字段的截断值（见 [009 DWS 协议](009-dws-protocol.md) §4.4）。
 - 审计与状态目录、备份策略、profile 隔离随 WS5/WS7 落地；本工作流不写 `~/.dsh`。
 
-## 7. 尚未覆盖（WS7）
+## 8. 尚未覆盖（WS7）
 
 - bundle 安装/升级/卸载与 profile 隔离；
 - 状态目录、日志轮转、审计保留策略；

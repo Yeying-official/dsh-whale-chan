@@ -1,5 +1,5 @@
 /**
- * Cordis host entry of 鲸鱼酱 · 钉钉助理.
+ * Cordis host entry of DSH助理 · 钉钉助理.
  *
  * The runtime opens the state database, the settings service, the domain
  * engine and the effects queue, then composes the channel, the replier model,

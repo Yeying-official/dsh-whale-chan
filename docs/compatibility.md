@@ -1,23 +1,23 @@
 # 兼容矩阵
 
-> 适用范围：`dsh-whale-chan-assistant` `0.1.0`（WS0–WS8 完成，Windows 真机 T0–T4 通过）。
+> 适用范围：`dsh-whale-chan-assistant` `0.2.0`（WS0–WS10 完成，Windows 真机 T0–T4 通过，v0.2.0 工作区改造做 T3/T4 复验）。
 > 最后核对：2026-11-03（Asia/Shanghai）。
 >
 > **权威顺序**：`package.json` 的 `dsh.compatibility` 与 WS8 的 T0–T4 记录 > 本文 > 其它说明。本文中的“已验证”只表示在本机 Windows 环境实际跑过，不表示在所有同版本环境都成立。
 
 ## 1. 结论
 
-| 组件          | 已验证                                                        | 状态                                                            |
-| ------------- | ------------------------------------------------------------- | --------------------------------------------------------------- |
-| DSH Desktop   | `0.2.1-rc.5`（Windows x64）                                   | **compatible**，`dsh.compatibility` 正式声明                    |
-| DSH 其它版本  | 无                                                            | 未验证；不要假设向前/向后兼容                                   |
-| `dws`         | `1.0.66`（`f215043e`，2026-10-28）                            | 群事件/发送回执已真机确认；单聊与其它版本仍 provisional         |
-| Windows       | 10/11                                                         | 已实测（开发机与桌面端）                                        |
-| 真机验收      | T0–T4（Windows 10/11、DSH `0.2.1-rc.5`、`dws` `1.0.66`）      | 通过；测试群目标已停用，见 [WS8 报告](test-reports/WS8-live.md) |
-| macOS / Linux | 无                                                            | **未验证**，不作为支持承诺                                      |
-| Node.js       | 24.15.0（开发）、24.21.0（DSH Desktop 自带）                  | 已实测；`engines` 允许 `^22.19.0 \|\| >=24.0.0`                 |
-| 单实例        | 同一 `stateDir` 一个进程                                      | 已实现并由测试覆盖；崩溃后锁 stale 10 秒                        |
-| 模型路由      | 宿主默认；或按回复器/执行器分别指定 provider + model + effort | 代码路径已测；未逐一验证所有 provider                           |
+| 组件          | 已验证                                                                      | 状态                                                                                                       |
+| ------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| DSH Desktop   | `0.2.1-rc.5`（Windows x64）                                                 | **compatible**，`dsh.compatibility` 正式声明                                                               |
+| DSH 其它版本  | 无                                                                          | 未验证；不要假设向前/向后兼容                                                                              |
+| `dws`         | `1.0.66`（`f215043e`，2026-10-28）                                          | 群事件/发送回执已真机确认；单聊与其它版本仍 provisional                                                    |
+| Windows       | 10/11                                                                       | 已实测（开发机与桌面端）                                                                                   |
+| 真机验收      | T0–T4（Windows 10/11、DSH `0.2.1-rc.5`、`dws` `1.0.66`）+ v0.2.0 工作区复验 | 通过；测试群目标已停用，见 [WS8 报告](test-reports/WS8-live.md) 与 [WS9/WS10 报告](test-reports/WS9-10.md) |
+| macOS / Linux | 无                                                                          | **未验证**，不作为支持承诺                                                                                 |
+| Node.js       | 24.15.0（开发）、24.21.0（DSH Desktop 自带）                                | 已实测；`engines` 允许 `^22.19.0 \|\| >=24.0.0`                                                            |
+| 单实例        | 同一 `stateDir` 一个进程                                                    | 已实现并由测试覆盖；崩溃后锁 stale 10 秒                                                                   |
+| 模型路由      | 宿主默认；或按回复器/执行器分别指定 provider + model + effort               | 代码路径已测；未逐一验证所有 provider                                                                      |
 
 ## 2. DSH 版本
 
@@ -76,16 +76,24 @@ WS8 已在 Windows + `1.0.66` 上确认：群事件键与 snake_case 扁平字�
 - SQLite schema v2（13 张表，WAL）。打开更高版本数据库会拒绝，不降级；备份/恢复见 [006 部署](006-deployment.md) §9.4。
 - 单实例与 schema 版本均不随 DSH/`dws` 版本变化而放宽。
 
+### 5.1 工作区布局（v0.2.0）
+
+- **一个会话一个目录**：`<root>/conversation-<sha256(threadKey) 前 16 位>`；`<root>` 取 `tasks.workspaceRoot`（展开 `~` 后必须是绝对路径），否则 `<stateDir>/workspaces`。回复器会话与该会话派生的每个任务共用同一目录。
+- **目录名稳定**：同一 `threadKey` 的摘要固定，重启、升级与改标题都不会换目录；`tasks.workspaceRoot` 改成新根只影响之后解析出的路径，旧目录原地保留。
+- **布局版本只进会话 id**：`WORKSPACE_LAYOUT_VERSION`（当前 `v2`）折进回复器会话 id，升级后第一次回复新建 `whale-reply-*` 会话；`state.db` schema 仍是 2，没有额外迁移，因此 v0.1.0 与 v0.2.0 可以打开同一个库。降级到 v0.1.0 时回复器回到 `<stateDir>/workspace`，`workspaces/` 与其中的文件保留但不再被使用。
+- **DSH registry 幂等**：目录先 `mkdir -p` 再 `workspaceRegistry.create(path, title)`；已按同一 path 注册时只更新标题，不新建第二条记录。目录被手动删除后，下一次预建会重建目录并重新注册。
+- **不随目标删除而回收**：停用/删除目标不会删除目录或注册记录，因为同一会话可能经其它目标到达，历史属于主人。
+
 ## 6. 兼容性判定流程
 
 任何“支持某版本”的声明都必须留下证据：
 
 1. **静态门禁**：`pnpm check`、`pnpm format:check`、`node scripts/check-pack.mjs` 全绿；
-2. **安装**：在干净 profile 或干净机器上安装本地 bundle，重启后侧栏出现「DSH助理」，`GET /whale-chan/api/state` 200；
+2. **安装**：在干净 profile 或干净机器上安装本地 bundle，重启后侧栏出现「DSH助理」，`GET /whale-chan/api/state` 200；「目标」页工作区块显示启用目标的目录（或「按会话创建」）；
 3. **T0 只读**：`dws --version`、`dws auth status --format json` 的布尔字段；不订阅、不发送；
 4. **T1 观察**：测试群订阅 + `dryRun`，确认事件解码、去重、断线重连、`unknown` 不重发；
 5. **T2 单条**：面板确认后向测试群发一条，确认 AI 角标、幂等键、回执；
 6. **T3 全链路**：@我 → 分类 → 回复/任务 → 面板批准 → worker 会话 → 结果回帖；
-7. 把版本、命令、输出摘要与截图写入 `docs/test-reports/WS8.md`，再更新本文与 `dsh.compatibility`。
+7. 把版本、命令、输出摘要与截图写入对应的 `docs/test-reports/WSxx.md`（真机链路见 [WS8](test-reports/WS8-live.md)、工作区见 [WS9/WS10](test-reports/WS9-10.md)），再更新本文与 `dsh.compatibility`。
 
 未走完上述流程的版本，一律写“未验证”，不要写“应该可以”。

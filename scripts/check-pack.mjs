@@ -15,7 +15,7 @@ const check = (condition, message) => {
 
 const manifest = JSON.parse(readFileSync('package.json', 'utf8'))
 check(manifest.name === 'dsh-whale-chan-assistant', 'package name must be dsh-whale-chan-assistant')
-check(manifest.version === '0.1.0', 'package version must be 0.1.0')
+check(manifest.version === '0.2.0', 'package version must be 0.2.0')
 check(manifest.private === true, 'package must stay private')
 check(manifest.type === 'module', 'package type must be module')
 check(manifest.main === 'lib/index.js', 'main must be lib/index.js')

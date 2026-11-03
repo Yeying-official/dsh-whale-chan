@@ -13,7 +13,7 @@
  * session cannot be created in a unit test without starting a model call.
  */
 import { describe, expect, it } from 'vitest'
-import { TurnTracker, awaitTurn, type TrackedSessionEvent } from '../src/executor/index.ts'
+import { TurnTracker, awaitTurn, deliveryId, type TrackedSessionEvent } from '../src/executor/index.ts'
 
 function start(turn: number): TrackedSessionEvent {
   return { type: 'turn/start', data: { turn } }
@@ -115,6 +115,26 @@ describe('TurnTracker', () => {
     expect(tracker.observe(userMessage('other'))).toBe(false)
     expect(tracker.observe(start(2))).toBe(false)
     expect(tracker.observe(end(2))).toBe(false)
+    expect(tracker.settled).toBe(false)
+  })
+
+  it('claims the delivery whose log id carries the delivery prefix', () => {
+    // The message id in the log is `dsh-whale-chan:<requestId>`; a tracker opened
+    // with the bare id would never match and would wait out the timeout.
+    const raw = 'whale-reply-abc123:1700000000000:1'
+    const tracker = new TurnTracker([], deliveryId(raw))
+    expect(tracker.observe({ type: 'user/message', data: { id: deliveryId(raw) } })).toBe(false)
+    expect(tracker.observe({ type: 'turn/start', data: { turn: 1 } })).toBe(false)
+    expect(tracker.observe({ type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })).toBe(true)
+    expect(tracker.turn).toBe(1)
+  })
+
+  it('does not claim a message whose log id has no delivery prefix', () => {
+    const raw = 'whale-reply-abc123:1700000000000:1'
+    const tracker = new TurnTracker([], deliveryId(raw))
+    tracker.observe({ type: 'user/message', data: { id: raw } })
+    tracker.observe({ type: 'turn/start', data: { turn: 1 } })
+    expect(tracker.observe({ type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })).toBe(false)
     expect(tracker.settled).toBe(false)
   })
 

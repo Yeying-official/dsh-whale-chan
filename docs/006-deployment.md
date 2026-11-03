@@ -133,6 +133,7 @@ bundle 在 `cordis.patch.yml` 里声明两个 `@deepseek-ai/dsh-agent-preset` �
 - **工作区以批准为准**：批准任务时主人选的目录就是 worker 的目录；设置里的 `tasks.workspaceRoot` 只是「批准时没选目录」的默认值。相对路径会被拒绝（领域错误 `invalidWorkspace`，属用户可纠正的 `refused` 组），因为 DSH 会按宿主工作目录解析它，主人无法预测文件落在哪里。
 - 工作区目录在会话创建**之前**用 `mkdir -p` 建好：DSH 的 `workspaceRegistry.create` 只接受已存在的目录，不存在的路径会被拒绝。
 - 回退路径里的 `taskId` 必须是单一安全路径段；含 `/`、`\` 或 `..` 的 id 会被执行器拒绝，不会写到根目录之外。
+- 投递消息 id 是 `dsh-whale-chan:<requestId>`；等待回合必须比较这个带前缀的 id（见 003 §6），否则会话早已结束也会等满超时。
 - 任务会话 id 是 `whale-task-<taskId>-<派工后缀>`（同一任务的每次派工都是一个新会话），标题 `任务 · <标题>`。**回复不建会话**：分类与草稿走 `ctx.llm.stream`，所以 DSH 的会话列表里只会出现任务会话。
 - 模型来自设置：worker 用 `models.worker`，回复器用 `models.reply`；两者都为空时用部署默认模型，且**不会**修改 DSH 的全局默认模型。
 - 单回合上限 **90 秒**（`MODEL_TURN_TIMEOUT_MS`）：本机模型首 token 可能 15–30 秒，这是为了让慢但健康的回合不被误判超时；任务总预算仍是 `tasks.timeoutMinutes`，只是不会低于这个值。
@@ -147,14 +148,14 @@ bundle 在 `cordis.patch.yml` 里声明两个 `@deepseek-ai/dsh-agent-preset` �
 
 先看插件日志里的 `dsh-whale-chan:` 前缀，再按下面的顺序定位：
 
-| 现象                                                        | 可能原因                                                 | 处理                                                                                                                            |
-| ----------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| 日志出现 `agent-preset/not-found` 或 `agent-preset/invalid` | preset 行没随 bundle 生效，或 `id` 拼错                  | `plugin_manager` `list_plugins` 里确认 `dsh-whale-chan-*-preset` 行的 `fiberPhase` 是 `active`；比较 `config.id` 与代码里的常量 |
-| `workspaceRegistry.create` 抛「不存在/不是目录」            | `tasks.workspaceRoot` 写成了文件、盘符不存在，或权限不足 | 手动确认该路径存在且可写；留空 `workspaceRoot` 用默认目录                                                                       |
-| 会话建好但没有回合结束，任务最终 `timeout`                  | worker 卡在一条前台命令，或模型侧长时间无响应            | 单回合上限是 **90 秒**；任务总预算 `tasks.timeoutMinutes` 更长时按它算。先在 DSH 里打开该会话看最后一步                         |
-| 结果 `failed: aborted by hook`                              | 有人在 DSH 里停止了这个回合（不是本插件的取消）          | 这是外部操作，按 `failed` 上报；重新派工即可                                                                                    |
-| 结果 `cancelled`                                            | 主人在面板取消，或插件在停机时清理运行中的任务           | 正常路径；`error` 里带取消原因                                                                                                  |
-| `permissionPresets.set` 抛「unknown preset」                | 部署的 preset 名单里没有 `workspace-write`               | 检查 DSH 的权限 preset 配置；本插件只使用这两个名字                                                                             |
+| 现象                                                        | 可能原因                                                   | 处理                                                                                                                                                                                                          |
+| ----------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 日志出现 `agent-preset/not-found` 或 `agent-preset/invalid` | preset 行没随 bundle 生效，或 `id` 拼错                    | `plugin_manager` `list_plugins` 里确认 `dsh-whale-chan-*-preset` 行的 `fiberPhase` 是 `active`；比较 `config.id` 与代码里的常量                                                                               |
+| `workspaceRegistry.create` 抛「不存在/不是目录」            | `tasks.workspaceRoot` 写成了文件、盘符不存在，或权限不足   | 手动确认该路径存在且可写；留空 `workspaceRoot` 用默认目录                                                                                                                                                     |
+| 会话建好但没有回合结束，任务最终 `timeout`                  | worker 卡在一条前台命令、模型侧无响应，或等待用错了消息 id | 单回合上限 **90 秒**，总预算 `tasks.timeoutMinutes` 更长时按它算。若 DSH 里该会话早已 `turn/end` 而插件仍报超时，先查投递 id：必须是 `deliveryId(requestId)`（带 `dsh-whale-chan:` 前缀），不是裸 `requestId` |
+| 结果 `failed: aborted by hook`                              | 有人在 DSH 里停止了这个回合（不是本插件的取消）            | 这是外部操作，按 `failed` 上报；重新派工即可                                                                                                                                                                  |
+| 结果 `cancelled`                                            | 主人在面板取消，或插件在停机时清理运行中的任务             | 正常路径；`error` 里带取消原因                                                                                                                                                                                |
+| `permissionPresets.set` 抛「unknown preset」                | 部署的 preset 名单里没有 `workspace-write`                 | 检查 DSH 的权限 preset 配置；本插件只使用这两个名字                                                                                                                                                           |
 
 回复路径的失败对 brain 表现为「模型错误」，不是任务失败：`LlmModel` 会抛 `ModelFailedError` / `ModelAbortedError`（会话版还会抛 `ModelTimeoutError`），由调用方决定降级为「不回复」还是「回复但说明」。
 

@@ -5,12 +5,14 @@
 import { describe, expect, it } from 'vitest'
 import { join } from 'node:path'
 import {
+  DELIVERY_ID_PREFIX,
   ExecutorError,
   MODEL_TURN_TIMEOUT_MS,
   ModelAbortedError,
   ModelFailedError,
   ModelTimeoutError,
   REPLIER_PRESET,
+  deliveryId,
 } from '../src/executor/index.ts'
 // The session-based reply path is not part of the public surface any more: the
 // replier calls the model directly (`llm-model.ts`). These tests keep covering
@@ -182,6 +184,19 @@ describe('model route', () => {
     const { host, model } = learning()
     await model.complete(request(), new AbortController().signal)
     expect(host.ensured[0]?.model).toBeUndefined()
+  })
+})
+
+describe('delivery id', () => {
+  it('waits on the id the log holds, not the bare request id', async () => {
+    const { host, model } = learning()
+    await model.complete(request(), new AbortController().signal)
+    const delivered = host.deliveries[0]
+    const awaited = host.awaited[0]
+    expect(delivered?.requestId.startsWith(DELIVERY_ID_PREFIX)).toBe(false)
+    expect(delivered?.id).toBe(deliveryId(delivered?.requestId ?? ''))
+    expect(awaited?.options.requestId).toBe(delivered?.id)
+    expect(awaited?.options.requestId.startsWith(DELIVERY_ID_PREFIX)).toBe(true)
   })
 })
 

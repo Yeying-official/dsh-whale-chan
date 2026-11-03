@@ -31,6 +31,7 @@ import { ExecutorError } from './errors.ts'
 import {
   MODEL_TURN_TIMEOUT_MS,
   WORKER_PRESET,
+  deliveryId,
   taskSessionId,
   type AwaitTurnOptions,
   type ExecutorLogger,
@@ -293,7 +294,8 @@ export class DshTaskExecutor implements TaskExecutor {
       // never drops below one model turn, or a one-minute task would cut a slow
       // first token before the model could answer.
       const timeoutMs = Math.max(settings.tasks.timeoutMinutes * 60_000, MODEL_TURN_TIMEOUT_MS)
-      const awaitOptions: AwaitTurnOptions = { requestId, timeoutMs, signal: lifetime }
+      // Same contract as the replier: wait on the id the log actually holds.
+      const awaitOptions: AwaitTurnOptions = { requestId: deliveryId(requestId), timeoutMs, signal: lifetime }
       const end = await this.host.awaitTurnEnd(session, awaitOptions)
       const final = await this.host.readFinalText(session)
       result = await this.ending(task, end, final.text, run)

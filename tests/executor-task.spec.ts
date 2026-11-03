@@ -12,6 +12,7 @@ import { USER_ERRORS, UserError } from '../src/core/errors.ts'
 import { ExecutorError } from '../src/executor/errors.ts'
 import {
   DEFAULT_STATE_DIR,
+  DELIVERY_ID_PREFIX,
   DshTaskExecutor,
   MODEL_TURN_TIMEOUT_MS,
   WORKER_PRESET,
@@ -239,6 +240,23 @@ describe('session and workspace', () => {
     expect(taskWorkspace(settings, 'task-9', '/home/owner', DEFAULT_STATE_DIR)).toBe(
       join('/home/owner', '.dsh-whale-chan', 'tasks', 'task-9'),
     )
+  })
+})
+
+describe('delivery id', () => {
+  it('delivers a bare request id and waits on the prefixed id', async () => {
+    const { host, executor } = harness()
+    const task = makeTask()
+    await executor.execute({
+      task,
+      approval: makeApproval(task),
+      settings: makeSettings(),
+      signal: new AbortController().signal,
+    })
+    const delivered = host.deliveries[0]
+    expect(delivered?.requestId).toBe('task:task-1:assignment-1')
+    expect(delivered?.id).toBe(`${DELIVERY_ID_PREFIX}task:task-1:assignment-1`)
+    expect(host.awaited[0]?.options.requestId).toBe(delivered?.id)
   })
 })
 

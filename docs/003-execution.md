@@ -119,7 +119,8 @@ interface ExecutorResult {
 
 ## 6. 投递与幂等
 
-- 消息 id 由 `requestId` 派生：`MessageId('dsh-whale-chan:' + requestId)`，source 固定为 `{ kind: 'dsh-whale-chan' }`（`MessageSourceMap` 的模块扩展）。
+- 消息 id 由 `requestId` 派生：`deliveryId(requestId) = DELIVERY_ID_PREFIX + requestId`（即 `dsh-whale-chan:<requestId>`），source 固定为 `{ kind: 'dsh-whale-chan' }`（`MessageSourceMap` 的模块扩展）。
+- **等待回合时比较的必须是带前缀的 id**：`deliver` 接收裸 `requestId`（内部只加一次前缀），`awaitTurnEnd` 接收 `deliveryId(requestId)`。日志里的 `user/message.id` 是带前缀的，拿裸 id 去比永远不匹配，回合早已结束也只会等满超时（T3 的第二根因；第一根因是 §7 的 inbox 顺序）。
 - 投递前先查**会话自己的日志**与 agent inbox：同 id 的 `user/message` 已经在日志里，或仍在 `nextTurn`/`nextStep` 队列里，就跳过。不需要额外的账本，重启后也不会重复投递。
 - `queue` 模式走 `agent.followup(message)`，开一个新回合；`steer` 模式走 `agent.steer(message)`，并入正在运行的回合。
 - 本插件投递的消息 source 不是 `user`，因此 DSH 与面板不会把它当成主人手写的消息。

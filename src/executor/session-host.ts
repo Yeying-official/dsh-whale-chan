@@ -49,8 +49,8 @@ declare module '@deepseek-ai/dsh-llm' {
 import { ExecutorError } from './errors.ts'
 import { roleModelDeps, routeSelection, seedRoleModel } from './role-model.ts'
 import {
-  DELIVERY_ID_PREFIX,
   DELIVERY_SOURCE,
+  deliveryId,
   type AwaitTurnOptions,
   type DeliverOptions,
   type EnsureSessionOptions,
@@ -363,7 +363,7 @@ export class DshSessionHost implements SessionHost {
   async deliver(ref: SessionRef, options: DeliverOptions): Promise<void> {
     if (this.disposed) throw new ExecutorError('disposed')
     const agent = this.require(ref)
-    const id = MessageId(`${DELIVERY_ID_PREFIX}${options.requestId}`)
+    const id = MessageId(deliveryId(options.requestId))
     if (this.holds(agent, id)) {
       this.logger?.debug?.(`dsh-whale-chan: message ${options.requestId} is already in session ${ref.sessionId}`)
       return

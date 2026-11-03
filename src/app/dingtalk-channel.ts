@@ -65,6 +65,8 @@ export interface RuntimeChannelOptions {
   readonly settings: () => Settings | Promise<Settings>
   readonly logger: DingTalkChannelOptions['logger']
   readonly ownerUserId?: string
+  /** Display name used for `@<name>` mention detection in flattened group events. */
+  readonly ownerNick?: string
   readonly command?: string
   readonly baseArgs?: readonly string[]
   readonly env?: NodeJS.ProcessEnv
@@ -77,6 +79,7 @@ export function createDingTalkChannel(options: RuntimeChannelOptions): DingTalkC
       settingsProvider: options.settings,
       logger: options.logger,
       ...(options.ownerUserId === undefined ? {} : { ownerUserId: options.ownerUserId }),
+      ...(options.ownerNick === undefined ? {} : { ownerNick: options.ownerNick }),
       ...(options.command === undefined ? {} : { command: options.command }),
       ...(options.baseArgs === undefined ? {} : { baseArgs: options.baseArgs }),
       ...(options.env === undefined ? {} : { env: options.env }),

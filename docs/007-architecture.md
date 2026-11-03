@@ -237,7 +237,7 @@ Outbound 有两条入口，共用同一个发送处理器：
 
 1. **存储先行**：`mkdir` → 锁 → `Store.open` → `SettingsService` → `Engine` → `Effects` → 持久计数器（KV）。
 2. **提示词预载**：`PromptStore.preload()`；缺失/空白模板记为 health `prompts: error`，且**通道、流水线与 effect 队列都不装配**。模板属于包完整性的一部分，半运行只会让 classify/compose 反复失败；修复需要重新安装完整 bundle。
-3. **授权探测**：构造探测用的 `DingTalkChannel`（无 owner），调用 `probeAuth()`。`available && authenticated && tokenValid && userId` 缺一不可；缺失时 health 红、**不启动订阅**。
+3. **授权探测**：构造探测用的 `DingTalkChannel`（无 owner），调用 `probeAuth()`。`available && authenticated && tokenValid && userId` 缺一不可；缺失时 health 红、**不启动订阅**。探测返回的可选 `userName`（auth 的 `user_name`）在启动运行通道时作为 `ownerNick` 传入——群事件没有 `staffId`/`atUsers`，正文里的 `@昵称` 是唯一的 addressed 信号；该值只在内存中，不落库、不记日志。
 4. **服务装配**：`DshSessionHost` → `SessionModelPool`（每线程一个 replier 会话，persona/models 变更时重建）→ `DshResearch` → `DshTaskExecutor`；注册全部 effect handler；`Passes` 注册 `expire`（60 s，启动即跑）与 `probe`（5 min）。
 5. **启动**：`Effects.start({concurrency: 8})` → `Passes.start()` → 有 owner 时 `channel.start(sink)`；`sink` 调 `engine.receive` 并对新 decision enqueue `classify`。
 6. **崩溃恢复**：通道启动后 `resumeOutbox()` 把所有 `pending` Outbound 重新 enqueue `send`。
@@ -303,7 +303,7 @@ Outbound 有两条入口，共用同一个发送处理器：
 | `tests/rate-counters.spec.ts`       | 窗口滚动、裁剪、跨重启、gap、损坏恢复、消息窗口与回环状态（11 条）                          |
 | `tests/pipeline-chat.spec.ts`       | 自动回复、闸门降级/拒绝、检索、回声、unknown/failed 发送（18 条）                           |
 | `tests/pipeline-task.spec.ts`       | 任务批准可见、批准后执行与回帖、未批准/取消/派工不符不执行、失败只通知（7 条）              |
-| `tests/runtime-pipeline.spec.ts`    | 启动授权门、暂停/恢复、防抖重启、outbox 恢复、过期/probe pass、停机顺序（16 条）            |
+| `tests/runtime-pipeline.spec.ts`    | 启动授权门、暂停/恢复、防抖重启、outbox 恢复、过期/probe pass、停机顺序、ownerNick（18 条） |
 | `tests/health-view.spec.ts`         | channel 健康语义：disabled/paused/无 target 为 ok，有 target 却 stopped 为 degraded（4 条） |
 
 ## 9. v1 限制

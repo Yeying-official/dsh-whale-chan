@@ -31,6 +31,14 @@ export interface ChannelAuthState {
   readonly expiresAt?: string
   /** Authorized account id; used only to filter the assistant's own messages. */
   readonly userId?: string
+  /**
+   * Authorized account display name, when reported.
+   *
+   * Flattened group events carry no atUsers/staffId, so `@<name>` in the text
+   * is the only way to recognize a mention; the runtime passes this back to the
+   * channel as `ownerNick`. It is never logged or persisted.
+   */
+  readonly userName?: string
 }
 
 /** One subscription's state, as the health view reports it. */

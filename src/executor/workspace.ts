@@ -18,7 +18,7 @@
  * naming rules without a state directory.
  */
 import { createHash } from 'node:crypto'
-import { join } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 import { ExecutorError } from './errors.ts'
 
 /**
@@ -66,6 +66,19 @@ export function isSafeWorkspaceSegment(value: string): boolean {
 /** Full SHA-256 hex digest of a thread key. */
 function threadHash(threadKey: string): string {
   return createHash('sha256').update(threadKey, 'utf8').digest('hex')
+}
+
+/**
+ * Whether two absolute spellings name the same directory.
+ *
+ * It is used to decide whether an explicitly approved directory *is* the
+ * conversation workspace: a trailing separator, a `.` segment or a different
+ * drive-letter case must not turn the same directory into a "different" one
+ * and drop the conversation title. `path.relative` applies the platform's own
+ * comparison rules (case-insensitive on Windows, case-sensitive on POSIX).
+ */
+export function isSameWorkspacePath(left: string, right: string): boolean {
+  return relative(resolve(left), resolve(right)) === ''
 }
 
 /** Deterministic digest of one conversation, used in its directory name. */

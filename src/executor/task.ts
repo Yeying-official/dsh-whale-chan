@@ -28,6 +28,7 @@ import { renderPersona } from '../brain/persona.ts'
 import type { Settings } from '../shared/settings.ts'
 import type { PermissionPreset } from '../shared/limits.ts'
 import { ExecutorError } from './errors.ts'
+import { isSameWorkspacePath } from './workspace.ts'
 import {
   MODEL_TURN_TIMEOUT_MS,
   WORKER_PRESET,
@@ -428,18 +429,23 @@ export class DshTaskExecutor implements TaskExecutor {
    * The workspace one run uses.
    *
    * An explicit approved directory is expanded and must be absolute; it wins
-   * because a person who chose a directory expects the worker there. Without
-   * one, the injected conversation resolver decides (reply and task share the
-   * directory); a composition root that injects no resolver keeps the legacy
-   * `<root>/<taskId>` behavior, including its safe-segment check.
+   * because a person who chose a directory expects the worker there. When it
+   * *is* the conversation workspace (the server's default approval path), the
+   * conversation title is returned as well, so the shared registry row keeps
+   * its name. A different directory is not a conversation workspace: the run
+   * gets no `workspaceTitle`, and a new record there is named by the session
+   * title while an existing record keeps its own title.
+   *
+   * Without an approved directory the injected resolver decides. A composition
+   * root that injects no resolver keeps the legacy `<root>/<taskId>` behavior,
+   * including its safe-segment check.
    */
   private async prepareWorkspace(
     task: Task,
     settings: Settings,
     approved?: string,
   ): Promise<{ path: string; title?: string }> {
-    const named = (approved ?? '').trim().length > 0
-    if (!named && this.workspaceFor !== undefined) {
+    if ((approved ?? '').trim().length === 0 && this.workspaceFor !== undefined) {
       const resolved = this.workspaceFor(task)
       await this.makeDirectory(resolved.path)
       return { path: resolved.path, title: resolved.title }
@@ -452,7 +458,12 @@ export class DshTaskExecutor implements TaskExecutor {
       stateDir: this.stateDir,
     })
     await this.makeDirectory(path)
-    return { path }
+    if (this.workspaceFor === undefined) return { path }
+    // The approved path may name the conversation workspace with a different
+    // spelling (trailing separator, `.` segment, drive-letter case). Compare
+    // resolved paths so the shared title survives.
+    const shared = this.workspaceFor(task)
+    return isSameWorkspacePath(path, shared.path) ? { path, title: shared.title } : { path }
   }
 }
 

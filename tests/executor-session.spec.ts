@@ -13,7 +13,14 @@
  * session cannot be created in a unit test without starting a model call.
  */
 import { describe, expect, it } from 'vitest'
-import { TurnTracker, awaitTurn, deliveryId, type TrackedSessionEvent } from '../src/executor/index.ts'
+import {
+  TurnTracker,
+  awaitTurn,
+  deliveryId,
+  ensureWorkspace,
+  type TrackedSessionEvent,
+  type WorkspaceTitleRecord,
+} from '../src/executor/index.ts'
 
 function start(turn: number): TrackedSessionEvent {
   return { type: 'turn/start', data: { turn } }
@@ -268,5 +275,78 @@ describe('awaitTurn', () => {
     log.push({ type: 'assistant/message', data: { turn: 1, step: 1 } })
     log.push({ type: 'tool/call', data: { turn: 1, step: 1 } })
     expect(await waiting).toEqual({ status: 'timeout' })
+  })
+})
+
+class FakeWorkspaceRecord implements WorkspaceTitleRecord {
+  readonly retitles: string[] = []
+  title: string
+
+  constructor(title: string) {
+    this.title = title
+  }
+
+  async setTitle(title: string): Promise<void> {
+    this.retitles.push(title)
+    this.title = title
+  }
+}
+
+/** A registry whose single record is reused, as `workspaceRegistry.create` does by canonical path. */
+function fakeRegistry(existing?: FakeWorkspaceRecord): {
+  calls: Array<{ path: string; title: string | undefined }>
+  record: FakeWorkspaceRecord
+  create(path: string, title?: string): Promise<FakeWorkspaceRecord>
+} {
+  const record = existing ?? new FakeWorkspaceRecord('')
+  const calls: Array<{ path: string; title: string | undefined }> = []
+  return {
+    calls,
+    record,
+    async create(path: string, title?: string): Promise<FakeWorkspaceRecord> {
+      calls.push({ path, title })
+      return record
+    },
+  }
+}
+
+describe('ensureWorkspace', () => {
+  it('keeps an existing conversation title when a task joins without its own title', async () => {
+    const record = new FakeWorkspaceRecord('钉钉 · AI工程师孵化中心')
+    const registry = fakeRegistry(record)
+    const workspace = await ensureWorkspace(
+      registry,
+      '/state/workspaces/conversation-0d7a92c2f345eead',
+      '任务 · 在测试工作区创建 ws-check.txt',
+    )
+    // `create` only names a new record; it must not be followed by a rewrite.
+    expect(registry.calls).toEqual([
+      { path: '/state/workspaces/conversation-0d7a92c2f345eead', title: '任务 · 在测试工作区创建 ws-check.txt' },
+    ])
+    expect(workspace.title).toBe('钉钉 · AI工程师孵化中心')
+    expect(record.retitles).toEqual([])
+  })
+
+  it('rewrites the title only when an explicit workspace title is supplied', async () => {
+    const record = new FakeWorkspaceRecord('旧标题')
+    const registry = fakeRegistry(record)
+    const workspace = await ensureWorkspace(registry, '/state/workspaces/conversation-a', '任务 · x', '钉钉 · 新标题')
+    expect(workspace.title).toBe('钉钉 · 新标题')
+    expect(record.retitles).toEqual(['钉钉 · 新标题'])
+  })
+
+  it('does not rewrite an already matching explicit title', async () => {
+    const record = new FakeWorkspaceRecord('钉钉 · 新标题')
+    const registry = fakeRegistry(record)
+    await ensureWorkspace(registry, '/state/workspaces/conversation-a', '任务 · x', '钉钉 · 新标题')
+    expect(record.retitles).toEqual([])
+  })
+
+  it('lets the session title name a brand-new record when no workspace title is given', async () => {
+    const registry = fakeRegistry()
+    registry.record.title = '任务 · x'
+    const workspace = await ensureWorkspace(registry, '/state/workspaces/tasks/task-1', '任务 · x')
+    expect(workspace.title).toBe('任务 · x')
+    expect(registry.record.retitles).toEqual([])
   })
 })

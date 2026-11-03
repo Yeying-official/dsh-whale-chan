@@ -301,6 +301,37 @@ export interface DshSessionHostOptions {
   readonly mkdir?: (path: string) => Promise<void>
 }
 
+/** The workspace-record operations `ensureSession` needs, kept minimal for a fake registry. */
+export interface WorkspaceTitleRecord {
+  readonly title: string
+  setTitle(title: string): Promise<void>
+}
+
+/**
+ * Create or reuse the workspace record of one session directory.
+ *
+ * `workspaceRegistry.create` is idempotent by canonical path and never changes
+ * the title of an existing record. The session title is therefore only the
+ * name of a *new* record. A registry title is rewritten solely when the caller
+ * explicitly supplies `workspaceTitle`: a task joining its conversation
+ * workspace must not rename that shared record after its own session title.
+ *
+ * Exported so the rule can be tested without a live DSH context; the
+ * production call site is `DshSessionHost.ensureSession`.
+ */
+export async function ensureWorkspace<W extends WorkspaceTitleRecord>(
+  registry: { create(path: string, title?: string): Promise<W> },
+  path: string,
+  sessionTitle: string,
+  workspaceTitle?: string,
+): Promise<W> {
+  const workspace = await registry.create(path, workspaceTitle ?? sessionTitle)
+  if (workspaceTitle !== undefined && workspace.title !== workspaceTitle) {
+    await workspace.setTitle(workspaceTitle)
+  }
+  return workspace
+}
+
 /**
  * `SessionHost` over one Cordis context.
  *
@@ -337,12 +368,14 @@ export class DshSessionHost implements SessionHost {
       options.signal.throwIfAborted()
       // `workspaceRegistry.create` rejects a path that is not an existing
       // directory, which is why the directory is made first. A conversation
-      // workspace may already exist (its replier was created first), in which
-      // case `create` returns that record unchanged and only a stale title is
-      // rewritten.
-      const workspaceTitle = options.workspaceTitle ?? options.title
-      const workspace = await this.ctx.workspaceRegistry.create(options.workspace, workspaceTitle)
-      if (workspace.title !== workspaceTitle) await workspace.setTitle(workspaceTitle)
+      // workspace may already exist (its replier or an earlier task created
+      // it); only an explicit `workspaceTitle` may rewrite that shared title.
+      const workspace = await ensureWorkspace(
+        this.ctx.workspaceRegistry,
+        options.workspace,
+        options.title,
+        options.workspaceTitle,
+      )
       const created = await this.ctx.sessionController.create({
         sessionId: requested,
         workspaceId: workspace.id,

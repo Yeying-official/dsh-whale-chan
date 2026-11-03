@@ -191,7 +191,7 @@ Outbound(pending) ──► effects.enqueue('send', outboundId) ──► channe
 
 - 会话层没有全局可变表：`SessionHost` 的每个方法都以调用方传入的 `SessionRef` 寻址，两个任务不可能读到对方的 inbox 或回合边界。
 - 执行器内部只有一张 `taskId → 运行记录` 的表，用来拒绝同一任务的第二次并发运行，以及让 `cancel` 找到要中止的运行；它不跨任务共享任何状态。
-- 全局并发上限（`tasks.maxConcurrent`）属于 app 层调度（WS5），执行器只保证「同一任务不并发」。
+- 全局并发上限（`tasks.maxConcurrent`）由 app 层的 `launch` handler 执行：达到上限时抛 `Later`，effect 在 1 秒后重试，不丢任务、不重复启动；没有全局排队表或面板排队。执行器只保证「同一任务不并发」。
 
 ## 10. 事务边界
 

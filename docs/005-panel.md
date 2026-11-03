@@ -1,6 +1,12 @@
 # 005 面板
 
-> 当前状态：占位（WS0）。WS0 只实现 `whale-chan` 面板的状态占位页。
+> 当前状态：占位（WS0）。WS0 只实现 `whale-chan` 面板的状态占位页。WS5b 已完成后端流水线，WS6 才开始实现本文的信息架构。
+
+## WS6 之前已知的 v1 限制（WS5b）
+
+- **review 草稿只读展示**：闸门降级为 `review` 时后端只 `engine.draft`，没有“确认后发送”的 HTTP 动作。面板只展示草稿并允许复制，由主人在钉钉手动发送。
+- **不新增路由**：v1 的 19 条 API 已冻结；`POST decisions/:id/send` 需要扩合约与视图，列入 v0.2 backlog。
+- **通知不进收件箱**：任务失败/投递 unknown 只写 `notice` 审计，面板在 audit/overview 展示，不创建 DSH 收件箱会话。
 
 ## 本文件将覆盖
 
@@ -10,5 +16,7 @@
 
 ## 相关文档
 
+- [003 执行](003-execution.md)
+- [006 部署](006-deployment.md)
 - [010 设计摘要](010-design.md)
 - [013 安全](013-security.md)

@@ -329,7 +329,13 @@ export function healthView(ctx: ViewContext): Health {
 
   const attached = status.auth !== null || status.monitorRunning || status.channelError !== null
   const authCheck = authHealth(status, check)
-  const channelCheck = channelHealth(status, authCheck, check)
+  const channelCheck = channelHealth(
+    status,
+    authCheck,
+    check,
+    settings.monitor.enabled,
+    settings.targets.rows.filter((row) => row.enabled).length,
+  )
   checks.push(channelCheck, authCheck)
   if (attached) owned.push(channelCheck, authCheck)
 
@@ -360,8 +366,23 @@ function authHealth(status: RuntimeServiceStatus, check: CheckFactory): HealthCh
   return check('auth', 'ok', 'dws authorization is valid')
 }
 
-function channelHealth(status: RuntimeServiceStatus, auth: HealthCheck, check: CheckFactory): HealthCheck {
+/**
+ * Project one channel state into a health check.
+ *
+ * "Stopped" is not automatically unhealthy: the owner can disable monitoring,
+ * pause the assistant, or configure no enabled target at all. Those are normal
+ * idle states and stay `ok`; only a channel that should be subscribed but is
+ * not gets `degraded`.
+ */
+function channelHealth(
+  status: RuntimeServiceStatus,
+  auth: HealthCheck,
+  check: CheckFactory,
+  monitoringEnabled: boolean,
+  enabledTargets: number,
+): HealthCheck {
   if (auth.status === 'error') return check('channel', 'error', 'not subscribed because authorization is invalid')
+  if (!monitoringEnabled) return check('channel', 'ok', 'monitoring is disabled in settings')
   if (status.paused) return check('channel', 'ok', 'paused by the owner')
   if (!status.channelAttached) return check('channel', 'degraded', 'unknown: the DingTalk channel is not attached')
   if (status.channelError !== null) {
@@ -372,6 +393,7 @@ function channelHealth(status: RuntimeServiceStatus, auth: HealthCheck, check: C
   }
   if (status.channelState === 'starting') return check('channel', 'degraded', 'starting')
   if (status.channelState === 'degraded') return check('channel', 'degraded', 'some subscriptions are unhealthy')
+  if (enabledTargets === 0) return check('channel', 'ok', 'idle: no enabled targets')
   return check('channel', 'degraded', 'not running')
 }
 

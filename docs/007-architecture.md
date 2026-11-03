@@ -236,7 +236,7 @@ Outbound 有两条入口，共用同一个发送处理器：
 组合根只做装配与生命周期，不实现业务规则：
 
 1. **存储先行**：`mkdir` → 锁 → `Store.open` → `SettingsService` → `Engine` → `Effects` → 持久计数器（KV）。
-2. **提示词预载**：`PromptStore.preload()`；缺失/空白模板只记为 health `prompts: error`，不启动通道（不猜提示词）。
+2. **提示词预载**：`PromptStore.preload()`；缺失/空白模板记为 health `prompts: error`，且**通道、流水线与 effect 队列都不装配**。模板属于包完整性的一部分，半运行只会让 classify/compose 反复失败；修复需要重新安装完整 bundle。
 3. **授权探测**：构造探测用的 `DingTalkChannel`（无 owner），调用 `probeAuth()`。`available && authenticated && tokenValid && userId` 缺一不可；缺失时 health 红、**不启动订阅**。
 4. **服务装配**：`DshSessionHost` → `SessionModelPool`（每线程一个 replier 会话，persona/models 变更时重建）→ `DshResearch` → `DshTaskExecutor`；注册全部 effect handler；`Passes` 注册 `expire`（60 s，启动即跑）与 `probe`（5 min）。
 5. **启动**：`Effects.start({concurrency: 8})` → `Passes.start()` → 有 owner 时 `channel.start(sink)`；`sink` 调 `engine.receive` 并对新 decision enqueue `classify`。
@@ -246,18 +246,18 @@ Outbound 有两条入口，共用同一个发送处理器：
 
 健康字段（`GET health` 的 `checks`；`dws` 汇总在顶层）：
 
-| check      | 来源                                                      | error 条件                                      |
-| ---------- | --------------------------------------------------------- | ----------------------------------------------- |
-| `state`    | `Runtime.info()`                                          | 无                                              |
-| `stateDir` | 目录可写                                                  | 不可写                                          |
-| `database` | `state.db` 打开、schema 版本                              | 未打开                                          |
-| `lock`     | 状态目录锁                                                | 锁丢失为 degraded                               |
-| `settings` | 加载警告                                                  | 有警告为 degraded                               |
-| `prompts`  | 五份模板预载                                              | 缺失/空白 → error                               |
-| `effects`  | `pending`/`dead` 计数                                     | 有 dead 行 → degraded                           |
-| `channel`  | 通道 health（state/running/targets）、启动错误            | 启动失败或授权无效 → error；暂停显示为 `ok`     |
-| `auth`     | `probeAuth()` 的 available/authenticated/tokenValid/owner | 未安装、未登录、token 失效、无账号 id → error   |
-| `executor` | 是否装配、运行中的任务数                                  | 未装配 → degraded `unknown`（仅 API-only 模式） |
+| check      | 来源                                                      | error 条件                                                                                            |
+| ---------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `state`    | `Runtime.info()`                                          | 无                                                                                                    |
+| `stateDir` | 目录可写                                                  | 不可写                                                                                                |
+| `database` | `state.db` 打开、schema 版本                              | 未打开                                                                                                |
+| `lock`     | 状态目录锁                                                | 锁丢失为 degraded                                                                                     |
+| `settings` | 加载警告                                                  | 有警告为 degraded                                                                                     |
+| `prompts`  | 五份模板预载                                              | 缺失/空白 → error                                                                                     |
+| `effects`  | `pending`/`dead` 计数                                     | 有 dead 行 → degraded                                                                                 |
+| `channel`  | 通道 health（state/running/targets）、启动错误            | 启动失败或授权无效 → error；禁用/暂停/无 enabled target → `ok`（idle）；应有订阅却 stopped → degraded |
+| `auth`     | `probeAuth()` 的 available/authenticated/tokenValid/owner | 未安装、未登录、token 失效、无账号 id → error                                                         |
+| `executor` | 是否装配、运行中的任务数                                  | 未装配 → degraded `unknown`（仅 API-only 模式）                                                       |
 
 `monitor.running` 与 `overview.monitor.running` 取真实通道运行状态，不再写死 `false`。
 
@@ -279,35 +279,38 @@ Outbound 有两条入口，共用同一个发送处理器：
 
 ## 8. 测试索引
 
-| 文件                                | 覆盖                                                                              |
-| ----------------------------------- | --------------------------------------------------------------------------------- |
-| `tests/core-engine.spec.ts`         | 领域命令、事件、会话绑定与标题（23 条）                                           |
-| `tests/core-invariants.spec.ts`     | 10 条硬不变量 + 中途失败回滚 + 迟到批准 + 偏移时间与非法时间（15 条）             |
-| `tests/store.spec.ts`               | 打开/迁移/索引/往返/回滚/唯一约束/损坏 JSON/分页/裁剪/KV（13 条）                 |
-| `tests/effects.spec.ts`             | 顺序、并发、覆盖、运行中重排、退避、上限、Later、dead、drain（10 条）             |
-| `tests/passes.spec.ts`              | 间隔、runAtStart、单飞、异常隔离、stop、重复注册（6 条）                          |
-| `tests/channel-*.spec.ts`           | dws 参数、解码、发送结果、重启退避、目标发现与授权（WS2）                         |
-| `tests/brain-*.spec.ts`             | 分类、闸门、回复清洗、检索预算、人设与提示（WS3）                                 |
-| `tests/executor-task.spec.ts`       | 批准门、工作区（批准目录优先）、模型路由、四种结局、回调次数、并发、重试（28 条） |
-| `tests/executor-model.spec.ts`      | 提示组装与截断、串行、模型路由、轮数/空闲重建、超时与异常、dispose（19 条）       |
-| `tests/executor-research.spec.ts`   | 映射、上限、非 http(s) 过滤、空结果、异常与中止降级（10 条）                      |
-| `tests/executor-session.spec.ts`    | 回合匹配、订阅/扫描竞态、超时、中止（13 条）                                      |
-| `tests/executor-role-model.spec.ts` | 模型路由映射、空配置不注入、已有选择不覆盖、解析失败回退（12 条）                 |
-| `tests/presets.spec.ts`             | 宿主行仍在、两套 preset 的字段与工具集、中性人设前缀、无重复 id（17 条）          |
-| `tests/contract.spec.ts`            | 分层依赖规则、共享合约、文档数量                                                  |
-| `tests/settings-service.spec.ts`    | 默认值、持久化、revision、冲突、深合并、损坏降级、v1→v2、history（16 条）         |
-| `tests/api-routes.spec.ts`          | 19 条路由、分页、错误码、audit、channel 503/400（22 条）                          |
-| `tests/task-actions.spec.ts`        | 批准/拒绝/取消/重试、默认工作区、launch effect（9 条）                            |
-| `tests/runtime-lock.spec.ts`        | 打开/持久化/锁冲突/释放/启动失败（6 条）                                          |
-| `tests/core-outbound.spec.ts`       | `queueFollowup` 幂等/目标匹配/空值；outbound 终态与重复上报（10 条）              |
-| `tests/rate-counters.spec.ts`       | 窗口滚动、裁剪、跨重启、gap、损坏恢复、消息窗口与回环状态（11 条）                |
-| `tests/pipeline-chat.spec.ts`       | 自动回复、闸门降级/拒绝、检索、回声、unknown/failed 发送（18 条）                 |
-| `tests/pipeline-task.spec.ts`       | 任务批准可见、批准后执行与回帖、未批准/取消/派工不符不执行、失败只通知（7 条）    |
-| `tests/runtime-pipeline.spec.ts`    | 启动授权门、暂停/恢复、防抖重启、outbox 恢复、过期/probe pass、停机顺序（16 条）  |
+| 文件                                | 覆盖                                                                                        |
+| ----------------------------------- | ------------------------------------------------------------------------------------------- |
+| `tests/core-engine.spec.ts`         | 领域命令、事件、会话绑定与标题（23 条）                                                     |
+| `tests/core-invariants.spec.ts`     | 10 条硬不变量 + 中途失败回滚 + 迟到批准 + 偏移时间与非法时间（15 条）                       |
+| `tests/store.spec.ts`               | 打开/迁移/索引/往返/回滚/唯一约束/损坏 JSON/分页/裁剪/KV（13 条）                           |
+| `tests/effects.spec.ts`             | 顺序、并发、覆盖、运行中重排、退避、上限、Later、dead、drain（10 条）                       |
+| `tests/passes.spec.ts`              | 间隔、runAtStart、单飞、异常隔离、stop、重复注册（6 条）                                    |
+| `tests/channel-*.spec.ts`           | dws 参数、解码、发送结果、重启退避、目标发现与授权（WS2）                                   |
+| `tests/brain-*.spec.ts`             | 分类、闸门、回复清洗、检索预算、人设与提示（WS3）                                           |
+| `tests/executor-task.spec.ts`       | 批准门、工作区（批准目录优先）、模型路由、四种结局、回调次数、并发、重试（28 条）           |
+| `tests/executor-model.spec.ts`      | 提示组装与截断、串行、模型路由、轮数/空闲重建、超时与异常、dispose（19 条）                 |
+| `tests/executor-research.spec.ts`   | 映射、上限、非 http(s) 过滤、空结果、异常与中止降级（10 条）                                |
+| `tests/executor-session.spec.ts`    | 回合匹配、订阅/扫描竞态、超时、中止（13 条）                                                |
+| `tests/executor-role-model.spec.ts` | 模型路由映射、空配置不注入、已有选择不覆盖、解析失败回退（12 条）                           |
+| `tests/presets.spec.ts`             | 宿主行仍在、两套 preset 的字段与工具集、中性人设前缀、无重复 id（17 条）                    |
+| `tests/contract.spec.ts`            | 分层依赖规则、共享合约、文档数量                                                            |
+| `tests/settings-service.spec.ts`    | 默认值、持久化、revision、冲突、深合并、损坏降级、v1→v2、history（16 条）                   |
+| `tests/api-routes.spec.ts`          | 19 条路由、分页、错误码、audit、channel 503/400（22 条）                                    |
+| `tests/task-actions.spec.ts`        | 批准/拒绝/取消/重试、默认工作区、launch effect（9 条）                                      |
+| `tests/runtime-lock.spec.ts`        | 打开/持久化/锁冲突/释放/启动失败（6 条）                                                    |
+| `tests/core-outbound.spec.ts`       | `queueFollowup` 幂等/目标匹配/空值；outbound 终态与重复上报（10 条）                        |
+| `tests/rate-counters.spec.ts`       | 窗口滚动、裁剪、跨重启、gap、损坏恢复、消息窗口与回环状态（11 条）                          |
+| `tests/pipeline-chat.spec.ts`       | 自动回复、闸门降级/拒绝、检索、回声、unknown/failed 发送（18 条）                           |
+| `tests/pipeline-task.spec.ts`       | 任务批准可见、批准后执行与回帖、未批准/取消/派工不符不执行、失败只通知（7 条）              |
+| `tests/runtime-pipeline.spec.ts`    | 启动授权门、暂停/恢复、防抖重启、outbox 恢复、过期/probe pass、停机顺序（16 条）            |
+| `tests/health-view.spec.ts`         | channel 健康语义：disabled/paused/无 target 为 ok，有 target 却 stopped 为 degraded（4 条） |
 
 ## 9. v1 限制
 
 - **没有历史补拉（backfill）**：`dws` 事件流只支持按 TTL 的消费窗口，WS2 没有实现「过去消息」补拉；插件只处理启动后收到的消息，不在本期伪造历史。
+- **模板缺失即插件降级**：`prompts/*.md` 属于包完整性；任一模板缺失/空白时通道、流水线与 effect 队列都不装配，health 显示 `prompts: error`。这是有意的 fail-closed，不尝试通用提示词。
+- **review 无发送路由**：闸门降级为 `review` 时只写 Draft；面板（WS6）只读展示并允许复制，由主人自行在钉钉发送。`POST decisions/:id/send` 需要扩 19 条冻结合约，列入 v0.2 backlog。
 - **通知不进 DSH 收件箱**：`notify` 只写 `notice` 审计事件（面板 audit/overview 可见），不创建 DSH 会话，也不注入消息。任务失败/未知投递的本地告警因此只能在审计与健康里看到。
 - **单实例**：状态目录锁保证同一 `stateDir` 只有一个进程；锁 stale 10 秒，崩溃后需等待接管，不支持多实例共享。
 - **未知投递不重发**：`unknown` 是终态，只有人核对通道后才能另行处理；没有自动重试命令。

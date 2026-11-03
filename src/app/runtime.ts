@@ -306,6 +306,10 @@ export class Runtime {
   private closing = false
   private stopping: Promise<void> | undefined
 
+  /**
+   * @deprecated Production uses `new Runtime({ ctx, config })`. This form
+   * remains only for the API-only tests that run without a Cordis context.
+   */
   constructor(config: DeploymentConfig, options?: RuntimeOptions)
   constructor(init: RuntimeInit)
   constructor(first: DeploymentConfig | RuntimeInit, second: RuntimeOptions = {}) {

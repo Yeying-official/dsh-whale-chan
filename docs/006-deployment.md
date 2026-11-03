@@ -265,7 +265,7 @@ WS5a 起设置与领域状态一起持久化在 SQLite；WS5a 只打开数据库
 
 1. 创建 `stateDir`、获取 `.lock`、打开并迁移 `state.db`；
 2. 加载 `SettingsService`、`Engine`、`Effects` 与持久计数器；
-3. `PromptStore.preload()` 读取 `prompts/*.md` 五份模板。**缺失或空白即 health `prompts: error`，不启动通道**（不会回落到通用提示词）；
+3. `PromptStore.preload()` 读取 `prompts/*.md` 五份模板。**缺失或空白属于包完整性问题：health `prompts: error`，通道、流水线与 effect 队列都不装配**（不会回落到通用提示词，也不会半运行制造无效重试）；
 4. `probeAuth()`：`available`、`authenticated`、`token_valid`、**账号 id**（`user_id`/`userId` 等别名）缺一不可。缺账号 id 时 health 的 `auth` 检查为 error，通道不订阅；
 5. 装配 `DshSessionHost`、`SessionModel`、`DshResearch`、`DshTaskExecutor`，注册全部 effect handler；
 6. `Effects.start` → `Passes.start`（过期扫描 60 s、授权探测 5 min）→ `channel.start`；
@@ -284,17 +284,17 @@ WS5a 起设置与领域状态一起持久化在 SQLite；WS5a 只打开数据库
 
 `GET health` 的 `status` 只由宿主拥有的检查决定；按下面顺序看：
 
-| check      | 看到什么                                | 先做什么                                                        |
-| ---------- | --------------------------------------- | --------------------------------------------------------------- |
-| `stateDir` | `not writable`                          | 检查目录权限、磁盘满、路径是否为文件                            |
-| `database` | 非 `ok`                                 | 看启动日志的迁移/锁错误；不要手改 `user_version`                |
-| `lock`     | `degraded`                              | 确认没有第二个实例；等待 10 s stale 后重试                      |
-| `settings` | `degraded`                              | 按 `detail` 里的 block 重新保存；损坏行已回退默认值             |
-| `prompts`  | `error`                                 | 确认包内有 `prompts/*.md` 且非空；重新 `pnpm build`/安装 bundle |
-| `auth`     | `error`                                 | `dws --version`、`dws auth status --format json`；重新登录      |
-| `channel`  | `error` / `degraded`                    | 看 `detail` 与通道日志；目标 ID 非法或 `dws event consume` 失败 |
-| `effects`  | `degraded`（有 dead 行）                | 查 `effects` 行的 `last_error`；修复后重新触发对应动作          |
-| `executor` | `degraded`（unknown，仅 API-only 模式） | 正常插件运行时应为 `ok`；检查两套 preset 是否生效               |
+| check      | 看到什么                                | 先做什么                                                                  |
+| ---------- | --------------------------------------- | ------------------------------------------------------------------------- |
+| `stateDir` | `not writable`                          | 检查目录权限、磁盘满、路径是否为文件                                      |
+| `database` | 非 `ok`                                 | 看启动日志的迁移/锁错误；不要手改 `user_version`                          |
+| `lock`     | `degraded`                              | 确认没有第二个实例；等待 10 s stale 后重试                                |
+| `settings` | `degraded`                              | 按 `detail` 里的 block 重新保存；损坏行已回退默认值                       |
+| `prompts`  | `error`                                 | 确认包内有 `prompts/*.md` 且非空；重新 `pnpm build`/安装 bundle           |
+| `auth`     | `error`                                 | `dws --version`、`dws auth status --format json`；重新登录                |
+| `channel`  | `error` / `degraded` / `ok`（idle）     | `ok` 的 disabled/paused/idle 是正常状态；`degraded` 才看通道日志与目标 ID |
+| `effects`  | `degraded`（有 dead 行）                | 查 `effects` 行的 `last_error`；修复后重新触发对应动作                    |
+| `executor` | `degraded`（unknown，仅 API-only 模式） | 正常插件运行时应为 `ok`；检查两套 preset 是否生效                         |
 
 `dws.available`/`dws.authenticated` 是顶层汇总；`monitor.running` 是真实通道状态。日志不包含消息正文、账号 id 或 token。
 
@@ -303,6 +303,9 @@ WS5a 起设置与领域状态一起持久化在 SQLite；WS5a 只打开数据库
 - 同一 `stateDir` 只能有一个实例；第二个实例启动失败（`already in use`），不会排队重试。这是有意的：两个进程同时消费同一账号的事件会重复回复。
 - v1 **没有历史补拉**：只处理启动后 `dws` 能消费到的消息，不补拉过去对话。
 - v1 的本地通知只写 `notice` 审计事件，**不创建 DSH 收件箱会话**；投递 unknown/failed 需在审计里核对后人工处理，插件不会自动重发。
+- **review 草稿没有发送路由**：v1 只 `draft`，WS6 面板只读展示并允许复制，由主人自行在钉钉发送。补 `POST decisions/:id/send` 需要扩 19 条冻结合约，列入 v0.2 backlog。
+- **模板缺失 = 插件不可用**：这是包完整性问题，不是运行时配置；health 的 `prompts` 为 error，通道与任务都不工作。修复方式是重新安装完整 bundle，而不是改设置。
+- 通道健康把「禁用监控 / 主人暂停 / 没有 enabled target」都视为正常 idle（`ok`）；只有「应有订阅却 stopped」才是 `degraded`。启用 targets 为 0 时 `monitor.running` 仍为 `false`，这是事实而非故障。
 
 ## 相关文档
 

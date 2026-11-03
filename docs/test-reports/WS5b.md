@@ -18,16 +18,16 @@ $ tsc --noEmit
 （无输出，退出码 0）
 
 $ pnpm test
- Test Files  42 passed (42)
-      Tests  558 passed (558)
+ Test Files  43 passed (43)
+      Tests  562 passed (562)
 
 $ pnpm build
 ℹ [CJS] lib\client.js  42.04 kB │ gzip: 12.48 kB
 ℹ [CJS] 1 files, total: 42.04 kB
 ✔ Build complete
-ℹ [ESM] lib\index.js  311.18 kB │ gzip: 85.92 kB
+ℹ [ESM] lib\index.js  312.15 kB │ gzip: 86.22 kB
 ℹ [ESM] lib\index.d.ts    0.90 kB │ gzip:  0.43 kB
-ℹ [ESM] 2 files, total: 312.08 kB
+ℹ [ESM] 2 files, total: 313.06 kB
 ✔ Build complete
 
 $ pnpm format:check
@@ -43,7 +43,7 @@ $ git status --porcelain
 
 ## 2. 测试增量
 
-基线 `main` `8dc9b93`：37 个 spec、496 条。新增 5 个 spec、62 条（**558**）。
+基线 `main` `8dc9b93`：37 个 spec、496 条。新增 6 个 spec、66 条（**562**）。
 
 | 文件                             | 条数 | 覆盖                                                                                                                                                                                   |
 | -------------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -52,6 +52,7 @@ $ git status --porcelain
 | `tests/pipeline-chat.spec.ts`    | 18   | 自动回复端到端、重复投递不重复回复、无目标 defer；review/自动关闭/静默/限速/最小间隔；未 @/广播/回声；低置信/空回复；检索成功与降级；unknown/failed/skipped 发送                       |
 | `tests/pipeline-task.spec.ts`    | 7    | GET tasks 可见待批准、批准后 fake executor 执行/`assignmentEnded`/回帖文本与目标；未批准、取消后残留 launch、派工不符不执行；失败只 notice；DM 回帖目标                                |
 | `tests/runtime-pipeline.spec.ts` | 16   | 授权门（未登录/token 失效/无 owner）、模板失败、通道启动失败；暂停/恢复、targets 防抖、dws 重启、persona/models 重建；outbox 恢复与幂等；expire/probe pass；停机顺序、幂等、锁/db 释放 |
+| `tests/health-view.spec.ts`      | 4    | channel 健康语义：monitoring disabled / paused / 无 enabled target 均 ok；有 enabled target 但 stopped 为 degraded；overall 不被 idle 拖成 degraded                                    |
 
 既有 `tests/core-invariants.spec.ts` 的错误码分类表补入 3 个新码（`emptyOutbound`、`emptyIdempotencyKey`、`outboundTargetMismatch`，均为 `invalid`）。
 
@@ -66,6 +67,7 @@ $ git status --porcelain
 - **暂停/恢复无泄漏**：paused=true 后 `monitor.running=false` 且 `channel.stopCalls=1`；恢复后重新 start。
 - **停止顺序**：`channel:stop → executor:dispose → model:dispose`；`stop()` 两次返回同一 Promise；锁释放、数据库关闭。
 - **健康真实值**：`monitor.running`、`channel`、`auth`、`prompts`、`effects`、`executor` 均由运行时状态投影；暂停显示为 channel `ok` 的「paused by the owner」。
+- **channel idle 不再误报**：monitoring disabled → `ok`「monitoring is disabled in settings」；paused → `ok`；无 enabled target → `ok`「idle: no enabled targets」；只有有 enabled target 却 stopped 才是 `degraded`；四种状态都不会把 overall 拖成 degraded。
 - **日志/健康不含敏感正文**：notice 只有 kind 与 id；channel 启动错误只保留 `name:code`；health 不包含账号 id、token 或消息正文。
 
 ## 4. 自评（10 条审核清单）

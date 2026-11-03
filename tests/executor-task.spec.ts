@@ -32,7 +32,13 @@ interface Harness {
   readonly starts: Array<{ taskId: string; sessionId: string }>
 }
 
-function harness(options: { settings?: ReturnType<typeof makeSettings>; stateDir?: string } = {}): Harness {
+function harness(
+  options: {
+    settings?: ReturnType<typeof makeSettings>
+    stateDir?: string
+    workspaceFor?: (task: ReturnType<typeof makeTask>) => { path: string; title: string }
+  } = {},
+): Harness {
   const host = new FakeSessionHost()
   const dirs: string[] = []
   const results: ExecutorResult[] = []
@@ -41,6 +47,7 @@ function harness(options: { settings?: ReturnType<typeof makeSettings>; stateDir
     host,
     homeDir: '/home/owner',
     ...(options.stateDir === undefined ? {} : { stateDir: options.stateDir }),
+    ...(options.workspaceFor === undefined ? {} : { workspaceFor: options.workspaceFor }),
     clock: () => new Date('2026-11-03T01:00:00.000Z'),
     mkdir: async (path) => {
       dirs.push(path)
@@ -259,6 +266,77 @@ describe('session and workspace', () => {
     expect(taskWorkspace(settings, 'task-9', '/home/owner', DEFAULT_STATE_DIR)).toBe(
       join('/home/owner', '.dsh-whale-chan', 'tasks', 'task-9'),
     )
+  })
+
+  it('runs in the conversation workspace when no directory was approved', async () => {
+    const { host, executor, dirs } = harness({
+      workspaceFor: (task) => ({ path: `/srv/conversations/${task.threadKey}`, title: '钉钉 · 会话' }),
+    })
+    const task = makeTask()
+    await executor.execute({
+      task,
+      approval: makeApproval(task),
+      settings: makeSettings(),
+      signal: new AbortController().signal,
+    })
+    expect(dirs).toEqual(['/srv/conversations/dm:u1'])
+    expect(host.ensured[0]?.workspace).toBe('/srv/conversations/dm:u1')
+    expect(host.ensured[0]?.workspaceTitle).toBe('钉钉 · 会话')
+    // The session title still describes the task, not the workspace.
+    expect(host.ensured[0]?.title).toBe('任务 · 整理会议纪要')
+  })
+
+  it('lets the approving person override the conversation workspace', async () => {
+    let calls = 0
+    const { host, executor, dirs } = harness({
+      workspaceFor: () => {
+        calls += 1
+        return { path: '/srv/conversations/dm:u1', title: '钉钉 · 会话' }
+      },
+    })
+    const task = makeTask()
+    await executor.execute({
+      task,
+      approval: makeApproval(task),
+      settings: makeSettings(),
+      workspace: '/srv/projects/alpha',
+      signal: new AbortController().signal,
+    })
+    expect(calls).toBe(0)
+    expect(dirs).toEqual(['/srv/projects/alpha'])
+    expect(host.ensured[0]?.workspace).toBe('/srv/projects/alpha')
+    // An explicitly chosen directory is not one conversation workspace, so no
+    // conversation title is written onto its registry row.
+    expect(host.ensured[0]?.workspaceTitle).toBeUndefined()
+  })
+
+  it('uses the conversation workspace when the approved value is blank', async () => {
+    const { host, executor, dirs } = harness({
+      workspaceFor: () => ({ path: '/srv/conversations/dm:u1', title: '钉钉 · 会话' }),
+    })
+    const task = makeTask()
+    await executor.execute({
+      task,
+      approval: makeApproval(task),
+      settings: makeSettings({ tasks: { workspaceRoot: '/srv/ignored' } }),
+      workspace: '   ',
+      signal: new AbortController().signal,
+    })
+    expect(dirs).toEqual(['/srv/conversations/dm:u1'])
+    expect(host.ensured[0]?.workspace).toBe('/srv/conversations/dm:u1')
+  })
+
+  it('keeps the legacy task directory and session workspace title without a resolver', async () => {
+    const { host, executor, dirs } = harness()
+    const task = makeTask()
+    await executor.execute({
+      task,
+      approval: makeApproval(task),
+      settings: makeSettings(),
+      signal: new AbortController().signal,
+    })
+    expect(dirs).toEqual([join('/home/owner', '.dsh-whale-chan', 'tasks', 'task-1')])
+    expect(host.ensured[0]?.workspaceTitle).toBeUndefined()
   })
 })
 

@@ -3,6 +3,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Task } from '../src/core/index.ts'
+import { conversationWorkspace } from '../src/executor/workspace.ts'
 import { jsonBody, request, startTestServer, type TestServer } from './fixtures/http.ts'
 import { inboundMessage } from './fixtures/domain.ts'
 
@@ -65,11 +66,12 @@ describe('approving a task', () => {
 
     const task = domainTask(runtime, taskId)
     expect(task.status).toBe('approved')
+    const expectedWorkspace = conversationWorkspace(join(runtime.stateDir, 'workspaces'), task.threadKey)
     const assignment = task.assignmentId === null ? undefined : runtime.store.assignments.get(task.assignmentId)
     expect(assignment).toMatchObject({
       taskId,
       state: 'pending',
-      workspace: join(runtime.stateDir, 'tasks', taskId),
+      workspace: expectedWorkspace,
     })
 
     const pending = runtime.effects.pending()
@@ -78,7 +80,7 @@ describe('approving a task', () => {
       kind: 'launch',
       key: taskId,
       state: 'waiting',
-      payload: { assignmentId: task.assignmentId, workspace: join(runtime.stateDir, 'tasks', taskId) },
+      payload: { assignmentId: task.assignmentId, workspace: expectedWorkspace },
     })
   })
 
@@ -226,7 +228,7 @@ describe('retrying a failed task', () => {
     expect(runtime.store.assignments.get(task.assignmentId as string)).toMatchObject({
       taskId,
       state: 'pending',
-      workspace: join(runtime.stateDir, 'tasks', taskId),
+      workspace: conversationWorkspace(join(runtime.stateDir, 'workspaces'), task.threadKey),
     })
     // The previous result is kept so the executor can quote it as context.
     expect(task.result).toMatchObject({ summary: '上一次失败了' })
@@ -238,7 +240,10 @@ describe('retrying a failed task', () => {
     expect(pending[0]).toMatchObject({
       kind: 'launch',
       key: taskId,
-      payload: { assignmentId: task.assignmentId, workspace: join(runtime.stateDir, 'tasks', taskId) },
+      payload: {
+        assignmentId: task.assignmentId,
+        workspace: conversationWorkspace(join(runtime.stateDir, 'workspaces'), task.threadKey),
+      },
     })
   })
 

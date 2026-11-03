@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { userErrorStatus } from '../src/app/http.ts'
 import { fakeChannel, jsonBody, request, startTestServer, type TestServer } from './fixtures/http.ts'
 import type { ChannelPort } from '../src/app/channel-port.ts'
+import { conversationWorkspace, conversationWorkspaceTitle } from '../src/executor/workspace.ts'
 import { inboundMessage } from './fixtures/domain.ts'
 import { SETTINGS_BLOCKS, SETTINGS_DEFAULTS } from '../src/shared/settings.ts'
 
@@ -96,7 +97,19 @@ describe('read routes', () => {
     }
     expect(body.supportedKinds).toEqual(['at-me', 'group', 'dm'])
     expect(body.targets).toEqual([
-      { id: 'user-1', kind: 'dm', label: 'Alice', enabled: true, mentionOnly: false, replyMode: 'review' },
+      {
+        id: 'user-1',
+        kind: 'dm',
+        label: 'Alice',
+        enabled: true,
+        mentionOnly: false,
+        replyMode: 'review',
+        workspace: {
+          path: conversationWorkspace(join(runtime.stateDir, 'workspaces'), 'dm:user-1'),
+          title: conversationWorkspaceTitle('Alice', 'dm:user-1'),
+          mode: 'ready',
+        },
+      },
     ])
   })
 

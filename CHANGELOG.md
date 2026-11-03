@@ -2,6 +2,33 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的结构与 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.3.0] - 2026-11-03
+
+人设默认值改为**空人设**，蓝白鲸鱼女仆改为**可选预设模板**（WS12）。产品显示名、包名与内部标识不变；npm 包仍只含运行产物与 `README.md`，`docs/` 与 CHANGELOG 只在仓库/发行页。
+
+### Added
+
+- **可选预设 `whale-maid`（蓝白鲸鱼女仆）**：`WHALE_MAID_PERSONA` 保存在 `src/shared/persona-defaults.ts`，简体中文、6 条规则、非空身份与 3 条示例；默认**不启用**，升级/启动/读取都不会自动应用。
+- **人设页「载入预设：蓝白鲸鱼女仆」**：把人设模板填入草稿并置 dirty，主人检查后自行保存；「恢复默认（空人设）」同理，只清空草稿、不发 `PUT`。
+- **`GET /whale-chan/api/persona` 新字段**：返回 `{ persona, revision, defaults, presets }`；`defaults` 是空人设的深拷贝，`presets` 当前只含 `whale-maid` 一项，均为只读投影、不落库。
+- **[014 人设默认值与预设](docs/014-persona-defaults.md)**：研究来源、原创与非官方声明、明确排除项、默认值/预设字段表与升级行为。
+
+### Changed
+
+- **persona 默认值改为空人设**：仅保留 `name = 鲸鱼酱`（schema 要求非空）；`identity`、`tone`、`signature`、`knowledge` 为空，`rules`、`samples` 为空数组，`language = auto`。回复回落为自然、克制的产品默认语气。
+- **默认人设不再是角色**：产品显示名仍是「DSH助理」，包名 `dsh-whale-chan-assistant`、状态目录、API 前缀、panel / session / preset id 与数据库都不随人设变化。
+- 面板人设页在保存按钮上方新增两个动作；旧 host 不返回 `defaults` / `presets` 时两个按钮整块隐藏，页面行为与升级前一致。
+
+### Fixed
+
+- **默认数组改用工厂**：`PersonaSchema` 的 `rules` / `samples` 默认值改为 `() => [...EMPTY_PERSONA.rules]` 一类工厂，`SettingsSchema` 的 persona block 同样处理，避免 schema 解析共享同一份常量数组。
+
+### Migration
+
+- **已保存的 persona 行原样保留**，不自动迁移、不覆盖；升级只影响从未保存过人设（块缺失）的安装，这类安装采用新的空默认。
+- **想用女仆需手动启用**：在人设页点「载入预设：蓝白鲸鱼女仆」→ 检查 → 保存；预设只读、不落库，不点保存不会生效。
+- 旧 persona 行若保留了旧预设文本，不会被自动清空；需要空人设时用「恢复默认（空人设）」手动应用并保存。
+
 ## [0.2.0] - 2026-11-03
 
 按会话工作区（WS9）与目标页只读工作区（WS10）：一个钉钉会话一个目录，回复器与任务共用，升级不移动、不删除任何旧目录。npm 包仍只含运行产物与 `README.md`，`docs/` 与 CHANGELOG 只在仓库/发行页。

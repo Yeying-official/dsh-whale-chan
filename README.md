@@ -2,7 +2,7 @@
 
 > **DSH Assistant · DingTalk Assistant** — a DeepSeek Harness desktop plugin that replies as you, in your own DingTalk account, within a persona you define.
 > It watches @-mentions, selected groups and DMs, answers with web research when needed, and turns actionable requests into tasks that only you can approve in the DSH panel.
-> Status: v0.2.0 (2026-11-03), WS0–WS10 complete including Windows real-device acceptance and per-conversation workspaces. The release tag is cut after review.
+> Status: v0.3.0 (2026-11-03), WS0–WS12 complete including Windows real-device acceptance, per-conversation workspaces, and an empty default persona with an opt-in whale-maid preset. The release tag is cut after review.
 
 DSH助理是运行在 DSH 桌面端里的**个人钉钉助理**：用主人本人的钉钉账号（`dws` 个人授权，不是机器人），按主人写的人设回复 @我、指定群与指定单聊；需要动手的事先变成任务，只有主人在面板里批准后，才会在 DSH 会话中执行，结果再回到原会话。
 
@@ -117,7 +117,7 @@ pnpm build          # 生成 lib/index.js 与 lib/client.js
 2. 打开「插件」→「添加插件」；选择「安装第三方插件」（不同版本可能直接打开输入框）。
 3. 在「包名或地址」中填入**本仓库的绝对路径**，例如 `E:\DSHWork\dsh-Whale-chan-Assistant`。安装器支持 npm 包、Git 仓库和本地目录；本地目录会以 `link:` 依赖写入 profile。
 4. 点击安装，等待完成。界面提示「请重启 DSH」时重启桌面端。
-5. 重启后侧栏出现「DSH助理」，打开面板应看到「已连接」与版本 `0.2.0`。
+5. 重启后侧栏出现「DSH助理」，打开面板应看到「已连接」与版本 `0.3.0`。
 
 > 桌面端的 `desktop` profile 由桌面端保留，命令行 `dsh plugin --profile desktop ...` 不用于管理它；请使用上面的 GUI 入口。自建 profile 可以用 `dsh plugin --profile <name> add <本地路径>`，该命令由 DSH CLI 转发给 profile 内的 pnpm。
 
@@ -127,7 +127,7 @@ pnpm build          # 生成 lib/index.js 与 lib/client.js
 
 ### 4. 验证
 
-- 侧栏「DSH助理」面板能打开，概览显示版本 `0.2.0` 与状态目录。
+- 侧栏「DSH助理」面板能打开，概览显示版本 `0.3.0` 与状态目录。
 - `GET /whale-chan/api/state` 返回 200；管理请求必须带 `x-whale-chan-request: 1`。
 - 概览的健康检查里 `stateDir`、`database`、`lock`、`settings`、`prompts` 为正常；`channel` 在未配置目标时为 idle，这是正常状态。
 - 「目标」页的「工作区」区块能显示：已启用的群/单聊给出具体目录（「已创建」，可复制路径），`@我`/`open:` 单聊显示「按会话创建」。该区块只读，路径与 `GET /whale-chan/api/targets` 的 `workspace.path` 一致。
@@ -277,10 +277,10 @@ pnpm build          # 生成 lib/index.js 与 lib/client.js
 
 ## 状态
 
-- WS0 骨架与冻结合约、WS1 领域与持久化、WS2 `dws` 通道、WS3 人设与策略、WS4 执行器、WS5a 设置/API、WS5b 组合根、WS6 面板、WS7 文档与安全基线、WS8 真机验收、WS9 按会话工作区、WS10 目标页工作区与显示名：**全部完成**。
-- 当前版本 `0.2.0`，2026-11-03 完成 Windows 真机 T0–T4 与工作区复验；tag `v0.2.0` 由发布复核后打，**尚未打 tag、未 push**。
-- 真机范围：Windows 10/11、DSH Desktop `0.2.1-rc.5`、`dws` `1.0.66`；单聊 o2o、`@我`/`open:` 惰性工作区、macOS/Linux 未真机覆盖，见 [WS8 真机报告](docs/test-reports/WS8-live.md)、[WS9/WS10 报告](docs/test-reports/WS9-10.md) 与 [兼容矩阵](docs/compatibility.md)。
-- 验收后测试群目标已停用（`targets.rows=[]`），通道回到 `idle: no enabled targets`；重新启用前请先核对目标、`dryRun` 与回复模式。
+- WS0 骨架与冻结合约、WS1 领域与持久化、WS2 `dws` 通道、WS3 人设与策略、WS4 执行器、WS5a 设置/API、WS5b 组合根、WS6 面板、WS7 文档与安全基线、WS8 真机验收、WS9 按会话工作区、WS10 目标页工作区与显示名、WS11 发布收口、WS12 空默认人设与可选预设：**全部完成**。
+- 当前版本 `0.3.0`，2026-11-03 完成 Windows 真机 T0–T4、v0.2.0 工作区复验与 v0.3.0 人设默认/预设核对；tag `v0.3.0` 由发布复核后打，**尚未打 tag、未 push**。
+- 真机范围：Windows 10/11、DSH Desktop `0.2.1-rc.5`、`dws` `1.0.66`；单聊 o2o、`@我`/`open:` 惰性工作区、macOS/Linux 未真机覆盖，见 [WS8 真机报告](docs/test-reports/WS8-live.md)、[WS9/WS10 报告](docs/test-reports/WS9-10.md)、[WS12 人设报告](docs/test-reports/WS12-persona.md) 与 [兼容矩阵](docs/compatibility.md)。
+- 验收后测试群目标为 `enabled=false`（保留该行与工作区），通道回到 `idle: no enabled targets`；重新启用前请先核对目标、`dryRun` 与回复模式。
 
 ## 许可证
 

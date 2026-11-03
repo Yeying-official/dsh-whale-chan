@@ -1,23 +1,23 @@
 # 兼容矩阵
 
-> 适用范围：`dsh-whale-chan-assistant` `0.2.0`（WS0–WS10 完成，Windows 真机 T0–T4 通过，v0.2.0 工作区改造做 T3/T4 复验）。
+> 适用范围：`dsh-whale-chan-assistant` `0.3.0`（WS0–WS12 完成，Windows 真机 T0–T4 通过，v0.2.0 工作区改造做 T3/T4 复验，v0.3.0 人设默认/预设做重载核对）。
 > 最后核对：2026-11-03（Asia/Shanghai）。
 >
 > **权威顺序**：`package.json` 的 `dsh.compatibility` 与 WS8 的 T0–T4 记录 > 本文 > 其它说明。本文中的“已验证”只表示在本机 Windows 环境实际跑过，不表示在所有同版本环境都成立。
 
 ## 1. 结论
 
-| 组件          | 已验证                                                                      | 状态                                                                                                       |
-| ------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| DSH Desktop   | `0.2.1-rc.5`（Windows x64）                                                 | **compatible**，`dsh.compatibility` 正式声明                                                               |
-| DSH 其它版本  | 无                                                                          | 未验证；不要假设向前/向后兼容                                                                              |
-| `dws`         | `1.0.66`（`f215043e`，2026-10-28）                                          | 群事件/发送回执已真机确认；单聊与其它版本仍 provisional                                                    |
-| Windows       | 10/11                                                                       | 已实测（开发机与桌面端）                                                                                   |
-| 真机验收      | T0–T4（Windows 10/11、DSH `0.2.1-rc.5`、`dws` `1.0.66`）+ v0.2.0 工作区复验 | 通过；测试群目标已停用，见 [WS8 报告](test-reports/WS8-live.md) 与 [WS9/WS10 报告](test-reports/WS9-10.md) |
-| macOS / Linux | 无                                                                          | **未验证**，不作为支持承诺                                                                                 |
-| Node.js       | 24.15.0（开发）、24.21.0（DSH Desktop 自带）                                | 已实测；`engines` 允许 `^22.19.0 \|\| >=24.0.0`                                                            |
-| 单实例        | 同一 `stateDir` 一个进程                                                    | 已实现并由测试覆盖；崩溃后锁 stale 10 秒                                                                   |
-| 模型路由      | 宿主默认；或按回复器/执行器分别指定 provider + model + effort               | 代码路径已测；未逐一验证所有 provider                                                                      |
+| 组件          | 已验证                                                                                                 | 状态                                                                                                                                                  |
+| ------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| DSH Desktop   | `0.2.1-rc.5`（Windows x64）                                                                            | **compatible**，`dsh.compatibility` 正式声明                                                                                                          |
+| DSH 其它版本  | 无                                                                                                     | 未验证；不要假设向前/向后兼容                                                                                                                         |
+| `dws`         | `1.0.66`（`f215043e`，2026-10-28）                                                                     | 群事件/发送回执已真机确认；单聊与其它版本仍 provisional                                                                                               |
+| Windows       | 10/11                                                                                                  | 已实测（开发机与桌面端）                                                                                                                              |
+| 真机验收      | T0–T4（Windows 10/11、DSH `0.2.1-rc.5`、`dws` `1.0.66`）+ v0.2.0 工作区复验 + v0.3.0 人设默认/预设核对 | 通过；测试群目标已停用，见 [WS8 报告](test-reports/WS8-live.md)、[WS9/WS10 报告](test-reports/WS9-10.md) 与 [WS12 报告](test-reports/WS12-persona.md) |
+| macOS / Linux | 无                                                                                                     | **未验证**，不作为支持承诺                                                                                                                            |
+| Node.js       | 24.15.0（开发）、24.21.0（DSH Desktop 自带）                                                           | 已实测；`engines` 允许 `^22.19.0 \|\| >=24.0.0`                                                                                                       |
+| 单实例        | 同一 `stateDir` 一个进程                                                                               | 已实现并由测试覆盖；崩溃后锁 stale 10 秒                                                                                                              |
+| 模型路由      | 宿主默认；或按回复器/执行器分别指定 provider + model + effort                                          | 代码路径已测；未逐一验证所有 provider                                                                                                                 |
 
 ## 2. DSH 版本
 
@@ -40,6 +40,8 @@
 2. 跑 `pnpm check` 与 `node scripts/check-pack.mjs`；
 3. 按 [012 发布](012-release.md) 的 T0–T4 重新验收；
 4. 确认 `state.db` schema 没有被新宿主改写；降级时不要用新库打开旧插件。
+
+`0.3.0` 只改人设默认值与只读预设投影，**不改变 DSH 兼容声明**：`engines.dsh` 仍是 `^0.2.1-rc.5`，`dsh.compatibility` 仍只标记 `0.2.1-rc.5`，`state.db` schema 仍是 2。因此本节的 DSH 版本结论与 v0.2.0 相同，没有“必须升级宿主”的要求。
 
 ## 3. `dws` 版本
 
@@ -83,6 +85,13 @@ WS8 已在 Windows + `1.0.66` 上确认：群事件键与 snake_case 扁平字�
 - **布局版本只进会话 id**：`WORKSPACE_LAYOUT_VERSION`（当前 `v2`）折进回复器会话 id，升级后第一次回复新建 `whale-reply-*` 会话；`state.db` schema 仍是 2，没有额外迁移，因此 v0.1.0 与 v0.2.0 可以打开同一个库。降级到 v0.1.0 时回复器回到 `<stateDir>/workspace`，`workspaces/` 与其中的文件保留但不再被使用。
 - **DSH registry 幂等**：目录先 `mkdir -p` 再 `workspaceRegistry.create(path, title)`；已按同一 path 注册时只更新标题，不新建第二条记录。目录被手动删除后，下一次预建会重建目录并重新注册。
 - **不随目标删除而回收**：停用/删除目标不会删除目录或注册记录，因为同一会话可能经其它目标到达，历史属于主人。
+
+### 5.2 人设默认与预设（v0.3.0）
+
+- **默认是空人设**：`EMPTY_PERSONA` 只保留 `name = 鲸鱼酱`，`identity`、`tone`、`signature`、`knowledge` 为空，`rules`、`samples` 为空数组，`language = auto`；回复语气回落为产品默认的中性风格。
+- **蓝白鲸鱼女仆是可选预设**：`PERSONA_PRESETS` 当前只有 `whale-maid`，只出现在 `GET /whale-chan/api/persona` 的 `defaults` / `presets` 只读投影里，不落库、不会自动启用。启用必须由主人点「载入预设」→ 检查 → 保存（`PUT settings/persona`）。
+- **旧 persona 行保留**：升级不迁移、不覆盖已保存的人设；从未保存过人设（块缺失）的安装才采用空默认。想清空旧的自定义内容，需要手动「恢复默认（空人设）」并保存。
+- **不改变存储与协议**：persona 仍是 `settings.persona` 单一来源，`state.db` schema 仍是 2；新增的两个字段只是接口投影，旧 host/旧 panel 忽略即可。预设正文与来源见 [014 人设默认值与预设](014-persona-defaults.md)。
 
 ## 6. 兼容性判定流程
 

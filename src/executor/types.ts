@@ -65,6 +65,19 @@ export function replySessionId(digest: string): string {
 /** Prefix of the ids delivered into a session, which makes repeated delivery of one request id a no-op. */
 export const DELIVERY_ID_PREFIX = `${DELIVERY_SOURCE}:`
 
+/**
+ * The message id one delivery actually gets in the session log.
+ *
+ * The log records the prefixed id, so a turn wait must compare against **this**
+ * value, never the bare request id: `TurnTracker` matches the `user/message`
+ * event by id, and a bare id never matches (it would wait out the timeout even
+ * though the turn already finished — T3's second root cause). `deliver` takes
+ * the bare id and prefixes it here, exactly once.
+ */
+export function deliveryId(requestId: string): string {
+  return `${DELIVERY_ID_PREFIX}${requestId}`
+}
+
 /** What one execution produced. `outcome` uses the domain's assignment vocabulary. */
 export type ExecutorOutcome = Extract<AssignmentOutcome, 'succeeded' | 'failed' | 'timeout' | 'cancelled'>
 

@@ -9,6 +9,7 @@
  */
 import type { Approval, Task } from '../../src/core/model.ts'
 import { SettingsSchema, type Settings } from '../../src/shared/settings.ts'
+import { deliveryId } from '../../src/executor/index.ts'
 import type {
   AwaitTurnOptions,
   DeliverOptions,
@@ -38,9 +39,11 @@ export function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject }
 }
 
-/** One recorded delivery, with the session it went to. */
+/** One recorded delivery, with the session it went to and the id the log would hold. */
 export interface DeliverRecord extends DeliverOptions {
   readonly sessionId: string
+  /** What `DshSessionHost` stamps on the message: the prefixed id. */
+  readonly id: string
 }
 
 /** Scripted DSH host. */
@@ -113,9 +116,9 @@ export class FakeSessionHost implements SessionHost {
     const key = `${ref.sessionId}\u0000${options.requestId}`
     const perSession = this.seen.get(ref.sessionId) ?? new Set<string>()
     this.seen.set(ref.sessionId, perSession)
-    if (perSession.has(options.requestId)) return
-    perSession.add(options.requestId)
-    this.deliveries.push({ ...options, sessionId: ref.sessionId })
+    if (perSession.has(key)) return
+    perSession.add(key)
+    this.deliveries.push({ ...options, sessionId: ref.sessionId, id: deliveryId(options.requestId) })
     void key
   }
 

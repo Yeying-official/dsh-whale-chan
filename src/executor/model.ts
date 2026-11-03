@@ -30,6 +30,7 @@ import { ExecutorError, ModelAbortedError, ModelFailedError, ModelTimeoutError }
 import {
   MODEL_TURN_TIMEOUT_MS,
   REPLIER_PRESET,
+  deliveryId,
   replySessionId,
   type ExecutorLogger,
   type SessionHost,
@@ -289,7 +290,12 @@ export class SessionModel implements ModelPort {
     state.sequence += 1
 
     await this.host.deliver(session, { requestId, text: prompt.text })
-    const end = await this.host.awaitTurnEnd(session, { requestId, timeoutMs: this.timeoutMs, signal })
+    // The log records the prefixed id; waiting on the bare one never matches.
+    const end = await this.host.awaitTurnEnd(session, {
+      requestId: deliveryId(requestId),
+      timeoutMs: this.timeoutMs,
+      signal,
+    })
     if (end.status === 'timeout') throw new ModelTimeoutError(`replier turn exceeded ${this.timeoutMs}ms`)
     if (end.status === 'aborted') throw new ModelAbortedError('the replier turn was aborted')
     if (end.status === 'failed') throw new ModelFailedError(end.detail ?? 'the replier turn failed')

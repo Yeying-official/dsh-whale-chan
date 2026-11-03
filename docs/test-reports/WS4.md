@@ -19,10 +19,10 @@ $ tsc --noEmit
 （无输出，退出码 0）
 
 $ pnpm test
- ✓ tests/executor-session.spec.ts (17 tests) 95ms
+ ✓ tests/executor-session.spec.ts (19 tests) 96ms
  ✓ tests/executor-research.spec.ts (10 tests) 53ms
- ✓ tests/executor-task.spec.ts (31 tests) 52ms
- ✓ tests/executor-model.spec.ts (21 tests) 44ms
+ ✓ tests/executor-task.spec.ts (32 tests) 53ms
+ ✓ tests/executor-model.spec.ts (22 tests) 45ms
  ✓ tests/executor-llm-model.spec.ts (16 tests) 21ms
  ✓ tests/presets.spec.ts (17 tests) 21ms
  ✓ tests/executor-role-model.spec.ts (12 tests) 14ms
@@ -55,15 +55,15 @@ $ git status --porcelain
 
 | 文件                                | 条数 | 覆盖                                                                                                                                                                                                                                                     |
 | ----------------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tests/executor-task.spec.ts`       | 31   | 批准门（pending / 未批准任务 / 错配批准 / 不安全 id）、会话参数与模型路由、批准目录优先 / `~` 展开 / 空值回退 / 相对路径拒绝、系统提示内容、投递一次、四种结局、取消幂等、回调恰好一次、失败监听器不影响结果、同任务并发拒绝、重试新会话与「上一轮结果」 |
-| `tests/executor-model.spec.ts`      | 21   | 提示组装与分隔、超预算丢最旧、单条超长截断、system 永不丢、会话 id/标题/工作区/preset、回复路由透传与缺省、会话复用、`forThread` 隔离、串行互斥、轮数重建（`fresh` + 旧会话取消）、空闲重建、超时/失败/中止三类错误、空文本、dispose                     |
+| `tests/executor-task.spec.ts`       | 32   | 批准门（pending / 未批准任务 / 错配批准 / 不安全 id）、会话参数与模型路由、批准目录优先 / `~` 展开 / 空值回退 / 相对路径拒绝、系统提示内容、投递一次、四种结局、取消幂等、回调恰好一次、失败监听器不影响结果、同任务并发拒绝、重试新会话与「上一轮结果」 |
+| `tests/executor-model.spec.ts`      | 22   | 提示组装与分隔、超预算丢最旧、单条超长截断、system 永不丢、会话 id/标题/工作区/preset、回复路由透传与缺省、会话复用、`forThread` 隔离、串行互斥、轮数重建（`fresh` + 旧会话取消）、空闲重建、超时/失败/中止三类错误、空文本、dispose                     |
 | `tests/executor-llm-model.spec.ts`  | 16   | 回复直接调用：请求形状（`system` / 一条 user / `maxTokens` / `signal`、无 `tools`）、路由优先级与回退、delta 拼接与 reasoning 忽略、流错误/中止、只访问 `llm`+`agentDefaultModel`（代理上下文）、`maxChars`→`maxTokens` 映射与上限                       |
 | `tests/executor-role-model.spec.ts` | 12   | 路由映射（含 effort、半配置、设置默认值）、`needsSeeding` 四种判断、空配置不注入、已有选择不覆盖、成功才 append + wire + flush、解析失败回退宿主默认                                                                                                     |
 | `tests/executor-research.spec.ts`   | 10   | 事实/来源映射、hostname 兜底、非 http(s) 丢弃与去重、limit 上限、长事实截断、空结果、异常、中止、预算耗尽、空查询不调用                                                                                                                                  |
 | `tests/executor-session.spec.ts`    | 17   | `TurnTracker` 归属回合、早于投递的 `turn/end`、历史已结束、aborted/failed 详情、无 requestId 的下一回合；`awaitTurn` 实时匹配、立即返回、订阅/扫描竞态补放、超时、中止、已中止不订阅、忽略无关事件                                                       |
 | `tests/presets.spec.ts`             | 17   | 宿主行仍在、无重复 loader id、两套 preset 的 id/name/order、回复器工具集与「无 shell/fs/jobs/skill」、执行器工具集、shell 平台门控、jobs 5 秒、compaction 隔离、插件名语法、`!!js` 位置、两套 preset 的中性人设前缀                                      |
 
-合计 **124** 条；仓库总数 335 → **459**。
+合计 **129** 条；仓库总数 335 → **464**。
 
 ## 3. 变异实验
 
@@ -199,6 +199,22 @@ T3 应在 1–3 秒内返回。
   历史已含完整本轮、id 不匹配不认领），改前 3 红，改后全绿。
 - 教训：旧测试都按「`turn/start` 先到」构造，恰好绕过了真实顺序；对时序敏感的匹配逻辑，
   测试必须覆盖真实事件顺序，而不是代码作者脑内的顺序。
+
+## 5.4 T3 第二根因：等待用了裸 requestId
+
+回合认领修好之后，另一个同类问题浮出来：会话在 16:10:35 已经完成 turn 5（56 output tokens），
+插件仍报 `classify:timeout`。
+
+- `deliver` 把消息 id 设成 `dsh-whale-chan:<requestId>`，而 `awaitTurnEnd` 拿**裸** `requestId`
+  与日志里的 `user/message.id` 比较，永远不相等 → 认领不了 → 等满超时。
+- 修复：新增 `deliveryId(requestId)`（`types.ts`，与 `DELIVERY_ID_PREFIX` 放一起），
+  `DshSessionHost.deliver` 内部用它加一次前缀；`SessionModel.runTurn` 与 `DshTaskExecutor.execute`
+  等待时都传 `deliveryId(requestId)`（`deliver` 仍收裸 id，不双前缀）。
+- 测试：模型/任务各 1 条断言「投递裸 id、等待带前缀 id」；`executor-session` 2 条断言
+  带前缀 id 能认领、裸 id 不能；fake host 的 `deliver` 现在也记录真实的前缀 id。
+- 变异：把等待改回裸 id（模型、任务各一次），对应测试各失败 1 条。
+- 教训：同一个值在「写」和「读」两侧各拼一次，是最容易漏的契约。修法是把它收敛成一个函数，
+  并且让 fake 与真实实现共用这个函数——否则 fake 会把 bug 一起假掉。
 
 ## 6. 复核清单
 

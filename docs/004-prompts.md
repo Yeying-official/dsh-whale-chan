@@ -116,11 +116,11 @@
 
 失败语义：
 
-| 结果                                      | 含义                         | 调用方动作                  |
-| ----------------------------------------- | ---------------------------- | --------------------------- |
-| `{ ok: false, reason: 'invalid' }`        | 模型输出不合契约或调用报错   | **defer**，不发送、不建任务 |
-| `{ ok: false, reason: 'timeout' }`        | 超过 `timeoutMs`（默认 15s） | defer                       |
-| `{ ok: false, reason: 'low_confidence' }` | 输出合法但没把握             | defer                       |
+| 结果                                      | 含义                             | 调用方动作                  |
+| ----------------------------------------- | -------------------------------- | --------------------------- |
+| `{ ok: false, reason: 'invalid' }`        | 模型输出不合契约或调用报错       | **defer**，不发送、不建任务 |
+| `{ ok: false, reason: 'timeout' }`        | 超过 `timeoutMs`（默认 **60s**） | defer                       |
+| `{ ok: false, reason: 'low_confidence' }` | 输出合法但没把握                 | defer                       |
 
 失败从不抛异常，也不会把模型原文写进结果（`detail` 只带字段名或错误摘要）。
 
@@ -148,6 +148,10 @@
 `research(query, settings, port, signal)`：
 
 - 预算来自设置：`maxResults`（结果与来源都受其限）、`timeoutMs`、`cacheMinutes`。
+- **检索预算下限 30s**（`DEFAULT_RESEARCH_TIMEOUT_MS`）：实际预算取
+  `max(settings.timeoutMs, 30s)`。检索是网络调用，冷启动一轮经常超过设置里 8s 的默认值，
+  预算过小只会制造无谓的降级；设置值仍可继续放大（>30s 时以设置为准）。`ResearchOptions.timeoutMs`
+  可显式覆盖两者，测试用它观察超时。
 - 超时同时中止端口调用并立即返回降级结果：端口即使忽略 `AbortSignal`，也不会拖住回复。
 - 事实去重（空白与大小写归一）、单条 ≤400 字符、总数 ≤`maxResults`。
 - 来源必须是可解析的 http(s) URL，按规范化 URL 去重，标题为空用主机名；其它协议直接丢弃。
@@ -156,7 +160,7 @@
 - `enabled = false`、空查询、超时、端口报错、空结果 → `degraded: true`、`facts: []`，
   回复按“没有资料”处理，不阻塞任务流。
 
-## 7. 提示长度预算
+## 7. 提示与调用长度预算
 
 | 片段             | 上限                             | 超限处理                        |
 | ---------------- | -------------------------------- | ------------------------------- |
@@ -166,6 +170,18 @@
 | 分类响应         | 800 字符（`maxChars` 提示）      | 解析失败即 invalid              |
 | 回复正文         | `persona.maxReplyChars`（1–800） | 句末截断 + `…`                  |
 | 检索事实         | 400 字符/条，≤`maxResults` 条    | 截断/丢弃                       |
+
+调用预算（时间，不是字符）：
+
+| 调用     | 默认预算                                 | 依据                                                                                            |
+| -------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| 分类     | **60s**（`DEFAULT_CLASSIFY_TIMEOUT_MS`） | 真机首轮常需 15–40s（模型冷启动 + 长提示），预算过低会把本来会成功的调用判成 `timeout` 并 defer |
+| 回复草稿 | **60s**（`DEFAULT_REPLY_TIMEOUT_MS`）    | 同上；草稿提示更长，首轮更慢                                                                    |
+| 检索     | `max(settings.timeoutMs, 30s)`           | 网络调用；8s 的设置默认值不足以覆盖冷启动                                                       |
+
+结论：**“慢但未超预算”必须成功**。`tests/brain-classifier.spec.ts` 与
+`tests/brain-reply.spec.ts` 各有一条用注入预算 + 40ms 延迟的用例固定这一点；
+`tests/brain-research.spec.ts` 的 `floors the retrieval budget at 30s…` 固定检索下限。
 
 ## 8. 安全规则（模板与代码双落实）
 
@@ -195,15 +211,20 @@ AI 角标和任务批准。
   暴露在第一轮监听之前。
 - WS3 只提供 `src/brain`；`src/brain/index.ts` 没有被 `src/index.ts` 接出（宿主入口保持零副作用），
   WS5 的组合根显式 import 并构造 `PromptStore` / `ModelPort` / `ResearchPort`。
-- **`ModelPort` 的回复实现是直接 LLM 调用**（`src/executor/llm-model.ts` 的 `LlmModel`）：
-  `system` 走 `system` 字段，`messages` 拼成一条 user 消息，调用一次 `ctx.llm.stream`，
-  不注册工具、不建会话、不建工作区。会话实现（`SessionModel`）会让 preset 的工具 schema
-  （实测 141k token）进入每次 classification/draft 的 prefill，T3 真机因此超时。
-- 单次调用的时间预算由 brain 的 `withDeadline`（`timeoutMs`，默认 15s）控制；`LlmModel`
-  不自带超时，只把调用方的 `AbortSignal` 传给 `ctx.llm.stream`。
-- 输出预算由 `maxChars` 换算：`maxTokens = clamp(maxChars/4, 1024, 4096)`。下限 1024 是给
-  reasoning 模型留的——分类只要 800 字符、草稿只要 300 字符，压缩成 200/75 token 会让推理
-  吃光预算，JSON 被截断或为空，表现为 `classify:invalid`。
+- **`ModelPort` 的回复实现是会话式的 `SessionModel`**（`src/executor/model.ts`，由
+  `src/executor/index.ts` 公开导出）：每个线程一个可见 DSH 会话，preset 为
+  `dsh-whale-chan-replier`，交互过程留在会话里，工具集随 preset 保留。`system` 与历史消息
+  组装成一条 prompt（超过 `MAX_PROMPT_CHARS` 12000 字符时先丢最旧消息），经 `SessionHost.deliver`
+  投递。
+- **T3 的根因是 TurnTracker**：DSH 先写 inbox 的 `user/message`、再发 `turn/start`；旧跟踪器
+  把上一轮的 `turn/end` 当成本次结束，导致模型 7–12 秒完成却报超时。现在未认领消息由下一个
+  `turn/start` 认领（`05762fa`），与 preset 是否带工具无关。
+- 单回合上限 `MODEL_TURN_TIMEOUT_MS`（90 秒，`REPLY_TIMEOUT_MS` 同值）由 `SessionModel` 的
+  `awaitTurnEnd` 执行，同时受 brain 的 `withDeadline` 与调用方 `AbortSignal` 约束；超时/中止/失败
+  分别映射为 `ModelTimeoutError` / `ModelAbortedError` / `ModelFailedError`。
+- `LlmModel`（`src/executor/llm-model.ts`）是**未接线的直连实验**：它不建会话、不注册工具，
+  只保留作对照；其 `maxTokens = clamp(maxChars/4, 1024, 4096)` 预算只适用于该实验，当前
+  回复路径不使用。
 - 解析失败时 `detail` 附带**原始输出前 200 字符**（空白折叠、超长加 `…`），用来区分
   「空 / 散文 / 截断」；审计只存这个样本，不存整段回答。
 

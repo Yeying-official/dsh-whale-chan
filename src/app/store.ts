@@ -309,9 +309,14 @@ export class Store implements Repositories {
     }
   }
 
+  /** The schema version the open database reports. */
+  schemaVersion(): number {
+    return Number(this.db.prepare('PRAGMA user_version').get()?.['user_version'] ?? 0)
+  }
+
   /** Apply every migration this build has not applied yet; safe to call again. */
   migrate(): void {
-    const current = Number(this.db.prepare('PRAGMA user_version').get()?.['user_version'] ?? 0)
+    const current = this.schemaVersion()
     if (current > SCHEMA_VERSION) {
       throw new Error(`Store schema ${current} is newer than this build supports (${SCHEMA_VERSION})`)
     }

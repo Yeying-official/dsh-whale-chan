@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_MIN_CONFIDENCE, classify, extractJsonObject, parseClassification } from '../src/brain/classifier.ts'
+import {
+  DEFAULT_CLASSIFY_TIMEOUT_MS,
+  DEFAULT_MIN_CONFIDENCE,
+  classify,
+  extractJsonObject,
+  parseClassification,
+} from '../src/brain/classifier.ts'
 import type { ClassifySuccess } from '../src/brain/types.ts'
 import { makeMessage, makePersona, shippedPromptStore, stubModel, hangingModel } from './fixtures/brain.ts'
 
@@ -153,6 +159,21 @@ describe('classify', () => {
       new AbortController().signal,
     )
     expect(result).toMatchObject({ ok: false, reason: 'timeout' })
+  })
+
+  it('defaults to a 60s budget and accepts a slow answer inside it', async () => {
+    // A real first call takes 15–40s; the deadline must not cut a working call.
+    expect(DEFAULT_CLASSIFY_TIMEOUT_MS).toBe(60_000)
+    const slow = stubModel(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40))
+      return json({ intent: 'chat', confidence: 0.9, reason: '慢但成功', need_search: false })
+    })
+    const result = await classify(
+      { message, threadWindow, persona, model: slow, options: { prompts, timeoutMs: 1_000 } },
+      new AbortController().signal,
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.reason).toBe('慢但成功')
   })
 
   it('treats a confident-looking but low-confidence answer as undecided', async () => {

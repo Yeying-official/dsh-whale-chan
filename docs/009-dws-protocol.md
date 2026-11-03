@@ -34,14 +34,14 @@
 ## 3. 订阅命令 **[H]**
 
 ```text
-dws event consume <event_key> --flatten -f ndjson --ttl <hours>
+dws event consume <event_key> --flatten -f ndjson --ttl <hours>h
     [--group <openConversationId>]
     [--user <userId> | --open-dingtalk-id <openDingTalkId>]
     [--profile <profile>]
 ```
 
 - **目标只用显式 ID**：`group` 用 `openConversationId`；`dm` 用 `userId`；只拿到 open id 时目标 id 写成 `open:<id>`，订阅走 `--open-dingtalk-id`。名称从不在订阅路径上被解析。
-- **TTL** 取 `settings.dws.eventTtlHours`（默认 24，范围 1–720），断线重连只补收有界窗口。
+- **TTL** 取 `settings.dws.eventTtlHours`（默认 24，范围 1–720），以 Go duration 形式传 `<hours>h`，断线重连只补收有界窗口。**T1 实测**：`--ttl 1` 被 dws 拒绝（exit 3，`invalid argument "1" for "--ttl" flag: time: missing unit in duration "1"`），因此 v1 固定整数小时 + `h` 后缀，不接受裸数字。
 - **就绪行**（stderr）**[H]**：
   ```text
   [event] ready event_key=<key> bus_pid=<n> subscribe_id=<id>
@@ -50,37 +50,79 @@ dws event consume <event_key> --flatten -f ndjson --ttl <hours>
 - **`--dry-run`** 只打印计划并退出，不创建订阅。`validateTarget` 用它做非破坏校验；非零退出、超时、`not logged in`/`未登录` 之类的授权错误都判为无效。
 - **`group` 目标接收群内全部消息**，`mentionOnly` 与 `addressed` 由归一化/决策层处理，订阅参数不承担该过滤。
 
+### 3.1 Windows 命令解析
+
+DSH 宿主进程不保证继承交互 shell 的 `PATH`。Windows 上 npm 全局安装的 `dws` 实际是 `%APPDATA%\npm\dws.cmd`；`cross-spawn` 对裸命令只按 `PATH` 找 `.exe`/`.cmd`，宿主 `PATH` 缺少 npm 全局目录时就会解析失败（现象：health `available=false`，而终端里 `dws --version` 正常）。
+
+`src/channel/command.ts` 的 `resolveDwsCommand(command, env, platform)` 统一处理：
+
+1. 非 `win32`、命令含 `/` 或 `\`、或已带 `.exe`/`.cmd`/`.bat`/`.ps1` 扩展名 → **原样返回**；
+2. `win32` 裸命令按顺序在以下目录查找 `<command>.cmd` → `<command>.exe` → `<command>.bat` → 无扩展名原文件：
+   - `PATH`（兼容 `Path` 键）的每个目录；
+   - `%APPDATA%\npm`；
+   - `%ProgramFiles%\nodejs`；
+   - `%LOCALAPPDATA%\Programs\nodejs`（目录存在时）；
+3. 命中第一个存在的文件 → 返回绝对路径，并按 command + 相关环境变量缓存；
+4. 全部未命中 → 返回原命令，让 spawn 错误保持可见，而不是伪造路径。
+
+所有实际 spawn 的入口共享这一条规则：`createRunner` → `runOnce`（`probeAuth`、`send`、`discover`、`validate`）与 `DwsProcess.start`（supervisor）都会在启动前解析，调用方不需要各自重复处理。`settings.dws.binaryPath` 可以是绝对路径；一旦配置成路径，解析直接原样返回，等于显式覆盖。通道日志会打印一次解析后的 `dws command`，health 的每个目标带 `command` 字段（仅路径，不含账号/token）。
+
 ## 4. NDJSON 归一化
 
 一行一个 JSON 对象，允许浅层包封 `data` / `event` / `message` / `payload`（最多两层）。字段名在 dws 各版本间出现过 snake_case 与 camelCase 混用，因此按别名表解析。
 
 ### 4.1 字段别名与证据
 
-| 归一化字段     | 接受的别名（按优先级）                                                       | 证据 |
-| -------------- | ---------------------------------------------------------------------------- | ---- |
-| 消息 id        | `msgId` `messageId` `msg_id` `message_id` `eventId` `event_id`               | [F]  |
-| 会话 id        | `conversationId` `openConversationId` `conversation_id` `chatId` `chat_id`   | [F]  |
-| 会话类型       | `conversationType` `conversation_type` `chatType`                            | [P]  |
-| 发送者 userId  | `senderStaffId` `senderId` `userId` `sender_user_id` `sender_userid`         | [P]  |
-| 发送者昵称     | `senderNick` `senderName` `sender_name` `nick`                               | [P]  |
-| 发送者 open id | `senderOpenDingTalkId` `sender_open_dingtalk_id` `openDingTalkId`            | [P]  |
-| 正文           | `text` `content` `messageText` `body` `msgContent`；支持 `text.content` 嵌套 | [F]  |
-| 发送时间       | `createAt` `createTime` `timestamp` `createdAt` `msgTimestamp`               | [P]  |
-| 提及列表       | `atUsers` `mentions` `atUsersList` `mentionedUsers` `at_users`               | [F]  |
-| 会话标题       | `conversationTitle` `chatName` `groupName` `title` `conversation_title`      | [P]  |
-| 消息类型       | `eventType` `msgtype` `msgType` `messageType` `event_type`                   | [P]  |
+| 归一化字段     | 接受的别名（按优先级）                                                        | 证据   |
+| -------------- | ----------------------------------------------------------------------------- | ------ |
+| 消息 id        | `message_id`（首选）`msgId` `messageId` `msg_id`；`eventId`/`event_id` 仅兜底 | [F] T3 |
+| 会话 id        | `conversation_id` `conversationId` `openConversationId` `chatId` `chat_id`    | [F] T3 |
+| 会话类型       | `conversationType` `conversation_type` `chatType`；缺失时按目标 kind 推断     | [F] T3 |
+| 发送者 userId  | `sender_staff_id`/`senderStaffId` 优先，其次 `sender_open_dingtalk_id`        | [F] T3 |
+| 发送者昵称     | `senderNick` `senderName` `sender_name` `nick`；T3 群事件用 `sender`          | [F] T3 |
+| 发送者 open id | `sender_open_dingtalk_id` `senderOpenDingTalkId` `openDingTalkId`             | [F] T3 |
+| 正文           | `content`（字符串）`text` `messageText` `body` `msgContent`；支持嵌套         | [F] T3 |
+| 发送时间       | `event_time` → `timestamp`（epoch ms）→ `create_time`（本地字符串）           | [F] T3 |
+| 提及列表       | 从正文 `@([^\s@]{1,32})` 解析；兼容 `atUsers`/`mentions` 结构化字段           | [F] T3 |
+| 会话标题       | `conversation_title` 等；缺失时回退到 `context.target.label`                  | [P]    |
+| 消息类型       | `eventType` `msgtype` `msgType` `messageType` `event_type`                    | [P]    |
 
 时间支持三种写法：epoch 秒（≤10 位）、epoch 毫秒、可解析日期字符串；无法解析时回退到本机接收时间。正文超过 20 000 字符截断（`DEFAULT_MAX_TEXT_CHARS`）。
+
+**T3 实测的群事件 flatten 结构**（占位符）：
+
+```json
+{
+  "type": "user_im_message_receive_group",
+  "event_id": "<event-id>",
+  "timestamp": 1793685862067,
+  "subscribe_id": "<sub-id>",
+  "message_id": "<msg-id>",
+  "conversation_id": "<cid>",
+  "sender": "<发送者昵称>",
+  "sender_open_dingtalk_id": "<open-id>",
+  "content": "@<主人昵称> T3 抓包",
+  "create_time": "2026-11-03 14:04:17",
+  "event_time": 1793685857502
+}
+```
+
+- `message_id` 才是消息 id；`event_id` 是事件 id，仅当 `message_id` 缺失时兜底，避免把同一事件重投当成新消息。
+- 群事件**没有** `senderStaffId`、`conversationType`、`atUsers`、`title`、`mentions`。`sender` 是昵称字符串；`sender_open_dingtalk_id` 是唯一发送者标识，作为 `sender.userId`，并同值写入 `openDingTalkId`。**群事件白名单必须按 openDingtalkId 配置**。
+- `content` 是纯文本，@ 只出现在文本里，因此 `addressed` 按 `@<ownerNick>` / `@我` 判断；`ownerNick` 来自 `auth status` 的 `user_name`/`userName`（`probeAuth().userName`）。没有 ownerNick 时群消息一律不视为 addressed。
+- `event_time`/`timestamp` 是 epoch ms；`create_time` 是无时区本地字符串，只在缺少 epoch 字段时按宿主本地时区解析。
+- 会话类型缺失时按目标 kind 推断（`group`/`at-me` → `group`，`dm` → `direct`），不判 malformed。
+- 事件没有标题时用设置里的目标名称（`context.target.label`）作为 `title`，避免 thread 标题退化为会话 id。
 
 `conversationType` 值映射 **[P]**：`direct`/`p2p`/`single`/`1`/`one-to-one` → `direct`；`group`/`2`/`chat`/`groupchat` → `group`；缺失时按目标 kind 推断（`dm` → direct，其余 group）。
 
 ### 4.2 `addressed` 判定 **[F]**
 
-| 目标 kind | 规则                                                                             |
-| --------- | -------------------------------------------------------------------------------- |
-| `at-me`   | 恒为 `true`（事件键本身保证被 @）                                                |
-| `dm`      | 恒为 `true`                                                                      |
-| `group`   | `atUsers`/`mentions` 含本人 userId 或昵称，或正文含 `@我` / `@<本人昵称>` 时为真 |
+| 目标 kind | 规则                                                                            |
+| --------- | ------------------------------------------------------------------------------- |
+| `at-me`   | 恒为 `true`（事件键本身保证被 @）                                               |
+| `dm`      | 恒为 `true`                                                                     |
+| `group`   | 正文含 `@<ownerNick>` 或 `@我`；`ownerNick` 未知时恒为 `false`（T3 无 atUsers） |
 
 `@所有人` 广播：当 `settings.reply.ignoreBroadcast` 为真且没有直接 @ 本人时，整条消息跳过（skip `broadcast`）；若同时直接 @ 了本人，仍按 `addressed: true` 保留。
 
@@ -88,14 +130,14 @@ dws event consume <event_key> --flatten -f ndjson --ttl <hours>
 
 ### 4.3 跳过原因（固定顺序）**[F]**
 
-| 顺序 | skip          | 条件                                                                  |
-| ---- | ------------- | --------------------------------------------------------------------- |
-| 1    | `unsupported` | 撤回/系统/群成员变化/已读/reaction 等类型，或带 `recallAt`/`isRecall` |
-| 2    | `malformed`   | 非对象、缺消息 id、缺发送者、群消息缺会话 id                          |
-| 3    | `self`        | 发送者就是本人                                                        |
-| 4    | `broadcast`   | 纯广播且未直接 @ 本人，且 `ignoreBroadcast` 打开                      |
-| 5    | `unsupported` | 正文为空但检测到图片/文件/语音/视频等媒体迹象（`detail=media-only`）  |
-| 6    | `empty`       | 正文为空**且**没有任何媒体迹象                                        |
+| 顺序 | skip          | 条件                                                                                 |
+| ---- | ------------- | ------------------------------------------------------------------------------------ |
+| 1    | `unsupported` | 撤回/系统/群成员变化/已读/reaction 等类型，或带 `recallAt`/`isRecall`                |
+| 2    | `malformed`   | 非对象、缺消息 id、缺发送者、群消息缺会话 id                                         |
+| 3    | `self`        | 发送者 open id/userId 命中 ownerUserId，或昵称等于 ownerNick（T3 无 staffId 时兜底） |
+| 4    | `broadcast`   | 纯广播且未直接 @ 本人，且 `ignoreBroadcast` 打开                                     |
+| 5    | `unsupported` | 正文为空但检测到图片/文件/语音/视频等媒体迹象（`detail=media-only`）                 |
+| 6    | `empty`       | 正文为空**且**没有任何媒体迹象                                                       |
 
 纯媒体事件在 v1 **不回复**：核心 `InboundMessage` 没有附件字段，回复一张没有说明的图片也没有意义，因此以 `unsupported` + `detail=media-only` 跳过；带文字说明的图文仍按文字处理。
 
@@ -114,6 +156,7 @@ dws event consume <event_key> --flatten -f ndjson --ttl <hours>
 
 ```text
 dws chat +messages-send --as user --ai-tag --idempotency-key <key> --wait-delivery -f json
+    --yes
     [--chat-id <openConversationId>]
     [--user <userId> | --open-dingtalk-id <openDingTalkId>]
     --markdown <正文>
@@ -123,20 +166,23 @@ dws chat +messages-send --as user --ai-tag --idempotency-key <key> --wait-delive
 - `--ai-tag` 由代码固定追加，模型输出无法移除。
 - 群与 `at-me` 回复都用 `--chat-id <conversationId>`；单聊用 `--user`；`open:` 前缀的目标用 `--open-dingtalk-id`。
 - 没有 `idempotencyKey`、正文为空、目标会话 id 为空时**不 spawn**，直接判 `failed`。
+- **非交互确认 `--yes`**：dws 在非交互环境要求显式确认，缺失时 exit 3 并返回 `{"error":{"category":"validation","reason":"confirmation_required",...}}`。发送总是发生在主人已配置/已批准的流程里，不能等待 stdin，因此 `buildSendArgs` 固定追加 `--yes`；`event stop` 同样使用 `--yes`。**T2 实测**：不带 `--yes` 的发送被 dws 拒绝（exit 3，`confirmation_required`），修复后通过。
 
 ### 5.1 回执语义 **[F]**
 
-| 情况                                                                              | 结果                               | 上层动作                       |
-| --------------------------------------------------------------------------------- | ---------------------------------- | ------------------------------ |
-| 退出 0 + `success:true` / `ok:true` / `errcode:0` / 有 messageId、processQueryKey | `sent`                             | 记录回执，Outbox 置 sent       |
-| 退出 0 但没有任何确认回执                                                         | `unknown`                          | **禁止重发**，等待人工/对账    |
-| 退出 0 + 明确失败（`success:false`、非零 errcode）                                | `failed` 或 `gone`                 | 写审计；`gone` 标记目标失效    |
-| 退出非 0 + 明确“目标不存在/不是成员/群不存在”                                     | `gone`                             | 标记目标失效，停止向该目标发送 |
-| 退出非 0 + 明确拒绝（invalid/denied/forbidden/无权限…）                           | `failed`                           | 记录错误，不自动重试           |
-| 退出非 0 但无法分类                                                               | `unknown`                          | **禁止重发**                   |
-| 超时、无输出、spawn 失败前的信号中断                                              | `unknown`（spawn 失败为 `failed`） | 超时禁止重发                   |
-| 进程无法启动（ENOENT 等）                                                         | `failed`                           | 明确未发出，允许按幂等键重试   |
-| `advanced.dryRun` 打开                                                            | `skipped`                          | 不 spawn、不改变 Outbound 状态 |
+| 情况                                                                                               | 结果                               | 上层动作                                                               |
+| -------------------------------------------------------------------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------- |
+| 退出 0 + `deliveryStatus` 为 `delivered`/`sent`/`ok`（或缺失但 `success:true`/`errcode:0`/有回执） | `sent`                             | 记录 `openMessageId`（优先）/messageId/processQueryKey，Outbox 置 sent |
+| 退出 0 + `deliveryStatus` 为非白名单值（如 `unknown`/`pending`/`failed`）                          | `unknown`                          | **禁止重发**，detail 记录 `deliveryStatus`                             |
+| 退出 0 但没有任何确认回执                                                                          | `unknown`                          | **禁止重发**，等待人工/对账                                            |
+| 退出 0 + 明确失败（`success:false`、非零 errcode）                                                 | `failed` 或 `gone`                 | 写审计；`gone` 标记目标失效                                            |
+| 退出非 0 + 明确“目标不存在/不是成员/群不存在”                                                      | `gone`                             | 标记目标失效，停止向该目标发送                                         |
+| 退出非 0 + 重复幂等键（`CONFLICT_ERROR` / `Request is repeated with uuid`）                        | `unknown`                          | **禁止重发**，detail 记录 duplicate idempotency key                    |
+| 退出非 0 + 明确拒绝（invalid/denied/forbidden/无权限…）                                            | `failed`                           | 记录错误，不自动重试                                                   |
+| 退出非 0 但无法分类                                                                                | `unknown`                          | **禁止重发**                                                           |
+| 超时、无输出、spawn 失败前的信号中断                                                               | `unknown`（spawn 失败为 `failed`） | 超时禁止重发                                                           |
+| 进程无法启动（ENOENT 等）                                                                          | `failed`                           | 明确未发出，允许按幂等键重试                                           |
+| `advanced.dryRun` 打开                                                                             | `skipped`                          | 不 spawn、不改变 Outbound 状态                                         |
 
 **unknown 语义**：通道无法证明消息是否送达，调用方不得重发同一 `idempotencyKey`；只能落 `send_unknown` 并等待对账/人工处理。这是 Outbox 设计的硬约束。
 
@@ -145,6 +191,8 @@ dws chat +messages-send --as user --ai-tag --idempotency-key <key> --wait-delive
 ### 5.2 幂等键
 
 `Outbound.idempotencyKey` 是唯一外部去重键：同一键最多产生一条钉钉消息。键由 app 生成并持久化（WS5），通道只透传给 `--idempotency-key`，从不自行生成或替换。
+
+**重复 key 的语义（T2 实测）**：同一幂等键第二次发送时，dws 返回 exit 1 与 `{"error":{"category":"api","server_error_code":"CONFLICT_ERROR","reason":"business_error","message":"Request is repeated with uuid '<key>'"}}`。这证明第一次请求已被受理，不是失败也不是新的发送；通道映射为 `unknown`（detail=`duplicate idempotency key`），上层不得重发，应按 Outbox 记录对账。
 
 ## 6. 停止、信号与订阅生命周期
 
@@ -198,12 +246,12 @@ dws chat +chat-list --types p2p --page-size 50 --format json
 以下行为/字段在实现中已被夹具覆盖，但**尚未在真机确认**；T1–T2 验证时按顺序核对，任何不一致都必须先改文档与测试再改实现：
 
 1. `user_im_message_receive_*` 三个事件键在登录态下的实际可用性（[H] 来自 help）。
-2. NDJSON 原始字段名：`senderStaffId` 是否总存在、`conversationType` 的取值集合、`atUsers` 的元素结构（字符串 vs 对象）、`createAt` 的单位、会话标题字段名。
+2. NDJSON 字段名：群 flatten 的真实结构已由 T3 证实（见 §4.1）；其它事件类型（`at`/`o2o`）、单聊的 `sender_staff_id` 是否存在、`conversationType` 的显式取值集合、`create_time` 在其它时区的表现仍待补充。
 3. `+chat-list --types p2p` 的响应结构与分页语义；`+chat-search` 的 `--format json` 是否被接受。
 4. `auth status --format json` 的字段名、`expires_at` 格式与账号 id 字段（`user_id`/`userId`/`staff_id` 等别名）。
-5. `+messages-send` 的成功回执字段（messageId / processQueryKey / errcode）与 `--wait-delivery` 的行为。
+5. `+messages-send` 的成功回执字段已由 T2 证实为 `openMessageId` + `deliveryStatus` + `idempotencyKey`；其他失败码的分类与 `--wait-delivery` 的边界行为仍待补充。
 6. Windows：`stdin.end()` 是否能优雅结束订阅；`dws event stop <id> --yes` 的实际语法与权限。
-7. `--ttl` 的单位与补收窗口语义；断线后是否重复投递旧事件。
+7. `--ttl` 的补收窗口语义（单位已由 T1 证实必须带 `h`，v1 固定整数小时）；断线后是否重复投递旧事件。
 8. `--profile` 在 `event consume` / `auth status` / `send` 上的位置与可接受性。
 9. `open:<id>` 前缀是本项目的显式约定（不是 dws 语法），用于区分 `--user` 与 `--open-dingtalk-id`。
 10. 群目标“订阅全部消息 + 本地 mention 过滤”的权限前提（是否要求管理员授权）。

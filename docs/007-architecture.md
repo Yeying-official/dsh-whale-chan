@@ -1,42 +1,51 @@
 # 007 架构
 
-> 当前状态：WS1 建立 core 领域层、SQLite 存储、持久 effect 队列与 pass 调度器；WS2 实现 dws 通道；WS3 实现人设、提示、分类、检索与回复策略；WS4 实现 DSH 任务执行器、直接调用模型的回复端口与两套 agent preset。HTTP 路由、设置持久化与组合根接线仍属 WS5。**本文是各层整合的统一入口**：每层对外提供什么端口、依赖允许指向哪里，以本文为准。
+> 当前状态：WS1 建立 core 领域层、SQLite 存储、持久 effect 队列与 pass 调度器；WS2 实现 dws 通道；WS3 实现人设、提示、分类、检索与回复策略；WS4 实现 DSH 任务执行器、会话式回复模型与两套 agent preset；WS5a 实现持久化设置服务（schema v2）、19 条管理 API、视图与状态目录锁；WS5b 完成组合根：通道订阅、回复流水线、任务执行与结果回帖、暂停/恢复、过期清扫与真实健康。**本文是各层整合的统一入口**：每层对外提供什么端口、依赖允许指向哪里，以本文为准。WS6 只消费 HTTP 合约。
 
 ## 1. 分层与依赖方向
 
-| 层                    | 职责                                                | 允许依赖                              | 禁止                                                         |
-| --------------------- | --------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------ |
-| `src/shared`          | 设置 schema、API 合约、字段表、边界常量             | 浏览器与 Node 通用的纯模块            | Node 内置模块、宿主实现、DSH 包                              |
-| `src/core`            | 领域类型与规则（`Engine`）                          | 本层、`src/shared` 的纯类型           | I/O、`node:*`、`@deepseek-ai/*`、app/channel/executor/client |
-| `src/app`             | 存储、迁移、effect 队列、pass 调度、KV、只读查询    | core、shared、Node 本地能力           | channel、executor、client、HTTP 宿主                         |
-| `src/channel`（WS2）  | dws 子进程、事件解码、发送参数、目标发现            | shared、core 类型                     | 领域决策、绕过 sender 直接写库                               |
-| `src/brain`（WS3）    | 人设/提示渲染、分类、回复策略与生成、检索预算、限流 | shared 设置类型、自有端口             | I/O 直连、DSH 包、core                                       |
-| `src/executor`（WS4） | DSH 会话与任务执行、回复器模型、检索适配、preset    | core/brain 的端口类型、DSH 服务、Node | 直接发钉钉消息、写领域存储                                   |
-| `src/client`          | Web 面板                                            | shared 类型与字段表                   | 宿主实现、Node 模块、发送层                                  |
+| 层                    | 职责                                                                     | 允许依赖                                                            | 禁止                                                                                            |
+| --------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `src/shared`          | 设置 schema、API 合约、字段表、边界常量                                  | 浏览器与 Node 通用的纯模块                                          | Node 内置模块、宿主实现、DSH 包                                                                 |
+| `src/core`            | 领域类型与规则（`Engine`）                                               | 本层、`src/shared` 的纯类型                                         | I/O、`node:*`、`@deepseek-ai/*`、app/channel/executor/client                                    |
+| `src/app`             | 存储、迁移、effect 队列、pass 调度、KV、只读查询、组合根（`runtime.ts`） | core、shared、Node 本地能力；**仅组合根**可 import channel/executor | 除 `runtime.ts`/`dingtalk-channel.ts` 外，app 模块不得依赖 channel、executor、client、HTTP 宿主 |
+| `src/channel`（WS2）  | dws 子进程、事件解码、发送参数、目标发现                                 | shared、core 类型                                                   | 领域决策、绕过 sender 直接写库                                                                  |
+| `src/brain`（WS3）    | 人设/提示渲染、分类、回复策略与生成、检索预算、限流                      | shared 设置类型、自有端口                                           | I/O 直连、DSH 包、core                                                                          |
+| `src/executor`（WS4） | DSH 会话与任务执行、回复器模型、检索适配、preset                         | core/brain 的端口类型、DSH 服务、Node                               | 直接发钉钉消息、写领域存储                                                                      |
+| `src/client`          | Web 面板                                                                 | shared 类型与字段表                                                 | 宿主实现、Node 模块、发送层                                                                     |
 
 ```text
-                    ┌──────────────┐
-   dws 子进程 ◄─────│   channel    │──────► InboundMessage / Outbound
-                    └──────┬───────┘
-                           │ 领域命令（classify / reply / task …）
-                    ┌──────▼───────┐        ┌──────────────┐
-                    │    engine    │◄───────│     app      │  Store · Effects · Passes · Kv
-                    └──────┬───────┘        └──────┬───────┘
-                           │ 领域事件/待办          │ 只读查询
-                    ┌──────▼───────┐               │
-                    │    brain     │  ModelPort / ResearchPort
-                    └──────┬───────┘               │
-                           │                       │
-                    ┌──────▼───────┐               │
-                    │   executor   │  SessionHost  │
-                    └──────┬───────┘               │
-                           │ DSH 会话              │
-                    ┌──────▼───────┐               │
-                    │  DSH 宿主    │◄──────────────┘
-                    └──────────────┘
+                              ┌────────────────────────────────────────────────┐
+                              │              src/app/runtime.ts                │
+                              │  组合根：启动探测、设置热应用、暂停/恢复、健康  │
+                              └───┬───────────┬───────────────┬────────────┬───┘
+                                  │           │               │            │
+   dws 子进程 ◄───────────────────┘           │               │            │
+        │                                     │               │            │
+        │ InboundMessage                      │               │            │
+        ▼                                     ▼               ▼            ▼
+ ┌─────────────┐   receive    ┌──────────────┐  enqueue  ┌──────────┐   ┌────────────┐
+ │   channel   │─────────────►│    engine    │◄─────────│ effects  │◄──│   passes   │
+ └─────────────┘              └──────┬───────┘  (domain) └────┬─────┘   └────────────┘
+        ▲                            │ 领域事件/状态           │ 处理器
+        │ send(outbound)             ▼                        │
+        │                     ┌──────────────┐                 │
+        │                     │  store (SQLite)│  events / kv     │
+        │                     └──────────────┘                 │
+        │                            │ 读 / 写                  │
+        │                            ▼                        ▼
+        │                     ┌──────────────┐          ┌──────────────┐
+        │                     │   brain      │◄─────────│   executor   │
+        │                     │ policy/reply │  ports   │  DSH 会话    │
+        │                     └──────┬───────┘          └──────┬───────┘
+        │                            │                         │
+        └──────── outbox ◄───────────┴───── SessionHost ────────┘
+                    （Outbound 表 · 幂等键 · send effect）
 ```
 
-依赖方向固定为 `client → shared`、`channel / brain / executor → app → core → shared`，且 `brain` 与 `executor` 只通过端口互相看见（`executor` 复用 `brain` 的 `ModelPort`/`ResearchPort` 类型，`brain` 不认识 `executor`）。`tests/contract.spec.ts` 强制检查：
+更准确地说，`effects` 是唯一的异步驱动者：`classify → research → compose → send` 与 `launch → finish → send` 都是持久 effect；`passes` 只负责「到期」与「启动恢复」，不解释业务。`channel` 不知道领域，`engine` 不做 I/O，`brain` 与 `executor` 只经端口看见彼此。
+
+依赖方向固定为 `client → shared`、`channel / brain / executor → core → shared`，`src/app` 的存储与调度模块只依赖 core/shared/Node，**只有组合根** `runtime.ts`（及其 `dingtalk-channel.ts` 适配器）可以 import `src/channel` 与 `src/executor`。`brain` 与 `executor` 只通过端口互相看见（`executor` 复用 `brain` 的 `ModelPort`/`ResearchPort` 类型，`brain` 不认识 `executor`）。`tests/contract.spec.ts` 强制检查：
 
 - core 不包含 `require`；每个 import 只能是 `./…` 或 `../shared/…`，不得是 `node:*`、`@deepseek-ai/*` 或 `../app|channel|executor|client`；
 - `store`、`store-read`、`migration`、`effects`、`passes`、`kv` 不依赖 channel、executor、client 或 HTTP 宿主；
@@ -51,15 +60,15 @@
 3. **分类（WS3）**：`classify()` 用 `ModelPort` 判定 `chat|question|task|ignore` 与置信度，app 调 `engine.classify`。
 4. **回复（WS3）**：`gateReply()` 读设置与计数器决定是否回、是否需要检索；`composeReply()` 生成并清洗文本；app 调 `engine.draft` 与 `engine.queueReply`，领域写入 Outbound（`pending`）。
 5. **任务（WS4）**：`intent: 'task'` 时领域建 Task + Approval，等人在面板批准；批准后 app 交给 `DshTaskExecutor.execute()`，`onStarted`/`onFinished` 映射为 `assignmentStarted`/`assignmentEnded`。
-6. **投递（outbox）**：`Effects` 的 `send` handler 取 `pending` Outbound，交给 `DingTalkChannel.send()`；`sent` / `unknown` / `failed` 由 `engine.reportReply` 落库。任务结果也走这条路——执行器不自己发消息。
-7. **观察**：`store-read` 的分页查询与 `/whale-chan/api/*` 路由（WS5）供面板读状态；`Passes` 负责批准过期扫描与 effect 重试。
+6. **投递（outbox）**：`Effects` 的 `send` handler 取 `pending` Outbound，交给 `DingTalkChannel.send()`；`sent` / `unknown` / `failed` 分别由 `replySent`/`replyUnknown`/`replyFailed` 或 `outboundSent`/`outboundUnknown`/`outboundFailed` 落库。任务结果也走这条路——执行器不自己发消息。
+7. **观察与清扫**：`store-read` 的分页查询与 `/whale-chan/api/*` 路由供面板读状态；`Passes` 负责批准过期扫描（60 s）、授权探测（5 min）与启动时的 outbox 恢复。
 
 ## 3. core 内部
 
 | 模块        | 内容                                                                                                                    |
 | ----------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `model.ts`  | 领域类型：`InboundMessage`、`Thread`、`Decision`、`Draft`、`Task`、`Approval`、`Assignment`、`Outbound`，全部为只读纯值 |
-| `errors.ts` | `UserError` 与稳定错误码表；`missing` 与 `refused` 区分「找不到」与「状态不允许」                                       |
+| `errors.ts` | `UserError` 与稳定错误码表；`missing`/`invalid`/`refused` 区分「找不到」「输入可纠正」「状态不允许」                    |
 | `ports.ts`  | `Repositories`（同步、事务化）、`Ids`、`Clock`、领域事件类型、`EngineOptions`                                           |
 | `engine.ts` | 唯一写入口；每个命令一个事务；读查询不开事务                                                                            |
 | `index.ts`  | 唯一公开出口，供 app/channel/executor 引用                                                                              |
@@ -73,7 +82,7 @@
 ### 4.1 `Store`
 
 - `Store.open(stateDir)` 打开 `<stateDir>/state.db`，创建父目录，设置 `journal_mode=WAL`、`synchronous=FULL`、`foreign_keys=ON`、`busy_timeout=5000`。
-- 用 `PRAGMA user_version` 记录 schema 版本（当前 `SCHEMA_VERSION = 1`）。`migrate()` 是前向、幂等的：版本相同直接返回，版本更低逐级升级，版本更高直接拒绝（不降级）。
+- 用 `PRAGMA user_version` 记录 schema 版本（当前 `SCHEMA_VERSION = 2`）。`migrate()` 是前向、幂等的：版本相同直接返回，版本更低逐级升级，版本更高直接拒绝（不降级）。v1→v2 只新增设置三表，可重复执行。
 - `atomic(fn)`：`BEGIN IMMEDIATE` / `COMMIT` / `ROLLBACK`；嵌套调用抛错。
 - JSON 列读取失败抛 `StoreCorruptionError(table, column, id)`，消息不含 SQL 与文件路径。
 - `close()` 关闭句柄；`trimThread(key, keep)` 只裁剪消息，不删 Decision/Task；`appendEvent` 写审计事件。
@@ -81,18 +90,21 @@
 
 ### 4.2 表与索引
 
-| 表            | 关键列                                                                                                                                   | 索引                                   |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| `messages`    | `id` PK、`thread_key`、`kind`、`sender_*`、`text`、`addressed`、`at`、`received_at`、`mentions_json`；WS1 增列 `sender_open_id`、`title` | `messages(thread_key, at)`             |
-| `threads`     | `key` PK、`peer_json`、`last_message_at`、`counts_json`                                                                                  | —                                      |
-| `decisions`   | `id` PK、`message_id UNIQUE`、`status`、`draft_json`、`outbound_id`、`task_id`、`confidence`（WS1 增列）、`updated_at`                   | `decisions(thread_key, at)`            |
-| `tasks`       | `id` PK、`status`、`approval_id`、`assignment_id`、`result_json`、`reason`（WS1 增列）、`updated_at`                                     | `tasks(status, updated_at)`            |
-| `approvals`   | `id` PK、`task_id UNIQUE`、`status`、`expires_at`                                                                                        | `approvals(status, expires_at)`        |
-| `assignments` | `id` PK、`task_id`、`state`、`session_id`、`workspace`、`outcome`                                                                        | —                                      |
-| `outbound`    | `id` PK、`idempotency_key UNIQUE`、`status`、`attempts`                                                                                  | `outbound(status)`                     |
-| `events`      | `seq` 自增 PK、`type`、`at`、`data_json`                                                                                                 | `events(at)`                           |
-| `kv`          | `k` PK、`v_json`                                                                                                                         | —                                      |
-| `effects`     | 见 §5                                                                                                                                    | `effects(state, due_at)`、部分唯一索引 |
+| 表                 | 关键列                                                                                                                                   | 索引                                   |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `messages`         | `id` PK、`thread_key`、`kind`、`sender_*`、`text`、`addressed`、`at`、`received_at`、`mentions_json`；WS1 增列 `sender_open_id`、`title` | `messages(thread_key, at)`             |
+| `threads`          | `key` PK、`peer_json`、`last_message_at`、`counts_json`                                                                                  | —                                      |
+| `decisions`        | `id` PK、`message_id UNIQUE`、`status`、`draft_json`、`outbound_id`、`task_id`、`confidence`（WS1 增列）、`updated_at`                   | `decisions(thread_key, at)`            |
+| `tasks`            | `id` PK、`status`、`approval_id`、`assignment_id`、`result_json`、`reason`（WS1 增列）、`updated_at`                                     | `tasks(status, updated_at)`            |
+| `approvals`        | `id` PK、`task_id UNIQUE`、`status`、`expires_at`                                                                                        | `approvals(status, expires_at)`        |
+| `assignments`      | `id` PK、`task_id`、`state`、`session_id`、`workspace`、`outcome`                                                                        | —                                      |
+| `outbound`         | `id` PK、`idempotency_key UNIQUE`、`status`、`attempts`                                                                                  | `outbound(status)`                     |
+| `events`           | `seq` 自增 PK、`type`、`at`、`data_json`                                                                                                 | `events(at)`                           |
+| `kv`               | `k` PK、`v_json`                                                                                                                         | —                                      |
+| `settings`         | `block` PK、`value_json`、`revision`、`updated_at`                                                                                       | —                                      |
+| `settings_history` | `id` 自增 PK、`block`、`value_json`、`revision`、`source`、`saved_at`                                                                    | `settings_history(block, id)`          |
+| `settings_meta`    | `id`（固定 1）、`revision`、`updated_at`                                                                                                 | —                                      |
+| `effects`          | 见 §5                                                                                                                                    | `effects(state, due_at)`、部分唯一索引 |
 
 标量列只用于索引与筛选，聚合的嵌套值以 JSON 列为准；写入时由 Store 同时维护两者。
 
@@ -103,6 +115,13 @@
 ### 4.4 KV（`kv.ts`）
 
 `kv` 表是通用持久键值区。`Kv` 提供 `get/set/delete/keys`；`record`/`family` 给后续工作流（设置、游标）注册类型化键。WS1 不预设业务键，避免与 WS5 的设置键冲突。
+
+### 4.5 设置服务（`settings.ts`，WS5a）
+
+- `SettingsService(store, clock)`：启动时把 `settings` 表读入内存；缺失/损坏/不再匹配 schema 的行回退默认值并记入 `warnings()`，启动不失败，`view()` 仍包含全部 9 个 block。
+- `update(block, patch, expectedRevision)`：块内深合并（数组/标量/null 替换）+ `SettingsSchema` strict 校验 + **单事务**写 `settings`、`settings_history`、`settings_meta`；revision 不匹配抛 `SettingsConflictError`（HTTP 409）。
+- `patchInternal(block, patch, source = 'internal')`：宿主系统写入（如暂停），不要求 expected revision，仍校验、仍记 history。
+- `view()`、`persona()`、`current()`、`history(block?)`、`onChange(listener)`；全局 revision 缺失或落后时启动会向上修复。
 
 ## 5. app：Effects（持久副作用队列）
 
@@ -127,6 +146,21 @@ UNIQUE INDEX effects_active ON effects(kind, key) WHERE state IN ('waiting','run
 - `pending()`/`dead()`：供面板与测试查看状态，返回解码后的载荷。
 
 Effects 不感知领域事务：调用方必须在命令事务提交后入队。这样「先落库、后发送」的顺序在崩溃后仍成立。
+
+### 5.1 已注册的 effect 种类（WS5b）
+
+| kind       | key            | 输入 payload                                   | 下一步                                               | 幂等依据                                             |
+| ---------- | -------------- | ---------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------- |
+| `classify` | `decisionId`   | `{decisionId}`                                 | `research` / `compose` / 终点（task、ignore、defer） | `decision.status === 'queued'`                       |
+| `research` | `decisionId`   | `{decisionId}`                                 | `compose`（带 `ResearchResult`，降级也继续）         | `classified` + `intent === 'question'`               |
+| `compose`  | `decisionId`   | `{decisionId, research?}`                      | `draft`；`auto` 再 `queueReply` 并 enqueue `send`    | 只处理 `classified`；闸门拒绝则 `defer`              |
+| `send`     | `outboundId`   | `{outboundId, decisionId?, threadKey?}`        | `replySent`/`outboundSent`（或 unknown/failed）      | 只处理 `outbound.status === 'pending'`               |
+| `launch`   | `taskId`       | `{assignmentId?, workspace?}`                  | `finish`（成功）或 `notify`（失败/拒绝）             | 只处理 `approved` + `approved` 批准 + `pending` 派工 |
+| `finish`   | `taskId`       | `{taskId, assignmentId, summary, sessionId}`   | `queueFollowup` 后 enqueue `send`                    | 任务必须 `succeeded`；外发键固定                     |
+| `probe`    | `auth`         | 无                                             | 更新健康；授权失效则停通道                           | 探测只读；重复执行无副作用                           |
+| `notify`   | `kind:目标 id` | `{kind, taskId?, outboundId?, decisionId?, …}` | 写一条 `notice` 审计事件（v1 不建 DSH 会话）         | 事件追加，重复写只影响审计                           |
+
+任务结果回帖**不经过 Decision**：`Engine.queueFollowup` 直接落一条 `Outbound`，`outbound.queued/sent/unknown/failed/dropped` 是它自己的生命周期（见 §6.4）。
 
 ## 6. 各层的端口与职责
 
@@ -158,17 +192,19 @@ brain 不开 socket、不 spawn 进程、不 import DSH 包：所有外部能力
 
 ### 6.3 executor（WS4）
 
-| 端口/类型                                                                     | 作用                                                                                                                                                                                 |
-| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `TaskExecutor.execute/cancel`                                                 | 执行一个已批准任务；`onStarted`/`onFinished` 对应领域两个命令                                                                                                                        |
-| `SessionHost.ensureSession/deliver/awaitTurnEnd/readFinalText/cancel/dispose` | 所有 DSH 调用的唯一入口，按 `SessionRef` 寻址，无跨任务状态                                                                                                                          |
-| `DshSessionHost`                                                              | 真实实现：`sessionController`、`workspaceRegistry`、`permissionPresets`、`agents`、`session/event`；`TurnTracker` 处理「inbox 先于 `turn/start`」，等待用 `deliveryId()` 的带前缀 id |
-| `DshTaskExecutor`                                                             | worker 会话生命周期、系统提示、超时（单回合 90 秒 / 任务总预算 `timeoutMinutes`）、取消、结果映射                                                                                    |
-| `LlmModel`（`implements ModelPort`）                                          | 回复路径：一次 `ctx.llm.stream`，只带 `system` + 一条 user 消息，无工具/无会话/无工作区（T3 后取代会话实现）                                                                         |
-| `DshResearch`（`implements ResearchPort`）                                    | `ctx.web.search` 适配，空结果/异常/中止一律降级为空                                                                                                                                  |
-| `seedRoleModel` / `routeSelection`                                            | 把 `settings.models.*` 播种到新会话（`model/selection` + 首次请求注入），不改全局默认                                                                                                |
+| 端口/类型                                                                     | 作用                                                                                               |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `TaskExecutor.execute/cancel`                                                 | 执行一个已批准任务；`onStarted`/`onFinished` 对应领域两个命令                                      |
+| `SessionHost.ensureSession/deliver/awaitTurnEnd/readFinalText/cancel/dispose` | 所有 DSH 调用的唯一入口，按 `SessionRef` 寻址，无跨任务状态                                        |
+| `DshSessionHost`                                                              | 真实实现：`sessionController`、`workspaceRegistry`、`permissionPresets`、`agents`、`session/event` |
+| `DshTaskExecutor`                                                             | worker 会话生命周期、系统提示、超时（单回合 90 秒 / 任务总预算 `timeoutMinutes`）、取消、结果映射  |
+| `SessionModel`（`implements ModelPort`）                                      | 每个线程一个可见 DSH 会话（`whale-reply-*`），带 replier preset 与工具；串行、限轮、限时、限长     |
+| `DshResearch`（`implements ResearchPort`）                                    | `ctx.web.search` 适配，空结果/异常/中止一律降级为空                                                |
+| `seedRoleModel` / `routeSelection`                                            | 把 `settings.models.*` 播种到新会话（`model/selection` + 首次请求注入），不改全局默认              |
 
 执行器不写领域存储、不发钉钉消息；它把任务结果交给 app，由 app 写 `assignmentEnded` 并把摘要转成 Outbound。
+
+回复器使用真实 DSH 会话，因此回合结算必须经过 TurnTracker：DSH 先写 inbox 的 `user/message`、再发 `turn/start`；未认领的消息只能由下一个 `turn/start` 认领，不能用上一轮 `turn/end` 结算。T3 真机“7–12 秒完成却超时”的根因就在这里（`05762fa` 修复），与 replier preset 的工具 schema 无关。`LlmModel`（`src/executor/llm-model.ts`）是未接线的直连实验，仅保留作对照。
 
 执行器也**不从 `src/index.ts` 导出**：宿主入口保持零执行器副作用（不会把 `@deepseek-ai/dsh-llm`、`dsh-session` 拉进插件模块图），由 WS5 的组合根显式 import `src/executor/index.ts`。
 
@@ -182,34 +218,106 @@ brain 不开 socket、不 spawn 进程、不 import DSH 包：所有外部能力
 
 `unknown` 永不自动重发：投递结果不可证明时，宁可让人对账，也不重复打扰对方。
 
+Outbound 有两条入口，共用同一个发送处理器：
+
+| 入口           | 领域命令                                | 绑定 Decision | 发送结果回写                                                              |
+| -------------- | --------------------------------------- | ------------- | ------------------------------------------------------------------------- |
+| 回复           | `queueReply(decisionId, …)`             | 是            | `replySent` / `replyUnknown` / `replyFailed`                              |
+| 任务结果与通知 | `queueFollowup({threadKey, target, …})` | 否            | `outboundSent` / `outboundUnknown` / `outboundFailed` / `outboundDropped` |
+
+`queueFollowup` 校验线程存在、`target.kind` 与线程 kind 一致、文本非空，并按 `idempotency_key` 去重；`outboundSent/Unknown/Failed/Dropped` 只更新 `pending` 行，重复上报不改变终态。启动恢复与暂停恢复都只做一件事：把 `pending` 行重新 enqueue `send`。
+
+### 6.5 app：HTTP（WS5a）
+
+`createHttpHandler(HttpDeps)` 实现 19 条冻结路由；`httpDeps(runtime)` 用 getter 惰性取 `settings`/`store`/`engine`/`effects`/`clock`，因此路由可以在启动完成前挂载，未就绪时统一返回 503。`Runtime` 打开 `<stateDir>/state.db`、`SettingsService`、`Engine`、`Effects`，并持有 `<stateDir>/.lock`（proper-lockfile，stale 10 s）。通道端口 `ChannelPort` 来自组合根；没有通道时 `targets/discover|validate` 返回 503 `channel_unavailable`。任务动作只 `enqueue('launch', …)`，实际执行由 `launch` handler 负责。
+
+视图全部由 `src/app/views.ts` 从领域对象投影到 `src/shared/models.ts`：domain `approved` → 面板 `queued`，审计行来自 `events` 表（引擎事件由 Runtime 的 `emit` 写入）。
+
+### 6.6 组合根（WS5b，`src/app/runtime.ts`）
+
+组合根只做装配与生命周期，不实现业务规则：
+
+1. **存储先行**：`mkdir` → 锁 → `Store.open` → `SettingsService` → `Engine` → `Effects` → 持久计数器（KV）。
+2. **提示词预载**：`PromptStore.preload()`；缺失/空白模板记为 health `prompts: error`，且**通道、流水线与 effect 队列都不装配**。模板属于包完整性的一部分，半运行只会让 classify/compose 反复失败；修复需要重新安装完整 bundle。
+3. **授权探测**：构造探测用的 `DingTalkChannel`（无 owner），调用 `probeAuth()`。`available && authenticated && tokenValid && userId` 缺一不可；缺失时 health 红、**不启动订阅**。探测返回的可选 `userName`（auth 的 `user_name`）在启动运行通道时作为 `ownerNick` 传入——群事件没有 `staffId`/`atUsers`，正文里的 `@昵称` 是唯一的 addressed 信号；该值只在内存中，不落库、不记日志。
+4. **服务装配**：`DshSessionHost` → `SessionModelPool`（每线程一个可见 `whale-reply-*` 会话，工作区 `<stateDir>/workspace`，persona/models 变更时重建）→ `DshResearch` → `DshTaskExecutor`；注册全部 effect handler；`Passes` 注册 `expire`（60 s，启动即跑）与 `probe`（5 min）。
+5. **启动**：`Effects.start({concurrency: 8})` → `Passes.start()` → 有 owner 时 `channel.start(sink)`；`sink` 调 `engine.receive` 并对新 decision enqueue `classify`。
+6. **崩溃恢复**：通道启动后 `resumeOutbox()` 把所有 `pending` Outbound 重新 enqueue `send`。
+7. **设置热应用**：`persona` 变 → 重建回复器会话；`models` 变 → 更新路由并重建 `SessionModel`；`monitor` 变 → 立即 reconcile（暂停即停通道）；`targets`/`dws` 变 → 500 ms 防抖后重启订阅。
+8. **停止顺序**（可重复调用）：取消生命周期信号 → `effects.drain()`（不再领取新行，等待运行中的尝试）→ `channel.stop()` → `executor.dispose()` → `model.dispose()` → `passes.stop()` → `sessionHost.dispose()` → 释放锁、关闭数据库。
+
+健康字段（`GET health` 的 `checks`；`dws` 汇总在顶层）：
+
+| check      | 来源                                                      | error 条件                                                                                            |
+| ---------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `state`    | `Runtime.info()`                                          | 无                                                                                                    |
+| `stateDir` | 目录可写                                                  | 不可写                                                                                                |
+| `database` | `state.db` 打开、schema 版本                              | 未打开                                                                                                |
+| `lock`     | 状态目录锁                                                | 锁丢失为 degraded                                                                                     |
+| `settings` | 加载警告                                                  | 有警告为 degraded                                                                                     |
+| `prompts`  | 五份模板预载                                              | 缺失/空白 → error                                                                                     |
+| `effects`  | `pending`/`dead` 计数                                     | 有 dead 行 → degraded                                                                                 |
+| `channel`  | 通道 health（state/running/targets）、启动错误            | 启动失败或授权无效 → error；禁用/暂停/无 enabled target → `ok`（idle）；应有订阅却 stopped → degraded |
+| `auth`     | `probeAuth()` 的 available/authenticated/tokenValid/owner | 未安装、未登录、token 失效、无账号 id → error                                                         |
+| `executor` | 是否装配、运行中的任务数                                  | 未装配 → degraded `unknown`（仅 API-only 模式）                                                       |
+
+`monitor.running` 与 `overview.monitor.running` 取真实通道运行状态，不再写死 `false`。
+
+### 6.7 配置与并发
+
+- `tasks.maxConcurrent` 由 app 层的 `launch` handler 执行：达到上限时抛 `Later`，effect 在 1 秒后重试，不会堆积第二个运行。执行器自身只保证「同一任务不并发」。
+- `Effects` 的并发为 8：长时间的 `launch` 不会阻塞 `classify`/`send`。
+- 通知（`notify`）v1 只写 `notice` 审计事件，便于 audit/overview 排障；不创建 DSH 收件箱会话。
+
 ## 7. 与其它工作流的边界
 
-| 工作流          | 交界                                                                                                                                                                                                           |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| WS2 通道/执行器 | 调用 `Engine` 命令与 `openTasks`/`pendingApprovals`；启动派工时用 `assignmentStarted(..., { sessionId })` 绑定会话；注册 Effects handler；不直接写 Store，不 import core 内部文件（只经 `src/core/index.ts`）  |
-| WS3 人设与检索  | 由 app 生成 Draft 文本后调用 `engine.draft`；领域不读设置                                                                                                                                                      |
-| WS4 执行器      | 只经 `TaskExecutor` 与 app 交互；复用 brain 的端口类型；preset 由 `cordis.patch.yml` 声明                                                                                                                      |
-| WS5 设置/HTTP   | 通过 `store-read` 提供只读视图，通过 `Engine` 提供命令；组合根用 `DshSessionHost` 构建任务执行器，用 `replyModelFor(ctx, settings.models.reply)` 构建回复端口（**不要**用 `SessionModel`）；不得改动领域状态机 |
-| WS6 面板        | 只经 WS5 的 HTTP 合约读状态与发命令                                                                                                                                                                            |
+| 工作流          | 交界                                                                                                                                                                                                          |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| WS2 通道/执行器 | 调用 `Engine` 命令与 `openTasks`/`pendingApprovals`；启动派工时用 `assignmentStarted(..., { sessionId })` 绑定会话；注册 Effects handler；不直接写 Store，不 import core 内部文件（只经 `src/core/index.ts`） |
+| WS3 人设与检索  | 由 app 生成 Draft 文本后调用 `engine.draft`；领域不读设置                                                                                                                                                     |
+| WS4 执行器      | 只经 `TaskExecutor` 与 app 交互；复用 brain 的端口类型；preset 由 `cordis.patch.yml` 声明                                                                                                                     |
+| WS5 设置/HTTP   | 通过 `store-read` 提供只读视图，通过 `Engine` 提供命令；组合根用 `DshSessionHost` 同时构建 worker 执行器与 `SessionModel`（回复器会话）；`launch`/`finish`/`send` 由 app 注册，不改领域状态机                 |
+| WS6 面板        | 只经 WS5 的 HTTP 合约读状态与发命令                                                                                                                                                                           |
 
 ## 8. 测试索引
 
-| 文件                                | 覆盖                                                                                                                                 |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `tests/core-engine.spec.ts`         | 领域命令、事件、会话绑定与标题（23 条）                                                                                              |
-| `tests/core-invariants.spec.ts`     | 10 条硬不变量 + 中途失败回滚 + 迟到批准 + 偏移时间与非法时间（15 条）                                                                |
-| `tests/store.spec.ts`               | 打开/迁移/索引/往返/回滚/唯一约束/损坏 JSON/分页/裁剪/KV（13 条）                                                                    |
-| `tests/effects.spec.ts`             | 顺序、并发、覆盖、运行中重排、退避、上限、Later、dead、drain（10 条）                                                                |
-| `tests/passes.spec.ts`              | 间隔、runAtStart、单飞、异常隔离、stop、重复注册（6 条）                                                                             |
-| `tests/channel-*.spec.ts`           | dws 参数、解码、发送结果、重启退避、目标发现与授权（WS2）                                                                            |
-| `tests/brain-*.spec.ts`             | 分类、闸门、回复清洗、检索预算、人设与提示（WS3）                                                                                    |
-| `tests/executor-task.spec.ts`       | 批准门、工作区（批准目录优先）、模型路由、四种结局、回调次数、并发、重试（28 条）                                                    |
-| `tests/executor-model.spec.ts`      | 提示组装与截断、串行、模型路由、轮数/空闲重建、超时与异常、dispose（19 条）                                                          |
-| `tests/executor-research.spec.ts`   | 映射、上限、非 http(s) 过滤、空结果、异常与中止降级（10 条）                                                                         |
-| `tests/executor-session.spec.ts`    | 回合匹配（inbox 先于 `turn/start`、前缀 id 认领、裸 id 不认领、历史已完整、旧回合 end 不误结算）、订阅/扫描竞态、超时、中止（19 条） |
-| `tests/executor-role-model.spec.ts` | 模型路由映射、空配置不注入、已有选择不覆盖、解析失败回退（12 条）                                                                    |
-| `tests/presets.spec.ts`             | 宿主行仍在、两套 preset 的字段与工具集、中性人设前缀、无重复 id（17 条）                                                             |
-| `tests/contract.spec.ts`            | 分层依赖规则、共享合约、文档数量                                                                                                     |
+| 文件                                | 覆盖                                                                                                    |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `tests/core-engine.spec.ts`         | 领域命令、事件、会话绑定与标题（23 条）                                                                 |
+| `tests/core-invariants.spec.ts`     | 10 条硬不变量 + 中途失败回滚 + 迟到批准 + 偏移时间与非法时间（15 条）                                   |
+| `tests/store.spec.ts`               | 打开/迁移/索引/往返/回滚/唯一约束/损坏 JSON/分页/裁剪/KV（13 条）                                       |
+| `tests/effects.spec.ts`             | 顺序、并发、覆盖、运行中重排、退避、上限、Later、dead、drain（10 条）                                   |
+| `tests/passes.spec.ts`              | 间隔、runAtStart、单飞、异常隔离、stop、重复注册（6 条）                                                |
+| `tests/channel-*.spec.ts`           | dws 参数、解码、发送结果、重启退避、目标发现与授权（WS2）                                               |
+| `tests/brain-*.spec.ts`             | 分类、闸门、回复清洗、检索预算、人设与提示（WS3）                                                       |
+| `tests/executor-task.spec.ts`       | 批准门、工作区（批准目录优先）、模型路由、四种结局、回调次数、并发、重试（28 条）                       |
+| `tests/executor-model.spec.ts`      | 提示组装与截断、串行、模型路由、轮数/空闲重建、超时与异常、dispose（19 条）                             |
+| `tests/executor-research.spec.ts`   | 映射、上限、非 http(s) 过滤、空结果、异常与中止降级（10 条）                                            |
+| `tests/executor-session.spec.ts`    | 回合匹配、订阅/扫描竞态、超时、中止（13 条）                                                            |
+| `tests/executor-role-model.spec.ts` | 模型路由映射、空配置不注入、已有选择不覆盖、解析失败回退（12 条）                                       |
+| `tests/presets.spec.ts`             | 宿主行仍在、两套 preset 的字段与工具集、中性人设前缀、无重复 id（17 条）                                |
+| `tests/contract.spec.ts`            | 分层依赖规则、共享合约、文档数量                                                                        |
+| `tests/settings-service.spec.ts`    | 默认值、持久化、revision、冲突、深合并、损坏降级、v1→v2、history（16 条）                               |
+| `tests/api-routes.spec.ts`          | 19 条路由、分页、错误码、audit、channel 503/400（22 条）                                                |
+| `tests/task-actions.spec.ts`        | 批准/拒绝/取消/重试、默认工作区、launch effect（9 条）                                                  |
+| `tests/runtime-lock.spec.ts`        | 打开/持久化/锁冲突/释放/启动失败（6 条）                                                                |
+| `tests/core-outbound.spec.ts`       | `queueFollowup` 幂等/目标匹配/空值；outbound 终态与重复上报（10 条）                                    |
+| `tests/rate-counters.spec.ts`       | 窗口滚动、裁剪、跨重启、gap、损坏恢复、消息窗口与回环状态（11 条）                                      |
+| `tests/pipeline-chat.spec.ts`       | 自动回复、闸门降级/拒绝、检索、回声、unknown/failed 发送（18 条）                                       |
+| `tests/pipeline-task.spec.ts`       | 任务批准可见、批准后执行与回帖、未批准/取消/派工不符不执行、失败只通知（7 条）                          |
+| `tests/runtime-pipeline.spec.ts`    | 启动授权门、暂停/恢复、防抖重启、outbox 恢复、过期/probe pass、停机顺序、ownerNick、会话式重建（18 条） |
+| `tests/health-view.spec.ts`         | channel 健康语义：disabled/paused/无 target 为 ok，有 target 却 stopped 为 degraded（4 条）             |
+
+## 9. v1 限制
+
+- **没有历史补拉（backfill）**：`dws` 事件流只支持按 TTL 的消费窗口，WS2 没有实现「过去消息」补拉；插件只处理启动后收到的消息，不在本期伪造历史。
+- **模板缺失即插件降级**：`prompts/*.md` 属于包完整性；任一模板缺失/空白时通道、流水线与 effect 队列都不装配，health 显示 `prompts: error`。这是有意的 fail-closed，不尝试通用提示词。
+- **review 无发送路由**：闸门降级为 `review` 时只写 Draft；面板（WS6）只读展示并允许复制，由主人自行在钉钉发送。`POST decisions/:id/send` 需要扩 19 条冻结合约，列入 v0.2 backlog。
+- **通知不进 DSH 收件箱**：`notify` 只写 `notice` 审计事件（面板 audit/overview 可见），不创建 DSH 会话，也不注入消息。任务失败/未知投递的本地告警因此只能在审计与健康里看到。
+- **单实例**：状态目录锁保证同一 `stateDir` 只有一个进程；锁 stale 10 秒，崩溃后需等待接管，不支持多实例共享。
+- **未知投递不重发**：`unknown` 是终态，只有人核对通道后才能另行处理；没有自动重试命令。
+- **review 不自动发送**：闸门降级为 `review` 时只 `draft`，v1 没有「人确认后发送」的路由；需要发送时由主人改 `replyMode`/设置后重新触发。
+- **任务并发**：`tasks.maxConcurrent` 在 `launch` handler 中执行（`Later` 1 秒重试）；没有跨进程配额，也没有全局排队面板。
 
 ## 相关文档
 

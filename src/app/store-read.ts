@@ -238,6 +238,17 @@ export interface TaskListOptions extends ListOptions {
   readonly status?: TaskStatus | readonly TaskStatus[]
 }
 
+/** Aggregate counters the overview and health views need, read in one call. */
+export interface StoreCounts {
+  readonly threads: number
+  /** One entry per task status, including zeroes. */
+  readonly tasks: Readonly<Record<TaskStatus, number>>
+  /** Pending approvals that are still actionable at the supplied instant. */
+  readonly pendingApprovals: number
+  /** Effects waiting for or currently running an attempt. */
+  readonly pendingEffects: number
+}
+
 export interface ReadQueries {
   listThreads(options?: ListOptions): Page<Thread>
   threadMessages(key: string, options?: ThreadMessageOptions): ThreadMessagesPage
@@ -246,10 +257,24 @@ export interface ReadQueries {
   pendingApprovals(now: IsoTime | Date): readonly Approval[]
   pendingOutbound(): readonly Outbound[]
   audit(options?: ListOptions): Page<AuditRecord>
+  counts(now: IsoTime | Date): StoreCounts
 }
 
 const DEFAULT_LIMIT = 50
 const MAX_LIMIT = 200
+
+/** Every task status, so a counts map always has the same keys. */
+const TASK_STATUSES: readonly TaskStatus[] = [
+  'captured',
+  'awaiting-approval',
+  'approved',
+  'running',
+  'succeeded',
+  'failed',
+  'rejected',
+  'cancelled',
+  'expired',
+]
 
 function pageSize(value: number | undefined): number {
   if (value === undefined) return DEFAULT_LIMIT
@@ -335,6 +360,24 @@ export function storeReads(db: DatabaseSync): ReadQueries {
         }
       })
       return { items, nextOffset: found.length > limit ? offset + limit : null }
+    },
+    counts(now) {
+      const total = (sql: string, ...parameters: (string | number)[]): number =>
+        Number(rows(sql, ...parameters)[0]?.['n'] ?? 0)
+      const tasks = Object.fromEntries(TASK_STATUSES.map((status) => [status, 0])) as Record<TaskStatus, number>
+      for (const row of rows('SELECT status, COUNT(*) AS n FROM tasks GROUP BY status')) {
+        const status = text(row['status']) as TaskStatus
+        if (status in tasks) tasks[status] = integer(row['n'])
+      }
+      return {
+        threads: total('SELECT COUNT(*) AS n FROM threads'),
+        tasks,
+        pendingApprovals: total(
+          "SELECT COUNT(*) AS n FROM approvals WHERE status = 'pending' AND expires_at > ?",
+          isoCutoff(now),
+        ),
+        pendingEffects: total("SELECT COUNT(*) AS n FROM effects WHERE state IN ('waiting', 'running')"),
+      }
     },
   }
 }

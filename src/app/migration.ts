@@ -12,7 +12,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 
 /** Schema this build writes and reads. */
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
 /** Oldest schema a migration exists for; a version below it cannot be upgraded. */
 export const OLDEST_SCHEMA_VERSION = 0
@@ -168,5 +168,44 @@ const schema1: Migration = (db) => {
   `)
 }
 
+/**
+ * Schema 2: durable, versioned settings.
+ *
+ * One row per settings block, a revision per block for optimistic concurrency,
+ * a single global revision row, and an append-only history that records who
+ * wrote which value. The migration is safe to run twice: every statement is
+ * idempotent and the meta row is inserted with `INSERT OR IGNORE`.
+ */
+const schema2: Migration = (db) => {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      block TEXT PRIMARY KEY,
+      value_json TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS settings_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      block TEXT NOT NULL,
+      value_json TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      source TEXT NOT NULL,
+      saved_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS settings_meta (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      revision INTEGER NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS settings_history_block ON settings_history(block, id);
+  `)
+  db.prepare('INSERT OR IGNORE INTO settings_meta (id, revision, updated_at) VALUES (1, 0, ?)').run(
+    new Date().toISOString(),
+  )
+}
+
 /** Every migration this build knows, indexed by the version it upgrades from. */
-export const MIGRATIONS: readonly Migration[] = [schema1]
+export const MIGRATIONS: readonly Migration[] = [schema1, schema2]

@@ -124,8 +124,8 @@ describe('DwsProcess with the fake executable', () => {
     const directory = tempDir()
     const traceFile = join(directory, 'trace.jsonl')
     const eventsFile = writeJson(directory, 'events.json', [
-      { msgId: 'm-1', text: 'one' },
-      { msgId: 'm-2', text: 'two' },
+      { type: 'user_im_message_receive_at', event_id: 'e-1', message_id: 'm-1', content: 'one' },
+      { type: 'user_im_message_receive_at', event_id: 'e-2', message_id: 'm-2', content: 'two' },
     ])
     const lines: string[] = []
     const ready: ReadyInfo[] = []
@@ -133,7 +133,7 @@ describe('DwsProcess with the fake executable', () => {
     const subscription = new DwsProcess({
       command: process.execPath,
       baseArgs: [fakeDws],
-      args: ['event', 'consume', 'user_im_message_receive_at', '--flatten', '-f', 'ndjson', '--ttl', '1'],
+      args: ['event', 'consume', 'user_im_message_receive_at', '--flatten', '-f', 'ndjson', '--ttl', '1h'],
       env: env({ FAKE_DWS_EVENTS: eventsFile, FAKE_DWS_TRACE: traceFile }),
       graceMs: 2_000,
       onLine: (line) => lines.push(line),
@@ -147,7 +147,7 @@ describe('DwsProcess with the fake executable', () => {
 
     expect(ready[0]?.eventKey).toBe('user_im_message_receive_at')
     expect(ready[0]?.subscribeId).toMatch(/^sub-/)
-    expect(lines.map((line) => JSON.parse(line).msgId)).toEqual(['m-1', 'm-2'])
+    expect(lines.map((line) => JSON.parse(line).message_id)).toEqual(['m-1', 'm-2'])
 
     await expect(subscription.stop()).resolves.toBe('stopped')
     expect(exits).toHaveLength(1)
@@ -165,7 +165,7 @@ describe('DwsProcess with the fake executable', () => {
     const subscription = new DwsProcess({
       command: process.execPath,
       baseArgs: [fakeDws],
-      args: ['event', 'consume', 'user_im_message_receive_at', '--flatten', '-f', 'ndjson', '--ttl', '1'],
+      args: ['event', 'consume', 'user_im_message_receive_at', '--flatten', '-f', 'ndjson', '--ttl', '1h'],
       env: env({ FAKE_DWS_EXIT: '7', FAKE_DWS_TRACE: traceFile }),
       onLine: () => undefined,
       onStderrLine: () => undefined,
@@ -180,7 +180,7 @@ describe('DwsProcess with the fake executable', () => {
     const subscription = new DwsProcess({
       command: process.execPath,
       baseArgs: [fakeDws],
-      args: ['event', 'consume', 'user_im_message_receive_at', '--flatten', '-f', 'ndjson', '--ttl', '1'],
+      args: ['event', 'consume', 'user_im_message_receive_at', '--flatten', '-f', 'ndjson', '--ttl', '1h'],
       env: env({ FAKE_DWS_DRY_RUN_EXIT: '3' }),
       onLine: () => undefined,
       onStderrLine: () => undefined,

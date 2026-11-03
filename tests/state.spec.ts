@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createHttpHandler, registerHttp } from '../src/app/http.ts'
+import { createHttpHandler, httpDeps, registerHttp } from '../src/app/http.ts'
 import { Runtime, resolveStateDir } from '../src/app/runtime.ts'
 import { stateView } from '../src/app/views.ts'
 import { API_REQUEST_HEADER, API_REQUEST_HEADER_VALUE } from '../src/shared/api.ts'
@@ -13,6 +13,7 @@ import { PLUGIN_NAME, PLUGIN_VERSION } from '../src/shared/limits.ts'
 import { SETTINGS_BLOCKS, SETTINGS_DEFAULTS } from '../src/shared/settings.ts'
 
 const servers = new Set<Server>()
+const runtimes = new Set<Runtime>()
 let root = ''
 
 beforeEach(async () => {
@@ -25,15 +26,19 @@ afterEach(async () => {
     await new Promise<void>((resolveClose) => server.close(() => resolveClose()))
   }
   servers.clear()
+  for (const runtime of runtimes) await runtime.stop()
+  runtimes.clear()
   await rm(root, { recursive: true, force: true })
 })
 
 function runtimeAt(stateDir: string, now = new Date('2026-11-02T00:00:00.000Z')): Runtime {
-  return new Runtime({ stateDir, logLevel: 'info' }, { now: () => now })
+  const runtime = new Runtime({ stateDir, logLevel: 'info' }, { now: () => now })
+  runtimes.add(runtime)
+  return runtime
 }
 
 async function serve(runtime: Runtime): Promise<{ baseUrl: string; close: () => Promise<void> }> {
-  const server = createServer(createHttpHandler(runtime))
+  const server = createServer(createHttpHandler(httpDeps(runtime)))
   servers.add(server)
   await new Promise<void>((resolveListen, reject) => {
     server.once('error', reject)

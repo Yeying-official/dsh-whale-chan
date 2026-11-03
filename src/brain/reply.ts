@@ -38,8 +38,8 @@ import type {
   ThreadWindow,
 } from './types.ts'
 
-/** Wall-clock budget for one reply draft. */
-export const DEFAULT_REPLY_TIMEOUT_MS = 20_000
+/** Wall-clock budget for one reply draft; a real first call can take 15–40s. */
+export const DEFAULT_REPLY_TIMEOUT_MS = 60_000
 
 /** A system-prompt line shorter than this is too generic to prove a leak. */
 const LEAK_LINE_MIN_CHARS = 24

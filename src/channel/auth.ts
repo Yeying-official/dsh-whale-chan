@@ -107,6 +107,9 @@ export async function probeAuth(settings: Settings, io: AuthIo = {}): Promise<Au
       'open_dingtalk_id',
       'openDingTalkId',
     ])
+    // The flattened group event carries no atUsers; `@<userName>` is the only
+    // way to tell a mention, so expose it to the host as `ownerNick`.
+    const userName = readString(payload, ['user_name', 'userName'])
 
     return {
       available: true,
@@ -115,6 +118,7 @@ export async function probeAuth(settings: Settings, io: AuthIo = {}): Promise<Au
       tokenValid,
       ...(expiresAt ? { expiresAt } : {}),
       ...(userId ? { userId } : {}),
+      ...(userName ? { userName } : {}),
     }
   } catch {
     // A throwing runner is still "not available" for the caller: the probe is a

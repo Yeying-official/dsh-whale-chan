@@ -57,37 +57,32 @@ const atMe: DwsTarget = { kind: 'at-me', id: 'at-me', mentionOnly: true, enabled
 const group: DwsTarget = { kind: 'group', id: 'cid-1', label: '测试群', mentionOnly: true, enabled: true }
 const ownerUserId = 'u-owner'
 
+// The real T3 shape: snake_case, no conversationType, no atUsers.
 const atEvent = {
-  eventType: 'user_im_message_receive_at',
-  msgId: 'm-at',
-  conversationId: 'cid-1',
-  conversationType: 'group',
-  senderStaffId: 'u-alice',
-  senderNick: 'Alice',
-  text: '@鲸鱼酱 hi',
-  atUsers: ['u-owner'],
+  type: 'user_im_message_receive_at',
+  event_id: 'evt-at-1',
+  message_id: 'm-at',
+  conversation_id: 'cid-1',
+  sender: 'Alice',
+  sender_open_dingtalk_id: 'od-alice',
+  content: '@鲸鱼酱 hi',
+  create_time: '2026-11-03 14:04:17',
+  event_time: 1793685857502,
 }
-function groupLine(msgId: string, text: string) {
+function groupLine(messageId: string, content: string) {
   return {
-    msgId,
-    conversationId: 'cid-1',
-    conversationType: 'group',
-    senderStaffId: 'u-bob',
-    senderNick: 'Bob',
-    text,
-    atUsers: ['u-owner'],
+    type: 'user_im_message_receive_group',
+    event_id: `evt-${messageId}`,
+    message_id: messageId,
+    conversation_id: 'cid-1',
+    sender: 'Bob',
+    sender_open_dingtalk_id: 'od-bob',
+    content,
+    event_time: 1793685857502,
   }
 }
 
-const groupEvent = {
-  msgId: 'm-group',
-  conversationId: 'cid-1',
-  conversationType: 'group',
-  senderStaffId: 'u-bob',
-  senderNick: 'Bob',
-  text: '@我 在吗',
-  atUsers: ['u-owner'],
-}
+const groupEvent = groupLine('m-group', '@我 在吗')
 
 function createSupervisor(
   targets: readonly DwsTarget[],

@@ -188,6 +188,7 @@ export class DingTalkChannel {
   }
 }
 
+export { clearDwsCommandCache, resolveDwsCommand, WINDOWS_COMMAND_EXTENSIONS } from './command.ts'
 export { ChannelError, isChannelError } from './errors.ts'
 export { redact, describeError } from './log.ts'
 export {

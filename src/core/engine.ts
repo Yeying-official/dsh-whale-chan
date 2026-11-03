@@ -63,6 +63,27 @@ export interface QueueReplyOptions {
   readonly target: OutboundTarget
 }
 
+/**
+ * One follow-up message, queued without a Decision.
+ *
+ * A task result has no inbound message to classify, so it cannot ride the
+ * reply chain. It still needs the same delivery guarantees, which is why it is
+ * a full `Outbound` bounded by its own idempotency key.
+ */
+export interface QueueFollowupOptions {
+  readonly threadKey: string
+  readonly target: OutboundTarget
+  readonly text: string
+  readonly idempotencyKey: string
+  readonly kind: 'reply' | 'notice'
+  readonly outboundId: string
+}
+
+export interface FollowupTimingOptions {
+  /** Instant the queue command is stamped with; defaults to the engine clock. */
+  readonly at?: IsoTime
+}
+
 export interface ApproveOptions {
   readonly by: 'owner'
   readonly note?: string
@@ -82,6 +103,15 @@ export interface CancelOptions {
   readonly by: 'owner'
   readonly reason?: string
   readonly at: IsoTime
+}
+
+export interface RetryOptions {
+  readonly by: 'owner'
+  readonly note?: string
+  /** When the person asked for the retry, as the panel recorded it. */
+  readonly at: IsoTime
+  /** Workspace the new assignment must run in. */
+  readonly workspace: string
 }
 
 export interface EndAssignmentOptions {
@@ -293,6 +323,123 @@ export class Engine {
     })
   }
 
+  /**
+   * Queue a follow-up message that is not part of a reply decision.
+   *
+   * Task results and v1 notices need an outbox entry but no Decision: nothing
+   * classified them and no inbound message owns them. The thread must exist and
+   * the target must address that same kind of conversation, so a follow-up
+   * cannot be silently delivered to someone else. The idempotency key is the
+   * delivery bound: queueing the same key twice returns the message staged the
+   * first time, with no second external message.
+   */
+  queueFollowup(options: QueueFollowupOptions, timing: FollowupTimingOptions = {}): Outbound {
+    return this.command((emit) => {
+      const at = timing.at === undefined ? this.now() : this.stamped(timing.at)
+      const thread = this.repos.threads.get(options.threadKey)
+      if (!thread) throw new UserError('unknownThread')
+      const text = options.text
+      if (text.trim().length === 0) throw new UserError('emptyOutbound')
+      const key = options.idempotencyKey.trim()
+      if (key.length === 0) throw new UserError('emptyIdempotencyKey')
+      if (options.target.kind !== thread.kind) throw new UserError('outboundTargetMismatch')
+
+      const existing = this.repos.outbound.byIdempotencyKey(key)
+      if (existing) return existing
+
+      const outbound: Outbound = {
+        id: options.outboundId,
+        idempotencyKey: key,
+        kind: options.kind,
+        target: {
+          kind: options.target.kind,
+          conversationId: options.target.conversationId,
+          ...(options.target.peerUserId ? { peerUserId: options.target.peerUserId } : {}),
+        },
+        text,
+        status: 'pending',
+        attempts: 0,
+        lastError: null,
+        sentAt: null,
+        receipt: null,
+      }
+      this.repos.outbound.save(outbound)
+      emit({
+        type: 'outbound.queued',
+        at,
+        data: { outboundId: outbound.id, threadKey: thread.key, outboundKind: outbound.kind },
+      })
+      return outbound
+    })
+  }
+
+  /**
+   * Record a confirmed delivery of a follow-up.
+   *
+   * Only a `pending` row changes: a terminal row keeps its first outcome, so a
+   * duplicate report after a restart cannot rewrite delivery history.
+   */
+  outboundSent(id: string, receipt?: string): Outbound {
+    return this.command((emit) => {
+      const outbound = this.requireOutbound(id)
+      if (outbound.status !== 'pending') return outbound
+      const at = this.now()
+      const sent: Outbound = { ...outbound, status: 'sent', sentAt: at, receipt: receipt ?? null, lastError: null }
+      this.repos.outbound.save(sent)
+      emit({ type: 'outbound.sent', at, data: { outboundId: id } })
+      return sent
+    })
+  }
+
+  /** Delivery could not be proven. Terminal, and never retried automatically. */
+  outboundUnknown(id: string, error: string): Outbound {
+    return this.command((emit) => {
+      const outbound = this.requireOutbound(id)
+      if (outbound.status !== 'pending') return outbound
+      const at = this.now()
+      const unknown: Outbound = {
+        ...outbound,
+        status: 'unknown',
+        attempts: outbound.attempts + 1,
+        lastError: error,
+      }
+      this.repos.outbound.save(unknown)
+      emit({ type: 'outbound.unknown', at, data: { outboundId: id, error } })
+      return unknown
+    })
+  }
+
+  /** Delivery definitely failed. Terminal until a person decides what to do. */
+  outboundFailed(id: string, error: string): Outbound {
+    return this.command((emit) => {
+      const outbound = this.requireOutbound(id)
+      if (outbound.status !== 'pending') return outbound
+      const at = this.now()
+      const failed: Outbound = {
+        ...outbound,
+        status: 'failed',
+        attempts: outbound.attempts + 1,
+        lastError: error,
+      }
+      this.repos.outbound.save(failed)
+      emit({ type: 'outbound.failed', at, data: { outboundId: id, error } })
+      return failed
+    })
+  }
+
+  /** Drop a follow-up that can never be delivered, such as one whose thread is gone. */
+  outboundDropped(id: string, reason: string): Outbound {
+    return this.command((emit) => {
+      const outbound = this.requireOutbound(id)
+      if (outbound.status !== 'pending') return outbound
+      const at = this.now()
+      const dropped: Outbound = { ...outbound, status: 'dropped', lastError: reason }
+      this.repos.outbound.save(dropped)
+      emit({ type: 'outbound.dropped', at, data: { outboundId: id, reason } })
+      return dropped
+    })
+  }
+
   /** The channel confirmed delivery: the decision is `sent` and the thread counts one reply. */
   replySent(decisionId: string, receipt?: string): Decision {
     return this.command((emit) => {
@@ -488,6 +635,52 @@ export class Engine {
   }
 
   /**
+   * A person retries a failed task.
+   *
+   * A retry is a new assignment, not a revival: the task keeps its result (the
+   * executor quotes the previous summary as context for the fresh session), its
+   * original approval stays `approved`, and a new pending assignment becomes
+   * the task's current one. Only `failed` qualifies; a cancelled task was ended
+   * on purpose and is never retried implicitly.
+   */
+  retryTask(taskId: string, options: RetryOptions): { task: Task; assignment: Assignment } {
+    return this.command((emit) => {
+      const at = this.now()
+      const task = this.requireTask(taskId)
+      if (task.status !== 'failed') throw new UserError('notFailed')
+      this.instant(options.at)
+      if (options.workspace.trim().length === 0) throw new UserError('missingWorkspace')
+      const workspace = options.workspace.trim()
+      if (!isAbsolutePath(workspace)) throw new UserError('invalidWorkspace')
+      const approval = this.repos.approvals.byTaskId(taskId)
+      if (!approval) throw new UserError('unknownApproval')
+      if (approval.status !== 'approved') throw new UserError('notApproved')
+
+      const assignment: Assignment = {
+        id: this.options.ids.next('assignment'),
+        taskId,
+        state: 'pending',
+        sessionId: null,
+        workspace,
+        startedAt: null,
+        endedAt: null,
+        outcome: null,
+        error: null,
+      }
+      const retried: Task = {
+        ...task,
+        status: 'approved',
+        assignmentId: assignment.id,
+        updatedAt: at,
+      }
+      this.repos.assignments.save(assignment)
+      this.repos.tasks.save(retried)
+      emit({ type: 'task.retried', at, data: { taskId, assignmentId: assignment.id } })
+      return { task: retried, assignment }
+    })
+  }
+
+  /**
    * Expire every pending approval whose `expiresAt` has passed, together with
    * its still-awaiting task. A second sweep over an unchanged clock returns an
    * empty list, because the approvals are no longer pending.
@@ -599,6 +792,11 @@ export class Engine {
     })
   }
 
+  /** Follow-up messages still waiting for delivery; the outbox resume pass reads this. */
+  pendingOutbounds(): readonly Outbound[] {
+    return this.repos.outbound.pending()
+  }
+
   // Helpers
 
   private now(): IsoTime {
@@ -620,6 +818,12 @@ export class Engine {
   private storedInstant(value: IsoTime): number | null {
     const time = Date.parse(value)
     return Number.isFinite(time) ? time : null
+  }
+
+  /** Validate a caller-supplied instant and echo it back for an event stamp. */
+  private stamped(value: IsoTime): IsoTime {
+    this.instant(value)
+    return value
   }
 
   private command<T>(work: (emit: Emit) => T): T {
@@ -667,7 +871,11 @@ export class Engine {
 
   private requireOutboundOf(decision: Decision): Outbound {
     if (!decision.outboundId) throw new UserError('outboundMissing')
-    const outbound = this.repos.outbound.get(decision.outboundId)
+    return this.requireOutbound(decision.outboundId)
+  }
+
+  private requireOutbound(id: string): Outbound {
+    const outbound = this.repos.outbound.get(id)
     if (!outbound) throw new UserError('unknownOutbound')
     return outbound
   }
@@ -697,4 +905,16 @@ function advanceThread(thread: Thread, message: InboundMessage): Thread {
     lastMessageAt: message.at > thread.lastMessageAt ? message.at : thread.lastMessageAt,
     counts: { ...thread.counts, inbound: thread.counts.inbound + 1 },
   }
+}
+
+/**
+ * Whether a workspace path is absolute on the platform that produced it.
+ *
+ * `src/core` may not import `node:path`, so this accepts the three forms the
+ * domain can meet: a POSIX path, a Windows drive path and a UNC share. The
+ * executor repeats the check with the host's own path module before it creates
+ * anything; the domain refuses early so a refused retry leaves no write behind.
+ */
+function isAbsolutePath(value: string): boolean {
+  return value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\')
 }

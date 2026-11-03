@@ -51,6 +51,8 @@ export interface TargetHealth {
   /** Accepted messages waiting for the sink, and lines rejected by normalization. */
   readonly pending: number
   readonly malformed: number
+  /** Executable actually spawned; a Windows shim is resolved here, never a secret. */
+  readonly command?: string
 }
 
 /** Aggregate channel health. */
@@ -89,6 +91,14 @@ export interface AuthState {
    * logged, persisted by the channel, or written into documentation.
    */
   readonly userId?: string
+  /**
+   * The authorized account's display name, when reported.
+   *
+   * Used only to recognize the owner's `@nick` in flattened group text; it is
+   * returned to the host so it can be passed back as `ownerNick`, and is never
+   * logged or persisted by the channel.
+   */
+  readonly userName?: string
 }
 
 /** Minimal logger seam; every message is expected to be already redacted. */

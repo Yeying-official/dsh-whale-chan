@@ -27,13 +27,26 @@ import { clip, codePointLength } from '../brain/format.ts'
 import type { ModelMessage, ModelPort, ModelRequest } from '../brain/types.ts'
 import type { ModelRoute } from '../shared/settings.ts'
 import { ExecutorError, ModelAbortedError, ModelFailedError, ModelTimeoutError } from './errors.ts'
-import { REPLIER_PRESET, replySessionId, type ExecutorLogger, type SessionHost, type SessionRef } from './types.ts'
+import {
+  MODEL_TURN_TIMEOUT_MS,
+  REPLIER_PRESET,
+  replySessionId,
+  type ExecutorLogger,
+  type SessionHost,
+  type SessionRef,
+} from './types.ts'
 
 /** Longest assembled prompt, in Unicode code points, sent as one user message. */
 export const MAX_PROMPT_CHARS = 12_000
 
-/** Wall-clock budget of one replier turn. */
-export const REPLY_TIMEOUT_MS = 60_000
+/**
+ * Wall-clock budget of one replier turn.
+ *
+ * It is the shared single-turn ceiling (`MODEL_TURN_TIMEOUT_MS`): a local model
+ * may take 15-30 seconds before its first token, so 90 seconds keeps a slow but
+ * healthy turn from being reported as a timeout.
+ */
+export const REPLY_TIMEOUT_MS = MODEL_TURN_TIMEOUT_MS
 
 /** Turns one session may serve before it is rebuilt. */
 export const MAX_TURNS = 20

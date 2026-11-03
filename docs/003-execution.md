@@ -93,7 +93,8 @@ interface ExecutorResult {
 3. 工作区：批准人选择的 `Assignment.workspace` 优先（展开 `~`，必须是绝对路径，否则抛 `UserError('invalidWorkspace')`（领域错误码，API 按用户可纠正错误映射）且不建任何东西）；没有选择时才回退到 `tasks.workspaceRoot`（展开 `~`）或 `<stateDir>/tasks` 拼上 `task.id`。然后 `mkdir -p`。回退路径里 `task.id` 必须是单一安全路径段，含 `/`、`\`、`..` 时抛 `ExecutorError('unsafeTaskId')`。
 4. `ensureSession`：会话 id `whale-task-<taskId>-<assignmentId 后 8 位>`、preset `dsh-whale-chan-worker`、权限 `settings.tasks.permissionPreset`（默认 `workspace-write`）、标题 `任务 · <title>`、系统提示与模型路由（见 §5）。
 5. 投递任务消息，`requestId = task:<taskId>:<assignmentId|initial>`；同一个派工重复投递不会产生第二条消息（§6）。`task.result.summary` 非空时，消息里追加「上一轮结果（供参考）」段落——重试是全新会话，这是它唯一能看到上次结论的途径。
-6. `awaitTurnEnd`，预算 `settings.tasks.timeoutMinutes` 分钟。
+6. `awaitTurnEnd`，预算 `max(settings.tasks.timeoutMinutes 分钟, 90 秒)`：`tasks.timeoutMinutes` 是任务总预算，
+   但单回合永远至少给 90 秒（`MODEL_TURN_TIMEOUT_MS`），否则 1 分钟的任务会在本地模型吐出首 token 前就被掐断。
 7. 读最后一条 assistant 文本作为 `summary`，映射 outcome。
 8. 无论走哪条路径，`runs` 条目都会被删除，`onFinished` 恰好触发一次。
 
@@ -128,6 +129,7 @@ interface ExecutorResult {
 - 订阅先建立、历史后扫描，扫描期间到达的事件会补放，因此不会漏掉「刚好在订阅前后结束」的回合；如果回合在等待开始前就已经结束，直接返回 `completed`。
 - 结果只有四种：`completed`、`timeout`、`aborted`、`failed`（`failed` 带上 DSH 的结束原因，例如 `aborted by hook`）。
 - 超时：执行器调用 `host.cancel` 取消会话回合，返回 `timeout`；不 SIGKILL 任何进程。
+- **单回合上限 90 秒**（`MODEL_TURN_TIMEOUT_MS`，回复器和执行器共用）：本机模型首 token 可能 15–30 秒，90 秒给慢但健康的回合留出余量。它与任务总超时是两回事：任务的总预算仍是 `tasks.timeoutMinutes`，只是不会低于一个回合的上限。
 - 取消：`cancel(taskId)` 先中止调用方生命周期，再 `agent.cancel({ kind: 'hook', reason }, { keepInbox: false })`——中止当前回合并清空队列，避免取消后又被排队消息唤醒。重复取消是幂等的，运行结束后再取消返回 `false`。
 - 外部（面板、别人在 DSH 里点停止）结束的回合不是本层的取消，按 `failed` 上报，避免把别人的操作说成领域取消。
 

@@ -24,6 +24,16 @@ export const REPLIER_PRESET = 'dsh-whale-chan-replier'
 /** Source kind stamped on every message this plugin delivers into a session. */
 export const DELIVERY_SOURCE = 'dsh-whale-chan' as const
 
+/**
+ * Wall-clock ceiling for one model turn in any session this plugin runs.
+ *
+ * It bounds a single turn, not a whole task: a local model can spend 15-30
+ * seconds producing its first token, so a turn is given 90 seconds before the
+ * host reports `timeout` and cancels it. A task's overall budget stays
+ * `settings.tasks.timeoutMinutes`, which may be larger.
+ */
+export const MODEL_TURN_TIMEOUT_MS = 90_000
+
 /** Characters an assignment id may contribute to a session id. */
 const SESSION_ID_SAFE = /[^A-Za-z0-9_-]/g
 

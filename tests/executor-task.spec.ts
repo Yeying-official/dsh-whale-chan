@@ -13,6 +13,7 @@ import { ExecutorError } from '../src/executor/errors.ts'
 import {
   DEFAULT_STATE_DIR,
   DshTaskExecutor,
+  MODEL_TURN_TIMEOUT_MS,
   WORKER_PRESET,
   resolveTaskWorkspace,
   taskRequestId,
@@ -238,6 +239,33 @@ describe('session and workspace', () => {
     expect(taskWorkspace(settings, 'task-9', '/home/owner', DEFAULT_STATE_DIR)).toBe(
       join('/home/owner', '.dsh-whale-chan', 'tasks', 'task-9'),
     )
+  })
+})
+
+describe('turn budget', () => {
+  it('waits the task budget when it is longer than one model turn', async () => {
+    const { host, executor } = harness()
+    const task = makeTask()
+    await executor.execute({
+      task,
+      approval: makeApproval(task),
+      settings: makeSettings({ tasks: { timeoutMinutes: 20 } }),
+      signal: new AbortController().signal,
+    })
+    expect(MODEL_TURN_TIMEOUT_MS).toBe(90_000)
+    expect(host.awaited[0]?.options.timeoutMs).toBe(20 * 60_000)
+  })
+
+  it('never waits less than one model turn, even for a one-minute task', async () => {
+    const { host, executor } = harness()
+    const task = makeTask()
+    await executor.execute({
+      task,
+      approval: makeApproval(task),
+      settings: makeSettings({ tasks: { timeoutMinutes: 1 } }),
+      signal: new AbortController().signal,
+    })
+    expect(host.awaited[0]?.options.timeoutMs).toBe(90_000)
   })
 })
 

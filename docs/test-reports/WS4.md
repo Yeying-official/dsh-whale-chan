@@ -21,14 +21,14 @@ $ tsc --noEmit
 $ pnpm test
  ✓ tests/executor-session.spec.ts (13 tests) 91ms
  ✓ tests/executor-research.spec.ts (10 tests) 53ms
- ✓ tests/executor-task.spec.ts (28 tests) 49ms
- ✓ tests/executor-model.spec.ts (19 tests) 40ms
+ ✓ tests/executor-task.spec.ts (31 tests) 52ms
+ ✓ tests/executor-model.spec.ts (21 tests) 44ms
  ✓ tests/presets.spec.ts (17 tests) 21ms
  ✓ tests/executor-role-model.spec.ts (12 tests) 14ms
 （另有既有 27 个 spec 文件）
 
  Test Files  33 passed (33)
-      Tests  434 passed (434)
+      Tests  439 passed (439)
 
 $ pnpm build
 ℹ [CJS] lib\client.js    42.04 kB │ gzip: 12.48 kB
@@ -54,14 +54,14 @@ $ git status --porcelain
 
 | 文件                                | 条数 | 覆盖                                                                                                                                                                                                                                                     |
 | ----------------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tests/executor-task.spec.ts`       | 29   | 批准门（pending / 未批准任务 / 错配批准 / 不安全 id）、会话参数与模型路由、批准目录优先 / `~` 展开 / 空值回退 / 相对路径拒绝、系统提示内容、投递一次、四种结局、取消幂等、回调恰好一次、失败监听器不影响结果、同任务并发拒绝、重试新会话与「上一轮结果」 |
-| `tests/executor-model.spec.ts`      | 19   | 提示组装与分隔、超预算丢最旧、单条超长截断、system 永不丢、会话 id/标题/工作区/preset、回复路由透传与缺省、会话复用、`forThread` 隔离、串行互斥、轮数重建（`fresh` + 旧会话取消）、空闲重建、超时/失败/中止三类错误、空文本、dispose                     |
+| `tests/executor-task.spec.ts`       | 31   | 批准门（pending / 未批准任务 / 错配批准 / 不安全 id）、会话参数与模型路由、批准目录优先 / `~` 展开 / 空值回退 / 相对路径拒绝、系统提示内容、投递一次、四种结局、取消幂等、回调恰好一次、失败监听器不影响结果、同任务并发拒绝、重试新会话与「上一轮结果」 |
+| `tests/executor-model.spec.ts`      | 21   | 提示组装与分隔、超预算丢最旧、单条超长截断、system 永不丢、会话 id/标题/工作区/preset、回复路由透传与缺省、会话复用、`forThread` 隔离、串行互斥、轮数重建（`fresh` + 旧会话取消）、空闲重建、超时/失败/中止三类错误、空文本、dispose                     |
 | `tests/executor-role-model.spec.ts` | 12   | 路由映射（含 effort、半配置、设置默认值）、`needsSeeding` 四种判断、空配置不注入、已有选择不覆盖、成功才 append + wire + flush、解析失败回退宿主默认                                                                                                     |
 | `tests/executor-research.spec.ts`   | 10   | 事实/来源映射、hostname 兜底、非 http(s) 丢弃与去重、limit 上限、长事实截断、空结果、异常、中止、预算耗尽、空查询不调用                                                                                                                                  |
 | `tests/executor-session.spec.ts`    | 13   | `TurnTracker` 归属回合、早于投递的 `turn/end`、历史已结束、aborted/failed 详情、无 requestId 的下一回合；`awaitTurn` 实时匹配、立即返回、订阅/扫描竞态补放、超时、中止、已中止不订阅、忽略无关事件                                                       |
 | `tests/presets.spec.ts`             | 17   | 宿主行仍在、无重复 loader id、两套 preset 的 id/name/order、回复器工具集与「无 shell/fs/jobs/skill」、执行器工具集、shell 平台门控、jobs 5 秒、compaction 隔离、插件名语法、`!!js` 位置、两套 preset 的中性人设前缀                                      |
 
-合计 **100** 条；仓库总数 335 → **435**。
+合计 **104** 条；仓库总数 335 → **439**。
 
 ## 3. 变异实验
 
@@ -149,6 +149,19 @@ waterfall，`ctx.on(..., { prepend: true })` 是 Cordis 的 `EventOptions.prepen
   只验证「注入什么、什么时候跳过、失败如何回退」。真实路由由 DSH 的 `ctx.llm` 决定。
 - 真机会话冒烟（创建会话、取消、观察 `turn/end`）写在
   [006 部署 §5.4](../006-deployment.md)，由 WS8 执行，本工作流未跑。
+
+## 5.1 T3 真机反馈（回合上限）
+
+首次真机分类调用（本机模型）在 15 秒内没有返回，brain 预算另派提高后，会话侧同步放宽：
+
+- `MODEL_TURN_TIMEOUT_MS = 90_000`（新增于 `types.ts`，两角色共用）；`REPLY_TIMEOUT_MS` 改为它的别名，
+  回复器单回合从 60 秒放宽到 90 秒。
+- 执行器的 `awaitTurnEnd` 预算改为 `max(tasks.timeoutMinutes × 60s, 90s)`：任务总预算仍是
+  `tasks.timeoutMinutes`，只是不会再低于一个回合的上限（1 分钟任务不会被 60 秒掐断）。
+- 新增 4 条测试：回复器默认 90 秒、显式预算仍生效、任务长预算按时长、1 分钟任务仍有 90 秒下限。
+
+一条教训：60 秒的回合上限对本机模型不够。测试无法发现这个问题——它需要真实的首 token 延迟，
+所以这条上限的表达方式是「常量 + 断言」，方便下次直接调数值而不是散落在调用点。
 
 ## 6. 复核清单
 

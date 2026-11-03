@@ -371,6 +371,8 @@ export function usePaged<T>(
   loader.current = load
   const [version, setVersion] = useState(0)
   const [state, setState] = useState<PagedInternal<T>>({ items: [], next: 0, loading: true, loadingMore: false })
+  const latest = useRef(state)
+  latest.current = state
   const request = useRef<AbortController | undefined>(undefined)
   const deps = options.deps ?? []
 
@@ -398,33 +400,33 @@ export function usePaged<T>(
 
   const reload = useCallback(() => setVersion((value) => value + 1), [])
   const loadMore = useCallback(() => {
-    setState((previous) => {
-      if (previous.loading || previous.loadingMore || previous.next === null) return previous
-      const offset = previous.next
-      const controller = new AbortController()
-      request.current = controller
-      void (async () => {
-        try {
-          const page = await loader.current(offset, controller.signal)
-          if (controller.signal.aborted) return
-          setState((current) =>
-            current.next === offset
-              ? {
-                  ...current,
-                  items: [...current.items, ...page.items],
-                  next: page.nextOffset,
-                  loadingMore: false,
-                  error: undefined,
-                }
-              : current,
-          )
-        } catch (failure) {
-          if (controller.signal.aborted) return
-          setState((current) => ({ ...current, loadingMore: false, error: asError(failure) }))
-        }
-      })()
-      return { ...previous, loadingMore: true, error: undefined }
-    })
+    const current = latest.current
+    if (current.loading || current.loadingMore || current.next === null) return
+    const offset = current.next
+    const controller = new AbortController()
+    request.current?.abort()
+    request.current = controller
+    setState((previous) => ({ ...previous, loadingMore: true, error: undefined }))
+    void (async () => {
+      try {
+        const page = await loader.current(offset, controller.signal)
+        if (controller.signal.aborted) return
+        setState((previous) =>
+          previous.next === offset
+            ? {
+                ...previous,
+                items: [...previous.items, ...page.items],
+                next: page.nextOffset,
+                loadingMore: false,
+                error: undefined,
+              }
+            : previous,
+        )
+      } catch (failure) {
+        if (controller.signal.aborted) return
+        setState((previous) => ({ ...previous, loadingMore: false, error: asError(failure) }))
+      }
+    })()
   }, [])
 
   return {

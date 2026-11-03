@@ -7,7 +7,17 @@ import { shortTime, timeText } from '../format.ts'
 import { usePanel } from '../provider.tsx'
 import { healthTone } from '../status.ts'
 import type { AuditEntry, Health, Overview } from '../../shared/models.ts'
-import type { T } from '../locale.ts'
+import type { T, WhaleChanKey } from '../locale.ts'
+
+const CHECK_LABELS: Readonly<Record<string, WhaleChanKey>> = {
+  state: 'health.check.state',
+  stateDir: 'health.check.stateDir',
+  database: 'health.check.database',
+  lock: 'health.check.lock',
+  settings: 'health.check.settings',
+  channel: 'health.check.channel',
+  executor: 'health.check.executor',
+}
 
 function healthStatusLabel(health: Health, t: T): string {
   return health.status === 'ok'
@@ -85,12 +95,12 @@ function HealthChecks({ health }: { health: Health }) {
       </div>
       <ul className="wc-health-list" aria-label={t('health.checks')}>
         {health.checks.map((check) => {
-          const key = `health.check.${check.id}` as 'health.check.state'
-          const label = t(key)
+          const key = CHECK_LABELS[check.id]
+          const label = key ? t(key) : check.id
           return (
             <li key={check.id} className="wc-health-row">
               <div>
-                <span className="wc-health-name">{label === key ? check.id : label}</span>
+                <span className="wc-health-name">{label}</span>
                 <span className="wc-health-detail-text">{check.detail}</span>
               </div>
               <Badge tone={healthTone(check.status)}>
@@ -214,7 +224,7 @@ export function OverviewPage() {
                     <span className="wc-stat-label">{t(item.key as 'overview.counts.threads')}</span>
                     <span className="wc-stat-value">
                       {item.value}
-                      {item.capped ? t('common.approximate') : ''}
+                      {item.capped ? ` ${t('common.approximate')}` : ''}
                     </span>
                   </div>
                 ))}

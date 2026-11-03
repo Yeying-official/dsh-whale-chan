@@ -92,7 +92,7 @@ export function FieldRow({ label, labelFor, hint, note, error, className, group,
         <span className="wc-field-label">
           <span id={labelId}>{label}</span>
         </span>
-        <div role="group" aria-labelledby={labelId} aria-invalid={error ? true : undefined}>
+        <div role="group" aria-labelledby={labelId}>
           {control}
         </div>
         {hint ? <span className="wc-field-hint">{hint}</span> : null}

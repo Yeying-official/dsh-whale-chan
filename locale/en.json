@@ -461,5 +461,6 @@
   "session.notListed": "That execution session is not in the current DSH session list.",
   "overview.counts.title": "At a glance",
   "threads.column.title": "Conversation",
-  "threads.column.kind": "Kind"
+  "threads.column.kind": "Kind",
+  "settings.fieldRequired": "Fill in this field."
 }

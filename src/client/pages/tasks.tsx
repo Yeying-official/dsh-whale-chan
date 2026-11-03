@@ -101,10 +101,13 @@ function TaskDetailView({ taskId, onBack }: { taskId: string; onBack: () => void
   const approval: Approval | null | undefined = detail.data?.approval
   const extra = detail.data as (TaskDetail & TaskDetailExtension) | undefined
   const assignment = extra?.assignment
+  const directSession = (detail.data as { readonly sessionId?: unknown } | undefined)?.sessionId
   const sessionId =
     assignment && typeof assignment.sessionId === 'string' && assignment.sessionId.length > 0
       ? assignment.sessionId
-      : undefined
+      : typeof directSession === 'string' && directSession.length > 0
+        ? directSession
+        : undefined
   const tasksBlock = settings.data?.blocks.tasks.value
   const workspaceRoot =
     isRecord(tasksBlock) && typeof tasksBlock['workspaceRoot'] === 'string' ? tasksBlock['workspaceRoot'] : ''
@@ -218,6 +221,7 @@ function TaskDetailView({ taskId, onBack }: { taskId: string; onBack: () => void
         <>
           <Card title={t('tasks.detail.title')}>
             <dl className="wc-facts">
+              <DetailFact label={t('tasks.detail.brief')}>{task.title}</DetailFact>
               <DetailFact label={t('tasks.field.id')}>
                 <span className="wc-mono">{task.id}</span>
               </DetailFact>

@@ -461,5 +461,6 @@
   "session.notListed": "该执行会话不在当前的 DSH 会话列表中。",
   "overview.counts.title": "数据概览",
   "threads.column.title": "会话",
-  "threads.column.kind": "类型"
+  "threads.column.kind": "类型",
+  "settings.fieldRequired": "请填写该字段。"
 }

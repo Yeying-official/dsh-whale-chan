@@ -144,6 +144,8 @@ export interface ModalProps {
 export function Modal({ open, title, closeLabel, onClose, children, footer }: ModalProps) {
   const id = useId()
   const panel = useRef<HTMLDivElement>(null)
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
 
   useEffect(() => {
     if (!open) return
@@ -151,17 +153,18 @@ export function Modal({ open, title, closeLabel, onClose, children, footer }: Mo
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.stopPropagation()
-        onClose()
+        closeRef.current()
       }
     }
     document.addEventListener('keydown', onKeyDown)
-    const focusable = panel.current?.querySelector<HTMLElement>('input, textarea, select, button, [href]')
+    const field = panel.current?.querySelector<HTMLElement>('input, textarea, select')
+    const focusable = field ?? panel.current?.querySelector<HTMLElement>('button, [href]')
     focusable?.focus()
     return () => {
       document.removeEventListener('keydown', onKeyDown)
       previous?.focus()
     }
-  }, [open, onClose])
+  }, [open])
 
   if (!open) return null
   return createPortal(

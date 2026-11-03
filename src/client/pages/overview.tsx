@@ -85,11 +85,12 @@ function HealthChecks({ health }: { health: Health }) {
       </div>
       <ul className="wc-health-list" aria-label={t('health.checks')}>
         {health.checks.map((check) => {
-          const label = t(`health.check.${check.id}` as 'health.check.state')
+          const key = `health.check.${check.id}` as 'health.check.state'
+          const label = t(key)
           return (
             <li key={check.id} className="wc-health-row">
               <div>
-                <span className="wc-health-name">{label}</span>
+                <span className="wc-health-name">{label === key ? check.id : label}</span>
                 <span className="wc-health-detail-text">{check.detail}</span>
               </div>
               <Badge tone={healthTone(check.status)}>

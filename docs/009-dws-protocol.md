@@ -29,6 +29,8 @@
 
 事件键由 `src/channel/targets.ts` 的 `EVENT_KEYS` 冻结；改键属于协议变更，不是配置变更。`at-me` 是全局订阅，同一时刻只允许一个（重复行会被 `dedupeTargets` 丢弃）。
 
+`at-me` 目标行的 `id` 只作为消息的 `targetId` 透传，不参与订阅参数；WS5 会把该行初始化为 `at-me`。
+
 ## 3. 订阅命令 **[H]**
 
 ```text
@@ -82,6 +84,8 @@ dws event consume <event_key> --flatten -f ndjson --ttl <hours>
 
 `@所有人` 广播：当 `settings.reply.ignoreBroadcast` 为真且没有直接 @ 本人时，整条消息跳过（skip `broadcast`）；若同时直接 @ 了本人，仍按 `addressed: true` 保留。
 
+**group 的 `mentionOnly` 属于 WS3 策略层**：通道始终如实输出 `addressed`，不会在通道层丢弃未 @ 的群消息（订阅本身接收群内全部消息）。是否回复、是否只看提及，由策略层基于 `addressed` 与 `mentionOnly` 决定。
+
 ### 4.3 跳过原因（固定顺序）**[F]**
 
 | 顺序 | skip          | 条件                                                                  |
@@ -90,9 +94,10 @@ dws event consume <event_key> --flatten -f ndjson --ttl <hours>
 | 2    | `malformed`   | 非对象、缺消息 id、缺发送者、群消息缺会话 id                          |
 | 3    | `self`        | 发送者就是本人                                                        |
 | 4    | `broadcast`   | 纯广播且未直接 @ 本人，且 `ignoreBroadcast` 打开                      |
-| 5    | `empty`       | 正文为空**且**没有任何媒体迹象                                        |
+| 5    | `unsupported` | 正文为空但检测到图片/文件/语音/视频等媒体迹象（`detail=media-only`）  |
+| 6    | `empty`       | 正文为空**且**没有任何媒体迹象                                        |
 
-空正文但带图片/文件等媒体迹象时**不跳过**：核心 `InboundMessage` 没有附件字段，通道保留该消息并给出空 `text`，由决策层决定是否忽略，而不是在通道层丢弃事实。
+纯媒体事件在 v1 **不回复**：核心 `InboundMessage` 没有附件字段，回复一张没有说明的图片也没有意义，因此以 `unsupported` + `detail=media-only` 跳过；带文字说明的图文仍按文字处理。
 
 `threadKey`：`dm` → `dm:<对端 userId>`；群（含 `at-me` 落在群内）→ `group:<openConversationId>`。`targetId` 取目标配置的显式 id。
 
@@ -131,8 +136,11 @@ dws chat +messages-send --as user --ai-tag --idempotency-key <key> --wait-delive
 | 退出非 0 但无法分类                                                               | `unknown`                          | **禁止重发**                   |
 | 超时、无输出、spawn 失败前的信号中断                                              | `unknown`（spawn 失败为 `failed`） | 超时禁止重发                   |
 | 进程无法启动（ENOENT 等）                                                         | `failed`                           | 明确未发出，允许按幂等键重试   |
+| `advanced.dryRun` 打开                                                            | `skipped`                          | 不 spawn、不改变 Outbound 状态 |
 
 **unknown 语义**：通道无法证明消息是否送达，调用方不得重发同一 `idempotencyKey`；只能落 `send_unknown` 并等待对账/人工处理。这是 Outbox 设计的硬约束。
+
+**skipped 语义**：演练模式下通道没有尝试发送，这不是失败，也不是成功。上层不得把 Outbound 置为 `failed`/`sent`，应保持原状态（或由 WS5 单独标记演练），更不得按失败重试。
 
 ### 5.2 幂等键
 
@@ -171,6 +179,8 @@ dws auth status --format json
 
 `probeAuth` 只提取：`available`（`--version` 是否成功）、`version`、`authenticated`、`token_valid`/`tokenValid`、`expires_at`/`expiresAt`。任何超时、非零退出、非 JSON 输出都降级为 `available:false` 或布尔 false，不抛异常、不记录原始 payload、不记录 corpId/userId/token。授权失败时通道进入可观察错误态，不猜测性降级。
 
+**owner 身份**：`probeAuth` 还返回可选的 `userId`（`auth status` 载荷里的账号 id，接受 `user_id`/`userId`/`staff_id`/`staffId`/`open_dingtalk_id`/`openDingTalkId` 别名）。它只交给宿主用于自消息过滤：**绝不写日志、绝不持久化、绝不写入文档**。宿主把它作为 `ownerUserId` 注入 `DingTalkChannel`，`start` 在“存在 enabled target 且 `ownerUserId` 为空”时抛 `ChannelError('owner-unknown')` 并拒绝订阅；通道**不再**从 at-me 行 id 回退猜测。缺失时强行启动会让助手把自己的回复当成新消息，形成回环。
+
 ## 8. 目标发现 **[H]** + **[P]**
 
 ```text
@@ -190,7 +200,7 @@ dws chat +chat-list --types p2p --page-size 50 --format json
 1. `user_im_message_receive_*` 三个事件键在登录态下的实际可用性（[H] 来自 help）。
 2. NDJSON 原始字段名：`senderStaffId` 是否总存在、`conversationType` 的取值集合、`atUsers` 的元素结构（字符串 vs 对象）、`createAt` 的单位、会话标题字段名。
 3. `+chat-list --types p2p` 的响应结构与分页语义；`+chat-search` 的 `--format json` 是否被接受。
-4. `auth status --format json` 的字段名与 `expires_at` 格式。
+4. `auth status --format json` 的字段名、`expires_at` 格式与账号 id 字段（`user_id`/`userId`/`staff_id` 等别名）。
 5. `+messages-send` 的成功回执字段（messageId / processQueryKey / errcode）与 `--wait-delivery` 的行为。
 6. Windows：`stdin.end()` 是否能优雅结束订阅；`dws event stop <id> --yes` 的实际语法与权限。
 7. `--ttl` 的单位与补收窗口语义；断线后是否重复投递旧事件。

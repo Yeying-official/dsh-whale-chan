@@ -39,35 +39,47 @@
 
 1. **不 kill -9**：停止顺序固定为 `stdin.end()` → grace → `SIGTERM` → term → `orphaned`；`runOnce` 超时同样只发 `SIGTERM`。孤儿状态保留在 health，并 best-effort 执行 `dws event stop <subscribe_id> --yes`。
 2. **unknown 语义**：发送超时、退出 0 无回执、无法分类的非零退出都映射为 `unknown`；上层禁止重发。缺 `idempotencyKey` 时不 spawn。
-3. **目标只认显式 ID**：订阅/发送路径不接受名称；`at-me` 全局唯一；`group` 订阅群内全部消息，mention 过滤在归一化/决策层；`open:<id>` 是本项目区分 `--user` 与 `--open-dingtalk-id` 的约定。
-4. **归一化保守**：消息 id/发送者/会话 id 任一缺失即 `malformed`；未知字段只输出名称；正文/发送者/id 永不进入调试摘要；空正文但有媒体时保留消息而非丢弃事实。
+3. **目标只认显式 ID**：订阅/发送路径不接受名称；`at-me` 全局唯一，其行 id 只作为消息 `targetId`（WS5 初始化为 `at-me`）；`group` 订阅群内全部消息，mention 过滤属于 WS3 策略层；`open:<id>` 是本项目区分 `--user` 与 `--open-dingtalk-id` 的约定。
+4. **归一化保守**：消息 id/发送者/会话 id 任一缺失即 `malformed`；未知字段只输出名称；正文/发送者/id 永不进入调试摘要；纯媒体事件以 `unsupported` + `detail=media-only` 跳过（v1 不回复），带文字说明的图文按文字处理。
 5. **supervisor 无重叠**：每目标一个进程；重启定时器或活动进程存在时拒绝二次 launch；退避 `1s → 2s → … → restartBackoffMaxSeconds`。
 6. **facade 无 Cordis 依赖**：`DingTalkChannel` 接受 `settingsProvider` 与 `logger`，`src/app` 可直接组合；`monitor.enabled=false` 或 `paused=true` 时不订阅。
-7. **dryRun 不发消息**：`advanced.dryRun` 时 facade 返回 `failed` 且不 spawn，避免演练模式产生外部消息。
+7. **dryRun 不发消息**：`advanced.dryRun` 时 facade 返回 `skipped` 且不 spawn；`skipped` 不是失败，上层不得改变 Outbound 状态或按失败重试。
 
 ## 4. 测试证据
 
 ```text
 pnpm install --frozen-lockfile   -> Done, exit 0
 pnpm typecheck                   -> tsc --noEmit, exit 0
-pnpm test                        -> 17 files, 208 tests passed (WS2: 8 files / 101 tests)
+pnpm test                        -> 18 files, 216 tests passed (WS2: 9 files / 109 tests)
 pnpm build                       -> lib/index.js, lib/index.d.ts, lib/client.js, exit 0
 node scripts/check-pack.mjs      -> pack check passed: 10 artifacts, icon 711 bytes
-pnpm format:check                -> 见下（仓库级被既有 docs/PROGRESS.md 阻塞）
+pnpm format:check                -> All matched files use Prettier code style!
 ```
 
 WS2 用例分布：
 
-| 文件                            | 数量 | 覆盖                                                                           |
-| ------------------------------- | ---- | ------------------------------------------------------------------------------ |
-| `channel-normalize.spec.ts`     | 22   | at/group/dm、self、broadcast、empty、媒体、坏行、别名、时间、调试摘要          |
-| `channel-targets.spec.ts`       | 11   | 事件键、群/单聊/open 参数、TTL、profile、去重、owner 解析                      |
-| `channel-process.spec.ts`       | 11   | 就绪行、行切分、stdin 停止、SIGTERM、orphaned、dry-run、超时、spawn 失败       |
-| `channel-supervisor.spec.ts`    | 9    | 双目标、顺序、sink 抛错、坏行、退避重启、无重叠、非法目标、stop 收敛、孤儿清理 |
-| `channel-send.spec.ts`          | 15   | 四种结果、幂等键、ledger、超时 unknown、回执分类                               |
-| `channel-discover-auth.spec.ts` | 16   | 发现容错/上限/去重、dry-run 校验、auth 降级与脱敏                              |
-| `channel-log.spec.ts`           | 9    | token/secret/query 脱敏、单行错误、截断                                        |
-| `channel-facade.spec.ts`        | 8    | paused/disabled 不订阅、无目标空闲、重复 start、dryRun send、facade 操作       |
+| 文件                            | 数量 | 覆盖                                                                                          |
+| ------------------------------- | ---- | --------------------------------------------------------------------------------------------- |
+| `channel-normalize.spec.ts`     | 22   | at/group/dm、self、broadcast、empty、纯媒体跳过、图文、坏行、别名、时间、调试摘要             |
+| `channel-targets.spec.ts`       | 11   | 事件键、群/单聊/open 参数、TTL、profile、去重、owner 无回退                                   |
+| `channel-process.spec.ts`       | 11   | 就绪行、行切分、stdin 停止、SIGTERM、orphaned、dry-run、超时、spawn 失败                      |
+| `channel-supervisor.spec.ts`    | 9    | 双目标、顺序、sink 抛错、坏行、退避重启、无重叠、非法目标、stop 收敛、孤儿清理、无 owner 拒绝 |
+| `channel-send.spec.ts`          | 15   | 四种结果、幂等键、ledger、超时 unknown、回执分类                                              |
+| `channel-discover-auth.spec.ts` | 16   | 发现容错/上限/去重、dry-run 校验、auth 降级、owner userId 与脱敏                              |
+| `channel-log.spec.ts`           | 9    | token/secret/query/JSON 脱敏、单行错误、截断                                                  |
+| `channel-facade.spec.ts`        | 8    | paused/disabled 不订阅、无目标空闲、重复 start、dryRun skipped、owner 拒绝                    |
+| `channel-review.spec.ts`        | 8    | owner userId 与脱敏、owner 拒绝启动、dryRun skipped、纯媒体、JSON 脱敏                        |
+
+### 4.1 Review round 1 修复（REQUEST_CHANGES）
+
+| 项   | 落点                                                                                                                                                                                      | 测试                                                                     |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| P0.1 | `AuthState.userId` 从 `auth status` 别名读取并只交给宿主；`DingTalkChannel.start` 与 `ChannelSupervisor.start` 在 enabled target 存在且 owner 为空时抛 `owner-unknown`；删除 at-me 行回退 | auth 3 条（返回值/别名/redact 后不落日志）、supervisor 1 条、facade 1 条 |
+| P0.2 | `SendResult` 增加 `skipped`；`advanced.dryRun` 时 `sendWithReceipt` 返回 `{result:'skipped'}`，不 spawn、不产生失败语义                                                                   | facade 1 条（skipped + ledger 不存在）                                   |
+| P0.3 | `normalize` 对纯媒体事件返回 `{skip:'unsupported', detail:'media-only'}`；有文字说明的图文仍按文字处理                                                                                    | normalize 2 条（纯媒体跳过、图文保留）                                   |
+| 决策 | group `mentionOnly` 归 WS3；at-me 行 id 作为 `targetId`；owner 不回退；PROGRESS.md 格式由整合方在 main 修复                                                                               | —                                                                        |
+
+review 同步：已 merge `main` `b69177d`（仅 `docs/PROGRESS.md` 格式修复），整仓 `pnpm format:check` 现为绿；review 修复提交为 `fix(channel): require owner identity and skip dry-run sends`、`test(channel): cover owner identity, skipped sends and media-only`、`docs: record ws2 review decisions`。
 
 ## 5. 风险与未验证项
 
@@ -97,12 +109,16 @@ WS2 用例分布：
 | ⑦    | 文档区分夹具/真机证据                  | 通过：009 全文标注 [F]/[H]/[P]/[T1]；006 标注 Windows 待验证                                             |
 | ⑧    | 依赖方向干净、无 `@deepseek-ai/*`      | 通过：`grep` 确认 `src/channel` 无该 import；只 import core 模型与 shared 设置                           |
 | ⑨    | Windows 可运行                         | 通过：cross-spawn、参数数组、UTF-8 `setEncoding`、`windowsHide`；本机 Windows 跑通全部门禁               |
-| ⑩    | 提交规范、工作区干净                   | 通过：6 个 Conventional Commits；提交后 `git status --porcelain` 为空                                    |
+| ⑩    | 提交规范、工作区干净                   | 通过：全部提交遵循 Conventional Commits；最终 `git status --porcelain` 为空                              |
 
-## 7. 需要决策的问题
+## 7. 已决事项与遗留
 
-1. **owner 身份来源**：settings 没有 `ownerUserId` 字段（WS5 契约已冻结，本工作流无权改）。目前由 facade 注入，缺省时回退到 `at-me` 目标的 id。建议 WS5/WS4 显式传入真实 userId，避免用户把占位 id 写进 at-me 行。
-2. **group 的 `mentionOnly` 语义**：当前订阅群内全部消息，由归一化输出真实 `addressed`，决策层按 `mentionOnly` 过滤。若希望通道层直接丢弃未 @ 的消息，需要新增 skip 原因（会改变 009 的五类 skip 契约）。
-3. **`at-me` 目标 id**：settings 行要求非空 id，但全局订阅不需要会话 id。当前把该 id 作为消息的 `targetId`。是否改为固定 `at-me` 并允许空 id，需要 WS5 决定。
-4. **dryRun 的发送语义**：`advanced.dryRun` 时 facade 返回 `failed`（不发、不重试）。若 WS5 希望区分“演练跳过”和“真正失败”，需要扩展 `SendResult` 或 `Outbound.status`。
-5. **仓库级 `format:check`**：`docs/PROGRESS.md` 在基线 `a7d68d6` 就已不符合 Prettier（用 `git show HEAD:docs/PROGRESS.md` 复现），本工作流按范围未改它。合并前需由整合方格式化该文件，否则整仓门禁无法通过。
+review round 1 已决定，不再需要额外决策：
+
+1. **owner 身份**：来源为 `probeAuth().userId`，由宿主注入；缺失时 `start` 抛 `owner-unknown` 并拒绝订阅，没有 at-me 行回退。
+2. **group `mentionOnly`**：通道如实输出 `addressed`，是否回复由 WS3 策略层决定；通道不丢弃未 @ 的群消息。
+3. **`at-me` 目标 id**：保留 `target.id` 作为消息 `targetId`；WS5 会把该行初始化为 `at-me`。
+4. **dryRun 发送**：`skipped`，不改变 Outbound 状态、不按失败重试。
+5. **`format:check`**：整合方已在 `main` `b69177d` 修复 `docs/PROGRESS.md`，本分支 merge 后整仓通过。
+
+遗留只有真机验证：§5 列出的 provisional 项需要在 T1–T2 逐项核对；不一致时先改 009 与测试，再改实现。

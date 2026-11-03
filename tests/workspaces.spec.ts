@@ -29,6 +29,7 @@ import {
   conversationWorkspaceDigest,
   conversationWorkspaceTitle,
   isSafeWorkspaceSegment,
+  isSameWorkspacePath,
 } from '../src/executor/workspace.ts'
 import type { Settings } from '../src/shared/settings.ts'
 import { makeSettings } from './fixtures/executor.ts'
@@ -135,6 +136,13 @@ describe('conversationWorkspace', () => {
     expect(() => conversationWorkspace('   ', 'dm:u1')).toThrow(ExecutorError)
     expect(() => conversationWorkspace('/srv/work\u0000spaces', 'dm:u1')).toThrow(ExecutorError)
     expect(() => conversationWorkspace('/srv/workspaces', '   ')).toThrow(ExecutorError)
+  })
+
+  it('compares workspace paths after resolving them', () => {
+    expect(isSameWorkspacePath('/srv/a', '/srv/a')).toBe(true)
+    expect(isSameWorkspacePath('/srv/a', '/srv/a/')).toBe(true)
+    expect(isSameWorkspacePath('/srv/a', '/srv/a/.')).toBe(true)
+    expect(isSameWorkspacePath('/srv/a', '/srv/b')).toBe(false)
   })
 
   it('recognizes safe segments on Windows and POSIX', () => {

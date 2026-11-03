@@ -15,6 +15,7 @@ import {
   DELIVERY_ID_PREFIX,
   DshTaskExecutor,
   MODEL_TURN_TIMEOUT_MS,
+  SessionModel,
   WORKER_PRESET,
   resolveTaskWorkspace,
   taskRequestId,
@@ -302,11 +303,12 @@ describe('session and workspace', () => {
       workspace: '/srv/projects/alpha',
       signal: new AbortController().signal,
     })
-    expect(calls).toBe(0)
+    expect(calls).toBe(1)
     expect(dirs).toEqual(['/srv/projects/alpha'])
     expect(host.ensured[0]?.workspace).toBe('/srv/projects/alpha')
     // An explicitly chosen directory is not one conversation workspace, so no
-    // conversation title is written onto its registry row.
+    // conversation title is written onto its registry row. The resolver is
+    // consulted only to compare the two paths, never to choose the directory.
     expect(host.ensured[0]?.workspaceTitle).toBeUndefined()
   })
 
@@ -337,6 +339,84 @@ describe('session and workspace', () => {
     })
     expect(dirs).toEqual([join('/home/owner', '.dsh-whale-chan', 'tasks', 'task-1')])
     expect(host.ensured[0]?.workspaceTitle).toBeUndefined()
+  })
+
+  it('keeps the conversation title when the approved default is that workspace', async () => {
+    const shared = '/srv/conversations/dm:u1'
+    const { host, executor, dirs } = harness({
+      workspaceFor: () => ({ path: shared, title: '钉钉 · AI工程师孵化中心' }),
+    })
+    const task = makeTask()
+    await executor.execute({
+      task,
+      approval: makeApproval(task),
+      settings: makeSettings(),
+      workspace: shared,
+      signal: new AbortController().signal,
+    })
+    expect(dirs).toEqual([shared])
+    expect(host.ensured[0]?.workspace).toBe(shared)
+    expect(host.ensured[0]?.workspaceTitle).toBe('钉钉 · AI工程师孵化中心')
+  })
+
+  it('recognizes the conversation workspace through a different path spelling', async () => {
+    const shared = '/srv/conversations/dm:u1'
+    const { host, executor } = harness({
+      workspaceFor: () => ({ path: shared, title: '钉钉 · AI工程师孵化中心' }),
+    })
+    const task = makeTask()
+    await executor.execute({
+      task,
+      approval: makeApproval(task),
+      settings: makeSettings(),
+      workspace: `${shared}/`,
+      signal: new AbortController().signal,
+    })
+    // The trailing separator must not make the approved path look like a
+    // different directory, or the shared record would lose its title.
+    expect(host.ensured[0]?.workspaceTitle).toBe('钉钉 · AI工程师孵化中心')
+  })
+
+  it('shares path and conversation title with the replier session', async () => {
+    const host = new FakeSessionHost()
+    const workspaceFor = (threadKey: string, title?: string): { path: string; title: string } => ({
+      path: `/srv/conversations/${threadKey}`,
+      title: `钉钉 · ${title ?? threadKey}`,
+    })
+    const signal = new AbortController().signal
+    const model = new SessionModel({
+      host,
+      threadKey: 'dm:u1',
+      title: '小明',
+      homeDir: '/home/owner',
+      workspaceFor,
+    })
+    await model.complete({ system: '你是助理。', messages: [{ role: 'user', content: '你好' }] }, signal)
+
+    const executor = new DshTaskExecutor({
+      host,
+      homeDir: '/home/owner',
+      workspaceFor: (task) => workspaceFor(task.threadKey, '小明'),
+      mkdir: async () => undefined,
+    })
+    const task = makeTask()
+    await executor.execute({
+      task,
+      approval: makeApproval(task),
+      settings: makeSettings(),
+      signal,
+    })
+
+    expect(host.ensured).toHaveLength(2)
+    const replier = host.ensured[0]
+    const worker = host.ensured[1]
+    expect(worker?.workspace).toBe(replier?.workspace)
+    expect(replier?.workspaceTitle).toBe('钉钉 · 小明')
+    expect(worker?.workspaceTitle).toBe('钉钉 · 小明')
+    // Session titles keep their own role wording; only the shared registry row
+    // carries the conversation title.
+    expect(replier?.title).toBe('钉钉 · 小明')
+    expect(worker?.title).toBe('任务 · 整理会议纪要')
   })
 })
 

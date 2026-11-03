@@ -38,6 +38,13 @@ export const USER_ERRORS = {
   notAwaitingApproval: ['refused', 'The task is not awaiting approval'],
   notApproved: ['refused', 'The task is not approved; no assignment may start'],
   notRunning: ['refused', 'The task is not running'],
+  /**
+   * Only a task that failed may be retried.
+   *
+   * A cancelled task is deliberately excluded: the owner ended it on purpose,
+   * and retrying it would silently overrule that decision.
+   */
+  notFailed: ['refused', 'Only a failed task can be retried'],
   notCancellable: ['refused', 'Only an awaiting, approved or running task can be cancelled'],
   assignmentMismatch: ['refused', 'The assignment does not own this task'],
   assignmentNotPending: ['refused', 'The assignment is not pending'],

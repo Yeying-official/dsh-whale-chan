@@ -223,6 +223,7 @@ bundle 在 `cordis.patch.yml` 里声明两个 `@deepseek-ai/dsh-agent-preset` �
 
 - **没有关闭会话的公开 API**：DSH 的 `ctx.agents` 只有 `get/list/roots/create/resume/register`，没有销毁入口。回复器「重建」因此是：取消旧会话当前回合 → 不再引用它 → 用同一身份再 `create`，由 DSH 另发一个 sessionId（执行器采纳返回值）。旧会话作为历史留在 DSH 里，不会消失。
 - 任务重试是**新会话**（会话 id 带派工后缀），上一次的结论只通过任务消息里的「上一轮结果（供参考）」传给 worker。
+- **任务结果回复只面向发起人**：群消息只含任务标题与摘要，按行剔除 `Route:`、`Aegis Reason Note:`、`会话：`、`Session:` 等内部行；会话 id 只留在任务结果、审计与面板，不进入 outbound 文本。
 - 模型路由只在会话首次创建时写入；之后主人在面板里改的模型优先，插件不会覆盖。
 - 执行器没有全局并发上限；`tasks.maxConcurrent` 由 WS5b 的 `launch` effect handler 执行（达到上限时该 effect 延迟 1 秒重试，不会启动第二个运行）。
 

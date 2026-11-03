@@ -19,15 +19,15 @@ $ tsc --noEmit
 
 $ pnpm test
  Test Files  58 passed (58)
-      Tests  695 passed (695)
+      Tests  697 passed (697)
 
 $ pnpm build
 ℹ [CJS] lib\client.js  222.76 kB │ gzip: 46.31 kB
 ℹ [CJS] 1 files, total: 222.76 kB
 ✔ Build complete
-ℹ [ESM] lib\index.js  321.03 kB │ gzip: 89.10 kB
+ℹ [ESM] lib\index.js  321.38 kB │ gzip: 89.29 kB
 ℹ [ESM] lib\index.d.ts    0.90 kB │ gzip:  0.43 kB
-ℹ [ESM] 2 files, total: 321.93 kB
+ℹ [ESM] 2 files, total: 322.28 kB
 ✔ Build complete
 
 $ pnpm format:check
@@ -43,14 +43,14 @@ $ git status --porcelain
 
 ## 2. 测试增量
 
-WS5b 自身新增 6 个 spec、68 条用例。合并 `main`（含 TurnTracker `05762fa`；WS2 + WS4 + WS6）后全量为 58 个 spec、**695** 条。
+WS5b 自身新增 6 个 spec、70 条用例。合并 `main`（含 TurnTracker `05762fa`；WS2 + WS4 + WS6）后全量为 58 个 spec、**697** 条。
 
 | 文件                             | 条数 | 覆盖                                                                                                                                                                                                                         |
 | -------------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `tests/core-outbound.spec.ts`    | 10   | `queueFollowup` 落库/事件/`at`；同键去重；线程不存在、目标 kind 不符、空文本/空键；sent 回执；unknown/failed/dropped 终态保护                                                                                                |
 | `tests/rate-counters.spec.ts`    | 11   | 窗口滚动、写入裁剪、跨 store 实例、gap、损坏 JSON 恢复；最近 outbound、连续回复清零、dm/group target、broadcast、20 条窗口                                                                                                   |
 | `tests/pipeline-chat.spec.ts`    | 18   | 自动回复端到端、重复投递不重复回复、无目标 defer；review/自动关闭/静默/限速/最小间隔；未 @/广播/回声；低置信/空回复；检索成功与降级；unknown/failed/skipped 发送                                                             |
-| `tests/pipeline-task.spec.ts`    | 7    | GET tasks 可见待批准、批准后 fake executor 执行/`assignmentEnded`/回帖文本与目标；未批准、取消后残留 launch、派工不符不执行；失败只 notice；DM 回帖目标                                                                      |
+| `tests/pipeline-task.spec.ts`    | 9    | GET tasks 可见待批准、批准后 fake executor 执行/`assignmentEnded`/回帖文本与目标；未批准、取消后残留 launch、派工不符不执行；失败只 notice；DM 回帖目标；内部行过滤/会话 id 不出口/空摘要回退                                |
 | `tests/runtime-pipeline.spec.ts` | 18   | 授权门（未登录/token 失效/无 owner）、模板失败、通道启动失败；暂停/恢复、targets 防抖、dws 重启、persona/models 重建；outbox 恢复与幂等；expire/probe pass；停机顺序、幂等、锁/db 释放；ownerNick 透传；会话式 persona reset |
 | `tests/health-view.spec.ts`      | 4    | channel 健康语义：monitoring disabled / paused / 无 enabled target 均 ok；有 enabled target 但 stopped 为 degraded；overall 不被 idle 拖成 degraded                                                                          |
 
@@ -62,7 +62,8 @@ WS5b 自身新增 6 个 spec、68 条用例。合并 `main`（含 TurnTracker `0
 - **unknown 绝不重发**：`send` 返回 unknown 后 Decision=`send_unknown`、Outbound=`unknown`，再跑一次 `effects.idle()` 通道仍只收到 1 条。
 - **review 不自动发送**：目标 `replyMode=review`、`autoReply=false`、静默时段、限速、最小间隔都只产生 `drafted`，`channel.sends` 为空。
 - **任务无批准绝不 launch**：待批准任务上的 launch 行不调用执行器；取消后残留 launch 同样不执行；payload assignmentId 不符也只写 notice。
-- **结果只回报成功**：failed 执行只写 `task_failed` notice，不产生 Outbound；succeeded 产生一条 `kind:'reply'` 的 follow-up，文本包含任务标题、摘要与会话 id。
+- **结果只回报成功**：failed 执行只写 `task_failed` notice，不产生 Outbound；succeeded 产生一条 `kind:'reply'` 的 follow-up，文本只含任务标题与面向发起人的摘要（内部 Route/Aegis/会话/Session 行被剔除，会话 id 不出口）。
+- **结果回复脱敏**：summary 同时含 `Route:`、`Aegis Reason Note:`、`会话：`、`Session:` 时，outbound 文本不含这些行，也不含 sessionId；全部行都是内部行时回退「这次没有文字汇报…」。
 - **效果可恢复**：崩溃窗口里留下的 pending follow-up 在 `resumeOutbox()` 后发送；重复 resume 不产生第二条。
 - **暂停/恢复无泄漏**：paused=true 后 `monitor.running=false` 且 `channel.stopCalls=1`；恢复后重新 start。
 - **停止顺序**：`channel:stop → executor:dispose → model:dispose`；`stop()` 两次返回同一 Promise；锁释放、数据库关闭。

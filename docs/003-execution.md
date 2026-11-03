@@ -189,8 +189,8 @@ Outbound(pending) ──► effects.enqueue('send', outboundId) ──► channe
 
 1. **批准门是双重的**：领域只给已批准任务建 `Assignment(pending)`；`launch` handler 在执行前再检查 `task.status === 'approved'`、`approval.status === 'approved'`、`approval.taskId === task.id`、`assignment.state === 'pending'` 且 `task.assignmentId` 指向它。任一不成立只写 `notice`，不创建会话。
 2. **成功才回帖**：`failed`/`timeout`/`cancelled` 只写 `notice`（v1 不进 DSH 收件箱、不发钉钉消息）；只有 `succeeded` 才 enqueue `finish`。
-3. **结果消息不绑定 Decision**：`Engine.queueFollowup` 创建独立 `Outbound`（`kind: 'reply'`），幂等键为 `task-finish:<taskId>:<assignmentId>`；模板为「任务「标题」已完成 + 摘要（最多 800 字）+ 会话 id」。目标从原线程推导：dm → `peerUserId`，group/at-me → 最近一条消息的 `conversationId`；`target.kind` 必须等于线程 kind。
-4. **会话 id 唯一来源**：执行器在 `assignmentStarted` 时绑定；`finish` 从 `onFinished` 的 `ExecutorResult.sessionId` 取值，任务 `result.sessionId` 只是冗余记录。
+3. **结果消息不绑定 Decision**：`Engine.queueFollowup` 创建独立 `Outbound`（`kind: 'reply'`），幂等键为 `task-finish:<taskId>:<assignmentId>`；模板为「任务「标题」已完成 + 面向发起人的摘要（最多 800 字）」。摘要按行剔除 `Route:`、`Aegis Reason Note:`、`会话：`、`Session:` 等内部行后再折叠空白；**会话 id 不进群回复**，只留在任务结果/审计与面板。目标从原线程推导：dm → `peerUserId`，group/at-me → 最近一条消息的 `conversationId`；`target.kind` 必须等于线程 kind。
+4. **会话 id 唯一来源**：执行器在 `assignmentStarted` 时绑定；`finish` 不再渲染 `ExecutorResult.sessionId`，该值仍由任务 `result.sessionId` 与派工记录保留，供面板/审计查询。
 5. **崩溃恢复**：`send` 只处理 `pending` 行；启动与通道恢复时把所有 `pending` Outbound 重新 enqueue。回复走 `replySent/replyUnknown/replyFailed`，任务结果走 `outboundSent/outboundUnknown/outboundFailed`，两者共用同一个 `send` handler。
 6. **并发**：`tasks.maxConcurrent` 由 `launch` handler 执行（`Later` 1 秒重试）；执行器本身只拒绝同一任务的第二次并发。
 

@@ -1,92 +1,116 @@
-/** WS0 overview: host connection state, build identity and state directory. */
-import { ApiError, type PollResult } from './api.ts'
-import { Badge, Button, Card, type BadgeTone } from './controls.tsx'
-import { usePanelData } from './provider.tsx'
-import type { StateView } from '../shared/models.ts'
-import type { T, WhaleChanKey } from './locale.ts'
+/** Panel shell: brand header, health badge, global refresh and the seven tabs. */
+import { useRef } from 'react'
+import { Badge, Button, type BadgeTone } from './controls.tsx'
+import { errorText } from './errors.ts'
+import { AuditPage } from './pages/audit.tsx'
+import { OverviewPage } from './pages/overview.tsx'
+import { PersonaPage } from './pages/persona.tsx'
+import { SettingsPage } from './pages/settings.tsx'
+import { TargetsPage } from './pages/targets.tsx'
+import { TasksPage } from './pages/tasks.tsx'
+import { ThreadsPage } from './pages/threads.tsx'
+import { usePanel } from './provider.tsx'
+import { TABS, type Tab } from './tabs.ts'
+import type { WhaleChanKey } from './locale.ts'
+import type { Health } from '../shared/models.ts'
 
-function timeText(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'medium' }).format(date)
-}
-
-function errorText(error: Error, t: T): string {
-  if (error instanceof ApiError) {
-    if (error.status === 0) return t('overview.errorOffline')
-    if (error.status >= 500) return t('overview.errorServer', { status: error.status })
-    if (error.status === 200) return t('overview.errorInvalid')
-    return t('overview.errorRequest', { status: error.status })
+function healthBadge(
+  health: { readonly data?: Health; readonly error?: Error; readonly loading: boolean },
+  t: ReturnType<typeof usePanel>['t'],
+): { readonly tone: BadgeTone; readonly label: string; readonly detail: string | undefined } {
+  if (health.data) {
+    const tone: BadgeTone =
+      health.data.status === 'ok' ? 'success' : health.data.status === 'degraded' ? 'warning' : 'error'
+    const key: WhaleChanKey =
+      health.data.status === 'ok' ? 'health.ok' : health.data.status === 'degraded' ? 'health.degraded' : 'health.error'
+    return { tone, label: t(key), detail: undefined }
   }
-  return t('overview.errorInvalid')
+  if (health.error) return { tone: 'error', label: t('health.unknown'), detail: errorText(health.error, t) }
+  return { tone: 'neutral', label: health.loading ? t('health.loading') : t('health.unknown'), detail: undefined }
 }
 
-function status(
-  state: StateView | undefined,
-  error: Error | undefined,
-  loading: boolean,
-): { readonly tone: BadgeTone; readonly key: WhaleChanKey } {
-  if (error) return { tone: 'error', key: 'overview.offline' }
-  if (state) return { tone: 'success', key: 'overview.online' }
-  return { tone: loading ? 'neutral' : 'warning', key: 'overview.connecting' }
+function Page({ tab }: { tab: Tab }) {
+  switch (tab) {
+    case 'overview':
+      return <OverviewPage />
+    case 'threads':
+      return <ThreadsPage />
+    case 'tasks':
+      return <TasksPage />
+    case 'targets':
+      return <TargetsPage />
+    case 'persona':
+      return <PersonaPage />
+    case 'settings':
+      return <SettingsPage />
+    case 'audit':
+      return <AuditPage />
+  }
 }
 
-export function App({ t }: { t: T }) {
-  const data: PollResult<StateView> & { state: StateView | undefined } = usePanelData()
-  const { state, error, loading, reload } = data
-  const current = status(state, error, loading)
+export function App() {
+  const { t, tab, openTab, refresh, health, refreshToken } = usePanel()
+  const tabs = useRef(new Map<Tab, HTMLButtonElement>())
+  const current = healthBadge(health, t)
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const index = TABS.indexOf(tab)
+    let next: Tab | undefined
+    if (event.key === 'ArrowRight') next = TABS[(index + 1) % TABS.length]
+    else if (event.key === 'ArrowLeft') next = TABS[(index - 1 + TABS.length) % TABS.length]
+    else if (event.key === 'Home') next = TABS[0]
+    else if (event.key === 'End') next = TABS[TABS.length - 1]
+    if (!next) return
+    event.preventDefault()
+    openTab(next)
+    tabs.current.get(next)?.focus()
+  }
 
   return (
-    <main className="wc-panel" aria-labelledby="wc-title">
-      <header className="wc-hero">
-        <div>
-          <h1 id="wc-title">{t('overview.title')}</h1>
-          <p>{t('overview.subtitle')}</p>
+    <div className="wc-panel">
+      <header className="wc-shell-head">
+        <div className="wc-shell-bar">
+          <div className="wc-brand">
+            <h1 id="wc-title">{t('panel.label')}</h1>
+            <span className="wc-brand-sub">{t('overview.title')}</span>
+          </div>
+          <div className="wc-shell-actions">
+            <div className="wc-health" aria-live="polite" aria-label={t('aria.health')}>
+              <span className="wc-status-label">{t('health.label')}</span>
+              <Badge tone={current.tone}>{current.label}</Badge>
+              {current.detail ? <span className="wc-health-detail">{current.detail}</span> : null}
+            </div>
+            <Button size="sm" onClick={refresh} aria-label={t('aria.refresh')}>
+              {t('common.refresh')}
+            </Button>
+          </div>
         </div>
-        <div className="wc-status" aria-live="polite">
-          <span className="wc-status-label">{t('overview.connection')}</span>
-          <Badge tone={current.tone}>{t(current.key)}</Badge>
+        <div className="wc-tabs" role="tablist" aria-label={t('tabs.label')} onKeyDown={onKeyDown}>
+          {TABS.map((item) => (
+            <button
+              key={item}
+              ref={(element) => {
+                if (element) tabs.current.set(item, element)
+                else tabs.current.delete(item)
+              }}
+              type="button"
+              role="tab"
+              id={`wc-tab-${item}`}
+              className="wc-tab"
+              aria-selected={tab === item}
+              aria-controls="wc-tabpanel"
+              tabIndex={tab === item ? 0 : -1}
+              onClick={() => openTab(item)}
+            >
+              {t(`tabs.${item}`)}
+            </button>
+          ))}
         </div>
       </header>
-
-      <Card
-        title={t('overview.connection')}
-        actions={
-          <Button size="sm" onClick={reload} disabled={loading}>
-            {t('overview.retry')}
-          </Button>
-        }
-      >
-        {error ? (
-          <div className="wc-error" role="alert">
-            <strong>{t('overview.errorTitle')}</strong>
-            <p>{errorText(error, t)}</p>
-          </div>
-        ) : null}
-
-        {state ? (
-          <dl className="wc-facts">
-            <div>
-              <dt>{t('overview.version')}</dt>
-              <dd>{state.version}</dd>
-            </div>
-            <div>
-              <dt>{t('overview.stateDir')}</dt>
-              <dd className="wc-mono">{state.stateDir}</dd>
-            </div>
-            <div>
-              <dt>{t('overview.startedAt')}</dt>
-              <dd>{timeText(state.startedAt)}</dd>
-            </div>
-          </dl>
-        ) : !error ? (
-          <p className="wc-muted" role="status">
-            {t('overview.connecting')}
-          </p>
-        ) : null}
-      </Card>
-
-      <p className="wc-placeholder">{t('overview.placeholder')}</p>
-    </main>
+      <main id="wc-tabpanel" role="tabpanel" aria-labelledby={`wc-tab-${tab}`} className="wc-tabpanel" key={tab}>
+        <Page tab={tab} />
+      </main>
+      <span className="wc-visually-hidden" data-refresh-token={refreshToken} />
+    </div>
   )
 }

@@ -73,31 +73,56 @@ DSH 宿主进程不保证继承交互 shell 的 `PATH`。Windows 上 npm 全局�
 
 ### 4.1 字段别名与证据
 
-| 归一化字段     | 接受的别名（按优先级）                                                       | 证据 |
-| -------------- | ---------------------------------------------------------------------------- | ---- |
-| 消息 id        | `msgId` `messageId` `msg_id` `message_id` `eventId` `event_id`               | [F]  |
-| 会话 id        | `conversationId` `openConversationId` `conversation_id` `chatId` `chat_id`   | [F]  |
-| 会话类型       | `conversationType` `conversation_type` `chatType`                            | [P]  |
-| 发送者 userId  | `senderStaffId` `senderId` `userId` `sender_user_id` `sender_userid`         | [P]  |
-| 发送者昵称     | `senderNick` `senderName` `sender_name` `nick`                               | [P]  |
-| 发送者 open id | `senderOpenDingTalkId` `sender_open_dingtalk_id` `openDingTalkId`            | [P]  |
-| 正文           | `text` `content` `messageText` `body` `msgContent`；支持 `text.content` 嵌套 | [F]  |
-| 发送时间       | `createAt` `createTime` `timestamp` `createdAt` `msgTimestamp`               | [P]  |
-| 提及列表       | `atUsers` `mentions` `atUsersList` `mentionedUsers` `at_users`               | [F]  |
-| 会话标题       | `conversationTitle` `chatName` `groupName` `title` `conversation_title`      | [P]  |
-| 消息类型       | `eventType` `msgtype` `msgType` `messageType` `event_type`                   | [P]  |
+| 归一化字段     | 接受的别名（按优先级）                                                        | 证据   |
+| -------------- | ----------------------------------------------------------------------------- | ------ |
+| 消息 id        | `message_id`（首选）`msgId` `messageId` `msg_id`；`eventId`/`event_id` 仅兜底 | [F] T3 |
+| 会话 id        | `conversation_id` `conversationId` `openConversationId` `chatId` `chat_id`    | [F] T3 |
+| 会话类型       | `conversationType` `conversation_type` `chatType`；缺失时按目标 kind 推断     | [F] T3 |
+| 发送者 userId  | `sender_staff_id`/`senderStaffId` 优先，其次 `sender_open_dingtalk_id`        | [F] T3 |
+| 发送者昵称     | `senderNick` `senderName` `sender_name` `nick`；T3 群事件用 `sender`          | [F] T3 |
+| 发送者 open id | `sender_open_dingtalk_id` `senderOpenDingTalkId` `openDingTalkId`             | [F] T3 |
+| 正文           | `content`（字符串）`text` `messageText` `body` `msgContent`；支持嵌套         | [F] T3 |
+| 发送时间       | `event_time` → `timestamp`（epoch ms）→ `create_time`（本地字符串）           | [F] T3 |
+| 提及列表       | 从正文 `@([^\s@]{1,32})` 解析；兼容 `atUsers`/`mentions` 结构化字段           | [F] T3 |
+| 会话标题       | `conversation_title` 等；缺失时回退到 `context.target.label`                  | [P]    |
+| 消息类型       | `eventType` `msgtype` `msgType` `messageType` `event_type`                    | [P]    |
 
 时间支持三种写法：epoch 秒（≤10 位）、epoch 毫秒、可解析日期字符串；无法解析时回退到本机接收时间。正文超过 20 000 字符截断（`DEFAULT_MAX_TEXT_CHARS`）。
+
+**T3 实测的群事件 flatten 结构**（占位符）：
+
+```json
+{
+  "type": "user_im_message_receive_group",
+  "event_id": "<event-id>",
+  "timestamp": 1793685862067,
+  "subscribe_id": "<sub-id>",
+  "message_id": "<msg-id>",
+  "conversation_id": "<cid>",
+  "sender": "<发送者昵称>",
+  "sender_open_dingtalk_id": "<open-id>",
+  "content": "@<主人昵称> T3 抓包",
+  "create_time": "2026-11-03 14:04:17",
+  "event_time": 1793685857502
+}
+```
+
+- `message_id` 才是消息 id；`event_id` 是事件 id，仅当 `message_id` 缺失时兜底，避免把同一事件重投当成新消息。
+- 群事件**没有** `senderStaffId`、`conversationType`、`atUsers`、`title`、`mentions`。`sender` 是昵称字符串；`sender_open_dingtalk_id` 是唯一发送者标识，作为 `sender.userId`，并同值写入 `openDingTalkId`。**群事件白名单必须按 openDingtalkId 配置**。
+- `content` 是纯文本，@ 只出现在文本里，因此 `addressed` 按 `@<ownerNick>` / `@我` 判断；`ownerNick` 来自 `auth status` 的 `user_name`/`userName`（`probeAuth().userName`）。没有 ownerNick 时群消息一律不视为 addressed。
+- `event_time`/`timestamp` 是 epoch ms；`create_time` 是无时区本地字符串，只在缺少 epoch 字段时按宿主本地时区解析。
+- 会话类型缺失时按目标 kind 推断（`group`/`at-me` → `group`，`dm` → `direct`），不判 malformed。
+- 事件没有标题时用设置里的目标名称（`context.target.label`）作为 `title`，避免 thread 标题退化为会话 id。
 
 `conversationType` 值映射 **[P]**：`direct`/`p2p`/`single`/`1`/`one-to-one` → `direct`；`group`/`2`/`chat`/`groupchat` → `group`；缺失时按目标 kind 推断（`dm` → direct，其余 group）。
 
 ### 4.2 `addressed` 判定 **[F]**
 
-| 目标 kind | 规则                                                                             |
-| --------- | -------------------------------------------------------------------------------- |
-| `at-me`   | 恒为 `true`（事件键本身保证被 @）                                                |
-| `dm`      | 恒为 `true`                                                                      |
-| `group`   | `atUsers`/`mentions` 含本人 userId 或昵称，或正文含 `@我` / `@<本人昵称>` 时为真 |
+| 目标 kind | 规则                                                                            |
+| --------- | ------------------------------------------------------------------------------- |
+| `at-me`   | 恒为 `true`（事件键本身保证被 @）                                               |
+| `dm`      | 恒为 `true`                                                                     |
+| `group`   | 正文含 `@<ownerNick>` 或 `@我`；`ownerNick` 未知时恒为 `false`（T3 无 atUsers） |
 
 `@所有人` 广播：当 `settings.reply.ignoreBroadcast` 为真且没有直接 @ 本人时，整条消息跳过（skip `broadcast`）；若同时直接 @ 了本人，仍按 `addressed: true` 保留。
 
@@ -105,14 +130,14 @@ DSH 宿主进程不保证继承交互 shell 的 `PATH`。Windows 上 npm 全局�
 
 ### 4.3 跳过原因（固定顺序）**[F]**
 
-| 顺序 | skip          | 条件                                                                  |
-| ---- | ------------- | --------------------------------------------------------------------- |
-| 1    | `unsupported` | 撤回/系统/群成员变化/已读/reaction 等类型，或带 `recallAt`/`isRecall` |
-| 2    | `malformed`   | 非对象、缺消息 id、缺发送者、群消息缺会话 id                          |
-| 3    | `self`        | 发送者就是本人                                                        |
-| 4    | `broadcast`   | 纯广播且未直接 @ 本人，且 `ignoreBroadcast` 打开                      |
-| 5    | `unsupported` | 正文为空但检测到图片/文件/语音/视频等媒体迹象（`detail=media-only`）  |
-| 6    | `empty`       | 正文为空**且**没有任何媒体迹象                                        |
+| 顺序 | skip          | 条件                                                                                 |
+| ---- | ------------- | ------------------------------------------------------------------------------------ |
+| 1    | `unsupported` | 撤回/系统/群成员变化/已读/reaction 等类型，或带 `recallAt`/`isRecall`                |
+| 2    | `malformed`   | 非对象、缺消息 id、缺发送者、群消息缺会话 id                                         |
+| 3    | `self`        | 发送者 open id/userId 命中 ownerUserId，或昵称等于 ownerNick（T3 无 staffId 时兜底） |
+| 4    | `broadcast`   | 纯广播且未直接 @ 本人，且 `ignoreBroadcast` 打开                                     |
+| 5    | `unsupported` | 正文为空但检测到图片/文件/语音/视频等媒体迹象（`detail=media-only`）                 |
+| 6    | `empty`       | 正文为空**且**没有任何媒体迹象                                                       |
 
 纯媒体事件在 v1 **不回复**：核心 `InboundMessage` 没有附件字段，回复一张没有说明的图片也没有意义，因此以 `unsupported` + `detail=media-only` 跳过；带文字说明的图文仍按文字处理。
 
@@ -221,7 +246,7 @@ dws chat +chat-list --types p2p --page-size 50 --format json
 以下行为/字段在实现中已被夹具覆盖，但**尚未在真机确认**；T1–T2 验证时按顺序核对，任何不一致都必须先改文档与测试再改实现：
 
 1. `user_im_message_receive_*` 三个事件键在登录态下的实际可用性（[H] 来自 help）。
-2. NDJSON 原始字段名：`senderStaffId` 是否总存在、`conversationType` 的取值集合、`atUsers` 的元素结构（字符串 vs 对象）、`createAt` 的单位、会话标题字段名。
+2. NDJSON 字段名：群 flatten 的真实结构已由 T3 证实（见 §4.1）；其它事件类型（`at`/`o2o`）、单聊的 `sender_staff_id` 是否存在、`conversationType` 的显式取值集合、`create_time` 在其它时区的表现仍待补充。
 3. `+chat-list --types p2p` 的响应结构与分页语义；`+chat-search` 的 `--format json` 是否被接受。
 4. `auth status --format json` 的字段名、`expires_at` 格式与账号 id 字段（`user_id`/`userId`/`staff_id` 等别名）。
 5. `+messages-send` 的成功回执字段已由 T2 证实为 `openMessageId` + `deliveryStatus` + `idempotencyKey`；其他失败码的分类与 `--wait-delivery` 的边界行为仍待补充。

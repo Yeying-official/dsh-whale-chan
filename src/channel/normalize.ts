@@ -39,14 +39,35 @@ export const DEFAULT_MAX_TEXT_CHARS = 20_000
 /** Shallow envelopes dws may wrap the flattened fields in. */
 const WRAPPERS = ['data', 'event', 'message', 'payload'] as const
 
-const MSG_ID_FIELDS = ['msgId', 'messageId', 'msg_id', 'message_id', 'eventId', 'event_id'] as const
-const CONVERSATION_FIELDS = ['conversationId', 'openConversationId', 'conversation_id', 'chatId', 'chat_id'] as const
+// T3 captured the flattened shape: all snake_case, and `event_id` is the event
+// id, not the message id. `message_id` must win when both are present.
+const MSG_ID_FIELDS = ['message_id', 'msgId', 'messageId', 'msg_id', 'eventId', 'event_id'] as const
+const CONVERSATION_FIELDS = ['conversation_id', 'conversationId', 'openConversationId', 'chatId', 'chat_id'] as const
 const CONVERSATION_TYPE_FIELDS = ['conversationType', 'conversation_type', 'chatType'] as const
-const SENDER_FIELDS = ['senderStaffId', 'senderId', 'userId', 'sender_user_id', 'sender_userid'] as const
-const SENDER_NICK_FIELDS = ['senderNick', 'senderName', 'sender_name', 'nick'] as const
-const SENDER_OPEN_FIELDS = ['senderOpenDingTalkId', 'sender_open_dingtalk_id', 'openDingTalkId'] as const
+// Group flatten carries no staff id; `sender_open_dingtalk_id` is the only
+// sender identity there, so it is the fallback rather than a separate field.
+const SENDER_STAFF_FIELDS = [
+  'sender_staff_id',
+  'senderStaffId',
+  'senderId',
+  'sender_id',
+  'userId',
+  'sender_user_id',
+  'sender_userid',
+] as const
+const SENDER_NICK_FIELDS = ['senderNick', 'senderName', 'sender_name', 'nick', 'sender'] as const
+const SENDER_OPEN_FIELDS = ['sender_open_dingtalk_id', 'senderOpenDingTalkId', 'openDingTalkId'] as const
 const TEXT_FIELDS = ['text', 'content', 'messageText', 'body', 'msgContent'] as const
-const TIME_FIELDS = ['createAt', 'createTime', 'timestamp', 'createdAt', 'msgTimestamp'] as const
+const TIME_FIELDS = [
+  'event_time',
+  'eventTime',
+  'timestamp',
+  'create_time',
+  'createTime',
+  'createAt',
+  'createdAt',
+  'msgTimestamp',
+] as const
 const MENTION_FIELDS = ['atUsers', 'mentions', 'atUsersList', 'mentionedUsers', 'at_users'] as const
 const TITLE_FIELDS = ['conversationTitle', 'chatName', 'groupName', 'title', 'conversation_title'] as const
 const MEDIA_FIELDS = [
@@ -178,6 +199,16 @@ function mentionTokens(value: unknown): string[] {
   return tokens
 }
 
+/** Mentions in the flattened shape exist only inside the plain-text body. */
+function mentionsFromText(text: string): string[] {
+  const tokens: string[] = []
+  for (const match of text.matchAll(/@([^\s@]{1,32})/g)) {
+    const token = match[1]
+    if (token !== undefined && token.trim() !== '') tokens.push(token.trim())
+  }
+  return tokens
+}
+
 function isBroadcastToken(token: string): boolean {
   const normalized = token.trim().toLowerCase().replace(/^@/, '')
   return normalized === 'all' || normalized === 'everyone' || normalized === '所有人' || token.includes('所有人')
@@ -213,40 +244,46 @@ export function normalizeEvent(raw: unknown, context: NormalizeContext): Normali
   const msgId = readScalar(raw, MSG_ID_FIELDS)
   if (!msgId) return { skip: 'malformed', detail: 'missing-msg-id' }
 
-  const senderUserId = readScalar(raw, SENDER_FIELDS)
+  const senderOpenId = readScalar(raw, SENDER_OPEN_FIELDS)
+  const senderUserId = readScalar(raw, SENDER_STAFF_FIELDS) ?? senderOpenId
   if (!senderUserId) return { skip: 'malformed', detail: 'missing-sender' }
   const senderNick = readScalar(raw, SENDER_NICK_FIELDS) ?? ''
-  const senderOpenId = readScalar(raw, SENDER_OPEN_FIELDS)
 
   const conversationField = readScalar(raw, CONVERSATION_FIELDS)
-  const direct = toConversationType(readScalar(raw, CONVERSATION_TYPE_FIELDS)) ?? undefined
-  const conversationType = direct ?? (context.target.kind === 'dm' ? 'direct' : 'group')
+  const declaredType = toConversationType(readScalar(raw, CONVERSATION_TYPE_FIELDS))
+  // The flattened event has no conversationType; the subscribed target decides.
+  const conversationType = declaredType ?? (context.target.kind === 'dm' ? 'direct' : 'group')
   const conversationId = conversationField ?? (conversationType === 'direct' ? senderUserId : undefined)
   if (!conversationId) return { skip: 'malformed', detail: 'missing-conversation' }
 
-  if (context.ownerUserId && senderUserId === context.ownerUserId) {
-    return { skip: 'self', detail: 'sender-is-owner' }
-  }
+  // Group events do not carry the owner's staff id, so a matching open id is the
+  // primary self-check; a matching display name is the second signal.
+  const selfById =
+    context.ownerUserId !== '' && (senderUserId === context.ownerUserId || senderOpenId === context.ownerUserId)
+  const ownerNick = context.ownerNick?.trim()
+  const selfByNick = ownerNick !== undefined && ownerNick !== '' && senderNick === ownerNick
+  if (selfById || selfByNick) return { skip: 'self', detail: 'sender-is-owner' }
 
   const rawText = readText(search(raw, TEXT_FIELDS))
   const text = rawText ?? ''
   const media = hasMedia(raw, readScalar(raw, ['msgtype', 'msgType', 'messageType'])?.toLowerCase())
-  const mentions = [...new Set(mentionTokens(search(raw, MENTION_FIELDS)))]
+  const structuredMentions = mentionTokens(search(raw, MENTION_FIELDS))
+  const textMentions = mentionsFromText(text)
+  const mentions = [...new Set([...structuredMentions, ...textMentions])]
+
+  // Group addressing is text-only: the flattened shape has no atUsers, and a
+  // bare '@' is not proof. Without the owner's display name a group message is
+  // never addressed.
+  let addressed: boolean
+  if (context.target.kind === 'at-me' || context.target.kind === 'dm') {
+    addressed = true
+  } else {
+    addressed = ownerNick !== undefined && ownerNick !== '' && (text.includes(`@${ownerNick}`) || text.includes('@我'))
+  }
 
   const broadcastMention = mentions.some(isBroadcastToken) || text.includes('@所有人')
-  const ownerMentioned =
-    (context.ownerUserId !== '' && mentions.includes(context.ownerUserId)) ||
-    (context.ownerNick !== undefined && context.ownerNick !== '' && mentions.includes(context.ownerNick))
-  const ownerTextMentioned =
-    text.includes('@我') ||
-    (context.ownerNick !== undefined && context.ownerNick !== '' && text.includes(`@${context.ownerNick}`))
-
-  let addressed: boolean
-  if (context.target.kind === 'at-me' || context.target.kind === 'dm') addressed = true
-  else addressed = ownerMentioned || ownerTextMentioned
-
   const ignoreBroadcast = context.ignoreBroadcast !== false
-  if (broadcastMention && !ownerMentioned && !ownerTextMentioned && ignoreBroadcast) {
+  if (broadcastMention && !addressed && ignoreBroadcast) {
     return { skip: 'broadcast', detail: 'broadcast-mention' }
   }
 
@@ -261,7 +298,9 @@ export function normalizeEvent(raw: unknown, context: NormalizeContext): Normali
   const receivedAt = now.toISOString()
   const maxTextChars = context.maxTextChars ?? DEFAULT_MAX_TEXT_CHARS
   const boundedText = text.length > maxTextChars ? text.slice(0, maxTextChars) : text
-  const title = readScalar(raw, TITLE_FIELDS)
+  // The flattened event carries no title; the configured target label keeps the
+  // thread named after the group instead of falling back to its id.
+  const title = readScalar(raw, TITLE_FIELDS) ?? context.target.label?.trim()
   const at = toIsoTime(search(raw, TIME_FIELDS)) ?? receivedAt
   const threadKey = conversationType === 'direct' ? `dm:${senderUserId}` : `group:${conversationId}`
 

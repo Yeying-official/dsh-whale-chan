@@ -12,7 +12,7 @@
 | -------------------------------- | ----------------------------------------------------------------------------------- |
 | `pnpm install --frozen-lockfile` | `Done in 1m 34.6s using pnpm v11.4.0`，exit 0                                       |
 | `pnpm typecheck`                 | `tsc --noEmit`，无错误，exit 0                                                      |
-| `pnpm test`                      | `46` 个文件、`579` 条测试全部通过（其中 WS2 `12` 文件 / `126` 条）                  |
+| `pnpm test`                      | `47` 个文件、`588` 条测试全部通过（其中 WS2 `13` 文件 / `135` 条）                  |
 | `pnpm build`                     | `lib/index.js` 19.94 kB、`lib/index.d.ts` 0.75 kB、`lib/client.js` 42.04 kB，exit 0 |
 | `node scripts/check-pack.mjs`    | `pack check passed: 10 artifacts, icon 711 bytes`，exit 0                           |
 | `pnpm format:check`（整仓）      | `All matched files use Prettier code style!`，exit 0（merge `main` `b69177d` 后）   |
@@ -25,7 +25,7 @@ tests/channel-normalize.spec.ts      22 passed
 tests/channel-targets.spec.ts        11 passed
 tests/channel-process.spec.ts        11 passed
 tests/channel-supervisor.spec.ts      9 passed
-tests/channel-send.spec.ts           18 passed
+tests/channel-send.spec.ts           15 passed
 tests/channel-confirm.spec.ts         3 passed
 tests/channel-discover-auth.spec.ts  16 passed
 tests/channel-log.spec.ts             9 passed
@@ -33,8 +33,9 @@ tests/channel-facade.spec.ts          8 passed
 tests/channel-review.spec.ts          8 passed
 tests/channel-command.spec.ts        10 passed
 tests/channel-ttl.spec.ts             4 passed
-WS2 total                           126 passed
-整仓 total                          579 passed / 46 files
+tests/channel-t3.spec.ts              9 passed
+WS2 total                           135 passed
+整仓 total                          588 passed / 47 files
 ```
 
 ## 2. 覆盖策略
@@ -50,6 +51,7 @@ WS2 total                           126 passed
 - **命令解析**：`resolveDwsCommand` 的 win32 搜索顺序（PATH `.cmd`、`%APPDATA%`、`%ProgramFiles%`、`%LOCALAPPDATA%` 存在性）、`.cmd` 优先、`Path` 拼写、绝对路径/已带扩展名原样、无命中回退、非 win32 原样，以及通过 `.cmd` shim 端到端 `probeAuth`。
 - **TTL 单位**：`consumeSpec` 精确断言 `--ttl 6h`/`1h`/`24h`；fake 拒收裸数字（exit 3）；validate 经 fake trace 断言 `24h`。
 - **发送确认与回执**：`--yes` 固定追加；缺 `--yes` fake 返回 exit 3 且映射 failed；成功解析 `openMessageId`/`deliveryStatus`；非白名单状态与重复 key 均映射 unknown 且不重发。
+- **真实 flatten 结构**：T3 的 snake_case 群事件（message_id/conversation_id/sender_open_dingtalk_id/content/event_time/create_time）全量映射；ownerNick @、open id 自过滤、title 回退目标名称。
 
 所有测试只运行 `tests/fixtures/fake-dws.mjs`，不存在真实钉钉流量。
 

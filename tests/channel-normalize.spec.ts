@@ -59,15 +59,21 @@ describe('normalizeEvent: kinds and addressing', () => {
     expect(message.addressed).toBe(false)
   })
 
-  it('treats a literal @我 in a group text as addressed', () => {
-    const message = asMessage(normalize({ ...atEvent, text: '@我 帮忙看一下', atUsers: [] }, groupTarget))
+  it('treats a literal @我 in a group text as addressed when the owner nick is known', () => {
+    const message = asMessage(
+      normalize({ ...atEvent, text: '@我 帮忙看一下', atUsers: [] }, groupTarget, { ownerNick: '鲸鱼酱' }),
+    )
     expect(message.addressed).toBe(true)
   })
 
-  it('matches the owner when atUsers carries objects instead of strings', () => {
-    const message = asMessage(normalize({ ...atEvent, atUsers: [{ userId: 'u-owner', name: '主人' }] }, groupTarget))
+  it('keeps structured atUsers as mentions and still addresses by text', () => {
+    const message = asMessage(
+      normalize({ ...atEvent, text: '@鲸鱼酱 帮我', atUsers: [{ userId: 'u-owner', name: '主人' }] }, groupTarget, {
+        ownerNick: '鲸鱼酱',
+      }),
+    )
     expect(message.addressed).toBe(true)
-    expect(message.mentions).toEqual(['u-owner'])
+    expect(message.mentions).toContain('u-owner')
   })
 
   it('always addresses a one-to-one message and keys its thread by peer', () => {
@@ -119,12 +125,14 @@ describe('normalizeEvent: skips', () => {
       }),
     )
     expect(message.addressed).toBe(false)
-    expect(message.mentions).toEqual(['@all'])
+    expect(message.mentions).toEqual(['@all', '所有人'])
   })
 
   it('keeps a broadcast that also mentions the owner directly', () => {
     const message = asMessage(
-      normalize({ ...atEvent, text: '@所有人 @鲸鱼酱 你看', atUsers: ['@all', 'u-owner'] }, groupTarget),
+      normalize({ ...atEvent, text: '@所有人 @鲸鱼酱 你看', atUsers: ['@all', 'u-owner'] }, groupTarget, {
+        ownerNick: '鲸鱼酱',
+      }),
     )
     expect(message.addressed).toBe(true)
   })

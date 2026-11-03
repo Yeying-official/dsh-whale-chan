@@ -19,19 +19,20 @@ main(whale-chan)
 - 页签顺序固定：概览、会话、任务、目标、人设、设置、审计。
 - 当前页签写入 `localStorage["whale-chan.tab"]`，同时镜像到 URL hash（`#tasks`）；启动时 **hash 优先**，其次持久化值，最后概览。页签切换用 `history.replaceState`，不产生额外历史记录。
 - 刷新按钮重建当前页签轮询并重新拉取健康；切换页签会卸载旧页签，未保存草稿随组件卸载丢弃（同一页签内切换设置 block 不丢）。
-- 响应式：≥900px 时概览/人设/目标使用两栏或表单+预览栅格，窄屏单列；表格容器横向滚动；页签条横向滚动；`.wc-tabpanel` 独立 `overflow:auto`，不撑破侧栏。
+- 响应式：≥900px 时概览/人设/目标使用两栏或表单+预览栅格，窄屏单列；表格容器横向滚动；`.wc-tabpanel` 独立 `overflow:auto`，不撑破侧栏。
+- 页签条使用不透明面板底色（`--dsw-alias-bg-base`）而不是透明叠加，隐藏滚动条但保留 `overflow-x:auto`，窄屏可横向滚动；焦点/激活态用内嵌描边，不会被滚动容器裁切。桌面壁纸/装饰浮层可能悬浮在页面最上层（例如拉绳挂饰盖住最右侧页签），此时可拖动装饰、用键盘 ←/→ 或概览的快捷入口进入被遮挡的页签。
 
 ## 2. 七个页签与数据来源
 
-| 页签 | 视图                                                                         | 路由（全部经 `apiUrl`）                                                                                                                                |
-| ---- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 概览 | 监控开关、待批准/运行中/会话/启用目标计数、健康检查、最近 5 条审计、快捷入口 | `GET overview`（5s）、`GET health`（壳层 5s）、`GET tasks?status=running&limit=100`、`GET audit?limit=5`、`POST monitor/pause`                         |
-| 会话 | 只读会话列表 → 消息详情；加载更早消息                                        | `GET threads?offset&limit=20`、`GET threads/:key?before&limit=50`                                                                                      |
-| 任务 | 状态筛选、任务详情、审批与动作弹窗                                           | `GET tasks?status&offset&limit=20`、`GET tasks/:id`、`POST tasks/:id/{approve,reject,cancel,retry}`、`GET settings`（仅取 `tasks.workspaceRoot` 提示） |
-| 目标 | 目标表编辑、发现、校验、逐块保存                                             | `GET targets`、`GET settings`（取 `targets` 的 revision）、`POST targets/discover`、`POST targets/validate`、`PUT settings/targets`                    |
-| 人设 | 注册表驱动的表单 + 本地实时预览                                              | `GET persona`、`PUT settings/persona`                                                                                                                  |
-| 设置 | monitor/reply/research/tasks/models/dws/advanced 七个 block 的注册表表单     | `GET settings`、`PUT settings/:block`                                                                                                                  |
-| 审计 | 时间/类型/摘要表格，加载更多                                                 | `GET audit?offset&limit=50`                                                                                                                            |
+| 页签 | 视图                                                                                   | 路由（全部经 `apiUrl`）                                                                                                                                |
+| ---- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 概览 | 监控开关、通道状态、待批准/运行中/会话/启用目标计数、健康检查、最近 5 条审计、快捷入口 | `GET overview`（5s）、`GET health`（壳层 5s）、`GET tasks?status=running&limit=100`、`GET audit?limit=5`、`POST monitor/pause`                         |
+| 会话 | 只读会话列表 → 消息详情；加载更早消息                                                  | `GET threads?offset&limit=20`、`GET threads/:key?before&limit=50`                                                                                      |
+| 任务 | 状态筛选、任务详情、审批与动作弹窗                                                     | `GET tasks?status&offset&limit=20`、`GET tasks/:id`、`POST tasks/:id/{approve,reject,cancel,retry}`、`GET settings`（仅取 `tasks.workspaceRoot` 提示） |
+| 目标 | 目标表编辑、发现、校验、逐块保存                                                       | `GET targets`、`GET settings`（取 `targets` 的 revision）、`POST targets/discover`、`POST targets/validate`、`PUT settings/targets`                    |
+| 人设 | 注册表驱动的表单 + 本地实时预览                                                        | `GET persona`、`PUT settings/persona`                                                                                                                  |
+| 设置 | monitor/reply/research/tasks/models/dws/advanced 七个 block 的注册表表单               | `GET settings`、`PUT settings/:block`                                                                                                                  |
+| 审计 | 时间/类型/摘要表格，加载更多                                                           | `GET audit?offset&limit=50`                                                                                                                            |
 
 轮询只在概览与壳层健康徽标上启用（5s）；其余页签首次加载后手动刷新。所有请求都有 `AbortController`、15s 超时与卸载取消，卸载后不会再有状态写入。
 
@@ -39,7 +40,9 @@ main(whale-chan)
 
 ## 3. 交互规则
 
-### 3.1 暂停监控
+### 3.1 暂停监控与通道状态
+
+概览的通道状态从 `GET overview.health.checks` 的 `channel` 项推导，不直接使用 `monitor.running`：`detail` 含 `idle` → 「空闲（未启用目标）」；含 `paused by the owner` → 「已暂停」；含 `ready` → 「运行中」；`status=error` → 「异常」并附 detail；`monitoring is disabled in settings` → 「监控已关闭」；`degraded` → 「未就绪」并附 detail；没有 channel 检查项 → 「未接入」。顶部健康徽标仍以 `health.status` 为准。
 
 概览的开关调用 `POST monitor/pause { paused }`。点击后先乐观更新，成功提示并按 `GET overview` 重新校准；失败回滚开关并显示错误。`monitor.enabled=false` 时开关禁用并说明原因。暂停会立即停止新的监控与回复，不改其他配置。
 
@@ -98,7 +101,7 @@ main(whale-chan)
 
 ## 5. i18n
 
-- 全部 UI 文案来自 `ctx.locale` 的 `dshWhaleChan` 命名空间；`locale/zh.json` 与 `locale/en.json` 各 463 个 key（`meta` 除外），key 集合由测试强制一致。
+- 全部 UI 文案来自 `ctx.locale` 的 `dshWhaleChan` 命名空间；`locale/zh.json` 与 `locale/en.json` 各 469 个 key（`meta` 除外），key 集合由测试强制一致。
 - 覆盖页签、按钮、字段 label/hint、空态、错误、确认、成功/失败提示、危险项说明、无障碍标签；`src/client/**` 不含中文字面量（测试扫描），英文词典不含中文。
 - 插值沿用 DSH locale 的 `{name}` 语法（如 `{status}`、`{count}`、`{block}`、`{root}`）。
 - 宿主返回的检查详情、事件类型、目标 ID 是数据而非文案，按原样显示；事件类型使用等宽字体，避免伪装成翻译。

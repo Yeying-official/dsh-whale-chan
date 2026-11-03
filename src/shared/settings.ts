@@ -7,6 +7,7 @@
  */
 import { z } from 'zod'
 import { LOG_LEVELS, LIMITS, PERMISSION_PRESETS, PERSONA_LANGUAGES, REPLY_MODES, TARGET_KINDS } from './limits.ts'
+import { EMPTY_PERSONA } from './persona-defaults.ts'
 
 export const SETTINGS_BLOCKS = [
   'monitor',
@@ -74,21 +75,22 @@ export const TargetsSchema = z
 
 export const PersonaSchema = z
   .object({
-    name: z.string().trim().min(1).default('鲸鱼酱'),
-    identity: z.string().default(''),
-    tone: z.string().default('二次元助理'),
-    language: z.enum(PERSONA_LANGUAGES).default('auto'),
-    signature: z.string().default(''),
-    rules: z.array(z.string()).default([]),
-    knowledge: z.string().default(''),
-    samples: z.array(z.string()).default([]),
-    allowEmoji: z.boolean().default(true),
+    name: z.string().trim().min(1).default(EMPTY_PERSONA.name),
+    identity: z.string().default(EMPTY_PERSONA.identity),
+    tone: z.string().default(EMPTY_PERSONA.tone),
+    language: z.enum(PERSONA_LANGUAGES).default(EMPTY_PERSONA.language),
+    signature: z.string().default(EMPTY_PERSONA.signature),
+    // Array defaults are factories so parsed values never share the constant's arrays.
+    rules: z.array(z.string()).default(() => [...EMPTY_PERSONA.rules]),
+    knowledge: z.string().default(EMPTY_PERSONA.knowledge),
+    samples: z.array(z.string()).default(() => [...EMPTY_PERSONA.samples]),
+    allowEmoji: z.boolean().default(EMPTY_PERSONA.allowEmoji),
     maxReplyChars: z
       .number()
       .int()
       .min(LIMITS.persona.maxReplyChars.min)
       .max(LIMITS.persona.maxReplyChars.max)
-      .default(300),
+      .default(EMPTY_PERSONA.maxReplyChars),
   })
   .strict()
 
@@ -201,7 +203,9 @@ export const SettingsSchema = z
   .object({
     monitor: MonitorSchema.default(MonitorSchema.parse({})),
     targets: TargetsSchema.default(TargetsSchema.parse({})),
-    persona: PersonaSchema.default(PersonaSchema.parse({})),
+    // A factory keeps every parse's persona arrays independent; a shared default
+    // object would hand the same arrays to every caller that omits the block.
+    persona: PersonaSchema.default(() => PersonaSchema.parse({})),
     reply: ReplySchema.default(ReplySchema.parse({})),
     research: ResearchSchema.default(ResearchSchema.parse({})),
     tasks: TasksSchema.default(TasksSchema.parse({})),

@@ -12,6 +12,7 @@
  * its examples first, then its background knowledge, then its trailing rules.
  */
 import type { PersonaSettings } from '../shared/settings.ts'
+import { EMPTY_PERSONA } from '../shared/persona-defaults.ts'
 import { clip, codePointLength, collapseBlankLines, formatLocalTime, redactSecretLike } from './format.ts'
 import { render } from './prompts.ts'
 
@@ -109,7 +110,7 @@ interface PersonaDraft {
 }
 
 function fillFrame(persona: PersonaSettings, context: PersonaContext, template: string, draft: PersonaDraft): string {
-  const name = trimOrEmpty(persona.name) || '鲸鱼酱'
+  const name = trimOrEmpty(persona.name) || EMPTY_PERSONA.name
   const owner = trimOrEmpty(context.ownerName) || '主人'
   const knowledge = trimOrEmpty(draft.knowledge)
   const style = [
@@ -187,7 +188,7 @@ export function renderPersonaSummary(
   persona: PersonaSettings,
   context: Pick<PersonaContext, 'ownerName'> = {},
 ): string {
-  const name = trimOrEmpty(persona.name) || '鲸鱼酱'
+  const name = trimOrEmpty(persona.name) || EMPTY_PERSONA.name
   const owner = trimOrEmpty(context.ownerName) || '主人'
   const tone = trimOrEmpty(persona.tone) || '自然克制'
   return `「${name}」，${owner} 的钉钉回复助理；语气：${tone}。`

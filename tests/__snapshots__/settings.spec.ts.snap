@@ -50,7 +50,7 @@ exports[`settings defaults > matches the committed default snapshot 1`] = `
     "rules": [],
     "samples": [],
     "signature": "",
-    "tone": "二次元助理",
+    "tone": "",
   },
   "reply": {
     "ackOnTaskCapture": true,

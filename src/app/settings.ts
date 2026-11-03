@@ -15,6 +15,7 @@
 import type { StatementSync } from 'node:sqlite'
 import type { Clock } from '../core/index.ts'
 import type { PersonaView, SettingsBlockView, SettingsUpdateResult, SettingsView } from '../shared/models.ts'
+import { EMPTY_PERSONA, PERSONA_PRESETS } from '../shared/persona-defaults.ts'
 import {
   SETTINGS_BLOCKS,
   SETTINGS_DEFAULTS,
@@ -158,9 +159,19 @@ export class SettingsService {
     return { blocks, revision: this.global }
   }
 
-  /** The persona block and its own revision. */
+  /**
+   * The persona block, its own revision, the empty default and the shipped presets.
+   *
+   * `defaults` and `presets` are deep copies: the client fills its draft from
+   * them, and a caller must never be able to mutate the frozen definitions.
+   */
   persona(): PersonaView {
-    return { persona: structuredClone(this.value.persona), revision: this.revisions.persona }
+    return {
+      persona: structuredClone(this.value.persona),
+      revision: this.revisions.persona,
+      defaults: structuredClone(EMPTY_PERSONA),
+      presets: structuredClone(PERSONA_PRESETS),
+    }
   }
 
   /** Blocks that fell back to their defaults because the stored row was unusable. */

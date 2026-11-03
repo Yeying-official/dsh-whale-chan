@@ -103,6 +103,25 @@ export function PersonaPage() {
     personaApi.reload()
   }
 
+  /**
+   * Fill the draft from a frozen definition without saving.
+   *
+   * The host sends deep copies, and the spread keeps the draft a plain record;
+   * the existing save action still owns the only write path.
+   */
+  const fillDraft = (value: Record<string, unknown> | undefined, message: string) => {
+    if (!value) return
+    setDraft({ ...structuredClone(value) })
+    setDirty(true)
+    setErrors({})
+    notify(message)
+  }
+
+  // An older host omits both fields; either action is hidden rather than broken.
+  const defaults = personaApi.data?.defaults as Record<string, unknown> | undefined
+  const preset = personaApi.data?.presets?.[0]
+  const presetPersona = preset?.persona as Record<string, unknown> | undefined
+
   const name = typeof draft?.['name'] === 'string' ? draft['name'] : ''
   const tone = typeof draft?.['tone'] === 'string' ? draft['tone'] : ''
   const signature = typeof draft?.['signature'] === 'string' ? draft['signature'] : ''
@@ -175,6 +194,35 @@ export function PersonaPage() {
                 />
               ))}
             </div>
+            {defaults || (preset && presetPersona) ? (
+              <div className="wc-persona-actions">
+                {defaults ? (
+                  <div className="wc-persona-action">
+                    <Button
+                      size="sm"
+                      onClick={() => fillDraft(defaults, t('persona.restoreDefaultsFilled'))}
+                      disabled={saving}
+                    >
+                      {t('persona.restoreDefaults')}
+                    </Button>
+                    <span className="wc-hint">{t('persona.restoreDefaultsHint')}</span>
+                  </div>
+                ) : null}
+                {preset && presetPersona ? (
+                  <div className="wc-persona-action">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => fillDraft(presetPersona, t('persona.loadPresetFilled', { name: preset.name }))}
+                      disabled={saving}
+                    >
+                      {t('persona.loadPreset', { name: preset.name })}
+                    </Button>
+                    <span className="wc-hint">{t('persona.loadPresetHint')}</span>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <FormActions
               dirty={dirty}
               saving={saving}

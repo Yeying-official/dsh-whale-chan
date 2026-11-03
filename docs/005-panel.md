@@ -79,6 +79,13 @@ main(whale-chan)
 
 表单编辑 name/identity/tone/language/signature/rules/knowledge/samples/allowEmoji/maxReplyChars；右侧预览完全在本地渲染（示例回复、签名、字数上限、emoji 状态），不调用后端。保存 `PUT settings/persona`，冲突恢复同 3.3。
 
+表单底部 `FormActions` 上方有两个只改草稿的动作：
+
+- **「恢复默认（空人设）」**：用 `GET persona` 的 `defaults`（只有 `name = 鲸鱼酱`，其余为空）替换草稿；清空字段错误、置 `dirty`，提示“已填入默认空人设，保存后生效”。**不会自动保存**。
+- **「载入预设：蓝白鲸鱼女仆」**：用 `presets` 里的 `whale-maid.persona` 替换草稿，同样只置 `dirty` 并提示保存后生效。预设是可选模板，默认不启用。
+
+两者都不改变已有保存语义：真正的写入仍由 `PUT settings/persona` 完成，「撤销修改」仍恢复为服务端当前值。旧 host 的 `GET persona` 没有 `defaults` / `presets` 时，对应按钮整块隐藏，页面保持升级前的行为。默认值、预设来源与升级行为见 [014 人设默认值与预设](014-persona-defaults.md)。
+
 ### 3.6 审计与会话
 
 审计按 `events` 倒序分页，展示时间、事件类型、摘要（操作者 + 对象 + detail）、结果徽标。会话视图只读：列表显示标题/类型/最后消息/未读数；详情显示发送者、方向、时间、正文，并支持用 `before` 游标加载更早消息。

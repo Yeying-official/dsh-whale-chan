@@ -11,24 +11,33 @@
 
 > 产品显示名是「DSH助理」；本文件里的「鲸鱼酱」是**默认人设名**（`settings.persona.name` 的默认值），
 > 可在面板「人设」页改名。显示名、包名、状态目录与 API 前缀彼此独立：显示名改动不会改变人设默认值。
+>
+> **默认人设是空人设**：只有 `name = 鲸鱼酱`，身份、语气、签名、规则、知识与示例全部为空；
+> 「蓝白鲸鱼女仆」是**可选预设模板**，需要在「人设」页手动载入后保存，不会被自动启用。
+> 来源、声明与升级行为见 [014 人设默认值与预设](014-persona-defaults.md)。
 
 ## 1. 人设：唯一的人设来源
 
 `settings.persona` 是唯一的人设来源（`src/shared/settings.ts`）。`src/brain/persona.ts`
 把它渲染进 `prompts/persona.md` 的骨架，渲染结果作为回复提示的「## 人设」段。
+默认值与预设的原始定义在 `src/shared/persona-defaults.ts`（`EMPTY_PERSONA` /
+`WHALE_MAID_PERSONA` / `PERSONA_PRESETS`）。
 
-| 字段            | 类型     | 渲染为                                     | 空值时             |
-| --------------- | -------- | ------------------------------------------ | ------------------ |
-| `name`          | string   | 「{{name}}」                               | 回落「鲸鱼酱」     |
-| `identity`      | string   | `## 身份` 段                               | 整段消失           |
-| `tone`          | string   | 表达风格里的「语气」                       | 回落「自然、克制」 |
-| `language`      | 枚举     | 语言要求（auto / zh-CN / en）              | 不适用             |
-| `signature`     | string   | 签名要求                                   | 只写「不需要签名」 |
-| `rules`         | string[] | `## 行为规则` 逐条 `- `                    | 整段消失           |
-| `knowledge`     | string   | `## 背景知识` 段                           | 整段消失           |
-| `samples`       | string[] | `## 示例回复`，逐条编号                    | 整段消失           |
-| `allowEmoji`    | boolean  | 表情要求                                   | 不适用             |
-| `maxReplyChars` | number   | 字数上限（人设段 + 回复提示 + 后处理共用） | 不适用             |
+| 字段            | 默认值   | 类型     | 渲染为                                     | 空值时                         |
+| --------------- | -------- | -------- | ------------------------------------------ | ------------------------------ |
+| `name`          | `鲸鱼酱` | string   | 「{{name}}」                               | 回落「鲸鱼酱」                 |
+| `identity`      | `""`     | string   | `## 身份` 段                               | 整段消失                       |
+| `tone`          | `""`     | string   | 表达风格里的「语气」                       | 回落「自然、克制，不喧宾夺主」 |
+| `language`      | `auto`   | 枚举     | 语言要求（auto / zh-CN / en）              | 不适用                         |
+| `signature`     | `""`     | string   | 签名要求                                   | 只写「不需要签名」             |
+| `rules`         | `[]`     | string[] | `## 行为规则` 逐条 `- `                    | 整段消失                       |
+| `knowledge`     | `""`     | string   | `## 背景知识` 段                           | 整段消失                       |
+| `samples`       | `[]`     | string[] | `## 示例回复`，逐条编号                    | 整段消失                       |
+| `allowEmoji`    | `true`   | boolean  | 表情要求                                   | 不适用                         |
+| `maxReplyChars` | `300`    | number   | 字数上限（人设段 + 回复提示 + 后处理共用） | 不适用                         |
+
+「默认人设来源」：[014 人设默认值与预设](014-persona-defaults.md)。蓝白鲸鱼女仆预设只是
+`PERSONA_PRESETS` 中的模板数据，不会改变上述默认值，也不会自动写入任何安装。
 
 会话侧变量由调用方注入：`ownerName`（缺省「主人」）、`targetLabel`（群名或私聊标签）、
 `now`（注入的本地时间，格式 `YYYY-MM-DD HH:mm`）。

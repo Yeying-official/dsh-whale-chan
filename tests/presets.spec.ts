@@ -100,6 +100,15 @@ describe('replier preset', () => {
     expect(ids).not.toContain('tool-todo')
   })
 
+  it('uses a neutral persona prefix that cannot fight the dynamic persona', () => {
+    const persona = replier.plugins.find((plugin) => plugin.id === 'persona')
+    const config = persona?.config as { prefix?: string } | undefined
+    expect(config?.prefix).toContain('动态人设')
+    // The owner's name lives in settings and in the rendered persona block; a
+    // hard-coded name here would contradict it after a rename.
+    expect(config?.prefix).not.toContain('鲸鱼酱')
+  })
+
   it('keeps web search enabled and fetch off', () => {
     const web = replier.plugins.find((plugin) => plugin.id === 'tool-web')
     expect(web?.name).toBe('@deepseek-ai/dsh-tool-web')
@@ -145,6 +154,13 @@ describe('worker preset', () => {
     expect(pwsh?.disabled).toContain("process.platform !== 'win32'")
     expect(bash?.config).toEqual({ timeoutMs: 5000, maxTimeoutMs: 5000 })
     expect(pwsh?.config).toEqual({ timeoutMs: 5000, maxTimeoutMs: 5000 })
+  })
+
+  it('uses a neutral persona prefix that cannot fight the dynamic persona', () => {
+    const persona = worker.plugins.find((plugin) => plugin.id === 'persona')
+    const config = persona?.config as { prefix?: string } | undefined
+    expect(config?.prefix).toContain('动态人设')
+    expect(config?.prefix).not.toContain('鲸鱼酱')
   })
 
   it('moves long job waits to the background after five seconds', () => {

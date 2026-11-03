@@ -14,6 +14,7 @@ import {
   DEFAULT_STATE_DIR,
   DshTaskExecutor,
   WORKER_PRESET,
+  resolveTaskWorkspace,
   taskRequestId,
   taskSessionId,
   taskWorkspace,
@@ -122,8 +123,8 @@ describe('session and workspace', () => {
     expect(ensured?.preset).toBe(WORKER_PRESET)
     expect(ensured?.permission).toBe('danger-full-access')
     expect(ensured?.title).toBe('任务 · 整理会议纪要')
-    expect(ensured?.sessionId).toBe(taskSessionId('task-1'))
-    expect(result.sessionId).toBe('whale-task-task-1')
+    expect(ensured?.sessionId).toBe(taskSessionId('task-1', 'assignment-1'))
+    expect(result.sessionId).toBe(taskSessionId('task-1', 'assignment-1'))
   })
 
   it('defaults the permission to workspace-write', async () => {
@@ -138,6 +139,18 @@ describe('session and workspace', () => {
     expect(host.ensured[0]?.permission).toBe('workspace-write')
   })
 
+  it('passes the configured worker route to the session', async () => {
+    const { host, executor } = harness()
+    const task = makeTask()
+    await executor.execute({
+      task,
+      approval: makeApproval(task),
+      settings: makeSettings({ models: { worker: { provider: 'deepseek', model: 'deepseek-chat', effort: '' } } }),
+      signal: new AbortController().signal,
+    })
+    expect(host.ensured[0]?.model).toEqual({ provider: 'deepseek', model: 'deepseek-chat', effort: '' })
+  })
+
   it('creates the workspace under the state directory and passes it on', async () => {
     const { host, executor, dirs } = harness()
     const task = makeTask()
@@ -150,6 +163,58 @@ describe('session and workspace', () => {
     const expected = join('/home/owner', '.dsh-whale-chan', 'tasks', 'task-1')
     expect(dirs).toEqual([expected])
     expect(host.ensured[0]?.workspace).toBe(expected)
+  })
+
+  it('runs in the workspace the approving person chose, over the settings default', async () => {
+    const { host, executor, dirs } = harness()
+    const task = makeTask()
+    const result = await executor.execute({
+      task,
+      approval: makeApproval(task),
+      settings: makeSettings({ tasks: { workspaceRoot: '~/ignored' } }),
+      workspace: '/srv/projects/alpha',
+      signal: new AbortController().signal,
+    })
+    expect(result.outcome).toBe('succeeded')
+    expect(dirs).toEqual(['/srv/projects/alpha'])
+    expect(host.ensured[0]?.workspace).toBe('/srv/projects/alpha')
+  })
+
+  it('expands a tilde in the approved workspace', async () => {
+    const settings = makeSettings()
+    expect(resolveTaskWorkspace({ taskId: 'task-1', settings, approved: '~/work/alpha', home: '/home/owner' })).toBe(
+      join('/home/owner', 'work', 'alpha'),
+    )
+  })
+
+  it('falls back to the settings default when no workspace is approved', async () => {
+    const { host, executor, dirs } = harness()
+    const task = makeTask()
+    await executor.execute({
+      task,
+      approval: makeApproval(task),
+      settings: makeSettings({ tasks: { workspaceRoot: '/srv/tasks' } }),
+      workspace: '   ',
+      signal: new AbortController().signal,
+    })
+    expect(dirs).toEqual([join('/srv/tasks', 'task-1')])
+    expect(host.ensured[0]?.workspace).toBe(join('/srv/tasks', 'task-1'))
+  })
+
+  it('refuses a relative approved workspace before creating anything', async () => {
+    const { host, executor, dirs } = harness()
+    const task = makeTask()
+    await expect(
+      executor.execute({
+        task,
+        approval: makeApproval(task),
+        settings: makeSettings(),
+        workspace: 'projects/alpha',
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toMatchObject({ code: 'invalidWorkspace' })
+    expect(dirs).toHaveLength(0)
+    expect(host.ensured).toHaveLength(0)
   })
 
   it('honours a configured workspace root and expands a leading tilde', async () => {
@@ -216,7 +281,7 @@ describe('endings', () => {
     expect(result).toEqual({
       outcome: 'succeeded',
       summary: '已完成三点纪要，文件为 notes.md。',
-      sessionId: 'whale-task-task-1',
+      sessionId: taskSessionId('task-1', 'assignment-1'),
     })
     expect(results).toEqual([result])
   })
@@ -263,7 +328,9 @@ describe('endings', () => {
     })
     expect(result.outcome).toBe('timeout')
     expect(result.error).toBe('timeout')
-    expect(host.cancellations).toEqual([{ sessionId: 'whale-task-task-1', reason: 'task task-1 timed out' }])
+    expect(host.cancellations).toEqual([
+      { sessionId: taskSessionId('task-1', 'assignment-1'), reason: 'task task-1 timed out' },
+    ])
   })
 
   it('maps an executor disposal to a cancelled result and stops the session', async () => {
@@ -283,7 +350,9 @@ describe('endings', () => {
     expect(result.outcome).toBe('cancelled')
     expect(result.summary).toBe('')
     expect(result.error).toBe('cancelled')
-    expect(host.cancellations).toEqual([{ sessionId: 'whale-task-task-1', reason: 'the executor was disposed' }])
+    expect(host.cancellations).toEqual([
+      { sessionId: taskSessionId('task-1', 'assignment-1'), reason: 'the executor was disposed' },
+    ])
   })
 })
 
@@ -305,7 +374,7 @@ describe('cancellation', () => {
     const result = await running
     expect(result.outcome).toBe('cancelled')
     expect(result.error).toBe('cancelled: 主人取消')
-    expect(host.cancellations).toEqual([{ sessionId: 'whale-task-task-1', reason: '主人取消' }])
+    expect(host.cancellations).toEqual([{ sessionId: taskSessionId('task-1', 'assignment-1'), reason: '主人取消' }])
     expect(results).toHaveLength(1)
     // After the run ended, the task is no longer addressable.
     expect(await executor.cancel('task-1')).toBe(false)
@@ -327,7 +396,7 @@ describe('start and finish bookkeeping', () => {
       settings: makeSettings(),
       signal: new AbortController().signal,
     })
-    expect(starts).toEqual([{ taskId: 'task-1', sessionId: 'whale-task-task-1' }])
+    expect(starts).toEqual([{ taskId: 'task-1', sessionId: taskSessionId('task-1', 'assignment-1') }])
     expect(results).toHaveLength(1)
     expect(results[0]?.outcome).toBe('succeeded')
   })
@@ -383,8 +452,8 @@ describe('concurrency', () => {
     expect(result.outcome).toBe('succeeded')
   })
 
-  it('allows a retry after the previous run ended, delivering a distinct message', async () => {
-    const { host, executor } = harness()
+  it('runs a retry in a fresh session and carries the previous summary as context', async () => {
+    const { host, executor, starts } = harness()
     const task = makeTask()
     const first = await executor.execute({
       task,
@@ -392,7 +461,11 @@ describe('concurrency', () => {
       settings: makeSettings(),
       signal: new AbortController().signal,
     })
-    const retried = { ...task, assignmentId: 'assignment-2' }
+    const retried = {
+      ...task,
+      assignmentId: 'assignment-2',
+      result: { summary: '上一轮只写了标题，正文没开始。', sessionId: first.sessionId },
+    }
     const second = await executor.execute({
       task: retried,
       approval: makeApproval(retried),
@@ -403,5 +476,13 @@ describe('concurrency', () => {
     expect(second.outcome).toBe('succeeded')
     expect(host.deliveries).toHaveLength(2)
     expect(host.requestIds()).toEqual(['task:task-1:assignment-1', 'task:task-1:assignment-2'])
+    // A retry is a new assignment, so it is a new session, not the failed one.
+    expect(starts.map((entry) => entry.sessionId)).toEqual([
+      taskSessionId('task-1', 'assignment-1'),
+      taskSessionId('task-1', 'assignment-2'),
+    ])
+    expect(host.ensured[1]?.sessionId).toBe(taskSessionId('task-1', 'assignment-2'))
+    expect(host.deliveries[1]?.text).toContain('## 上一轮结果（供参考）')
+    expect(host.deliveries[1]?.text).toContain('上一轮只写了标题，正文没开始。')
   })
 })

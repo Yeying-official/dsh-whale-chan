@@ -134,6 +134,27 @@ describe('session identity', () => {
   })
 })
 
+describe('model route', () => {
+  it('passes the configured reply route to the session', async () => {
+    const host = new FakeSessionHost()
+    const model = new SessionModel({
+      host,
+      threadKey: 'dm:u1',
+      title: '小明',
+      homeDir: '/home/owner',
+      model: { provider: 'deepseek', model: 'deepseek-chat', effort: 'high' },
+    })
+    await model.complete(request(), new AbortController().signal)
+    expect(host.ensured[0]?.model).toEqual({ provider: 'deepseek', model: 'deepseek-chat', effort: 'high' })
+  })
+
+  it('passes nothing when the route is left at its defaults', async () => {
+    const { host, model } = learning()
+    await model.complete(request(), new AbortController().signal)
+    expect(host.ensured[0]?.model).toBeUndefined()
+  })
+})
+
 describe('serialization', () => {
   it('runs one turn at a time per thread', async () => {
     const { host, model } = learning()

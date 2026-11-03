@@ -8,7 +8,7 @@
  *
  * - `--version`
  * - `auth status --format json`
- * - `event consume <key> --flatten -f ndjson --ttl <h> [--group|--user|--open-dingtalk-id]`
+ * - `event consume <key> --flatten -f ndjson --ttl <hours>h [--group|--user|--open-dingtalk-id]`
  * - `chat +chat-search --query <q> --limit <n>`
  * - `chat +chat-list --types p2p --page-size <n>`
  * - `chat +messages-send ... --markdown <text>`
@@ -135,6 +135,15 @@ function eventEntry(entry) {
 async function runConsume(args) {
   const eventKey = args.find((item) => item.startsWith('user_im_')) ?? 'unknown_event'
   const dryRun = hasFlag(args, '--dry-run')
+
+  // dws parses --ttl as a Go duration: a bare number is rejected before the
+  // plan is printed. Mirror that so tests catch a missing unit.
+  const ttl = flagValue(args, '--ttl')
+  if (ttl !== undefined && !/^\d+(?:\.\d+)?h$/.test(ttl)) {
+    console.error(`invalid argument "${ttl}" for "--ttl" flag: time: missing unit in duration "${ttl}"`)
+    trace('exit', { reason: 'invalid-ttl', code: 3 })
+    process.exit(3)
+  }
 
   if (dryRun) {
     const plan = {

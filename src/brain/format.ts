@@ -144,3 +144,15 @@ export function renderThreadWindow(
   }
   return text
 }
+
+/**
+ * The start of a model's raw output, safe to put in a failure detail or audit row.
+ *
+ * Diagnostics only: the panel shows the reason, and a truncated sample answers
+ * the first question a human asks ("was it empty, prose, or cut off?") without
+ * copying a whole model answer into the audit log.
+ */
+export function outputSample(text: string, limit = 200): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length <= limit ? flat : `${flat.slice(0, limit)}…`
+}

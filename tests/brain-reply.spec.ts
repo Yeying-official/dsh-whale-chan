@@ -187,7 +187,7 @@ describe('composeReply', () => {
     expect(fenced).toMatchObject({ ok: false, reason: 'empty' })
 
     const disclaimer = await composeReply(makeInput(), stubModel('我是人类'), new AbortController().signal)
-    expect(disclaimer).toMatchObject({ ok: false, reason: 'empty' })
+    expect(disclaimer).toMatchObject({ ok: false, reason: 'empty', detail: '我是人类' })
   })
 
   it('reports a timeout and a provider error distinctly', async () => {

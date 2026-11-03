@@ -114,6 +114,7 @@ interface ExecutorResult {
 - **工作区以批准为准**：`ExecutorRequest.workspace` 由 WS5 从 `Assignment.workspace` 传入，优先于 `tasks.workspaceRoot`；两者都没有配置时用 `<stateDir>/tasks/<taskId>`。相对路径一律拒绝（`UserError('invalidWorkspace')`，属领域 `refused` 组），因为 DSH 会按宿主工作目录解析它，主人无法预测任务落在哪里。
 - **模型**来自设置的两个独立路由：worker 用 `settings.models.worker`（会话创建后、首个回合前写入 `model/selection`，只注入第一次请求）；回复器用 `settings.models.reply`（`LlmModel` 每次调用前用它解析路由；为空则用宿主默认 `agentDefaultModel`）。两者都不**修改** DSH 的全局默认模型。
 - 任务会话按需创建：`whale-task-*` 的 id 带派工后缀，因此**重试是新会话**，不会复用上次失败的对话。
+- **输出预算有下限**：`LlmModel` 把 brain 的 `maxChars` 换算成 `maxTokens = clamp(maxChars/4, 1024, 4096)`。下限 1024 是给 reasoning 模型留的：分类只要 800 字符、草稿只要 300 字符，若按 200/75 传，推理 token 会先耗尽预算，JSON 被截断或为空，表现成 `classify:invalid` 而模型其实答对了。
 - **回复器不建会话**（T3 真机结论）：回复曾经跑在一个 DSH 会话里，但会话会带上 preset 挂载的全部工具 schema，实测 141k token，prefill 超过 60 秒。分类与草稿不需要任何工具，所以回复路径改为 `LlmModel`：一次 `ctx.llm.stream`，只带 `system` 与一条 user 消息，不注册工具、不建工作区、不落 session。`SessionModel` 仍留在 `src/executor/model.ts`（不公开导出）作为将来「需要工具的回复」的参考实现。
 
 ## 6. 投递与幂等
@@ -129,6 +130,7 @@ interface ExecutorResult {
 - **顺序假设：`user/message` 可能先于它的 `turn/start` 出现**（DSH 先记录 inbox append，再由 driver 开回合；会话复用时当前回合号还是上一轮的）。因此跟踪器只在消息落在**已开启的回合内**时直接认领；否则把它记为待认领，由**下一个 `turn/start`** 认领。未认领前任何 `turn/end` 都不结算——否则会拿上一轮的结束当成本次结束（T3 真机即此故障：分类 7–12 秒就完成，插件却等到超时）。
 - 订阅先建立、历史后扫描，扫描期间到达的事件会补放，因此不会漏掉「刚好在订阅前后结束」的回合；如果回合在等待开始前就已经结束，直接返回 `completed`。
 - 结果只有四种：`completed`、`timeout`、`aborted`、`failed`（`failed` 带上 DSH 的结束原因，例如 `aborted by hook`）。
+- 解析失败（`classify:invalid` / `empty`）的 `detail` 里带**模型原始输出的前 200 字符**（空白折叠，超长加 `…`）：一眼能分清是空、是散文、还是被截断，同时不会把整段回答写进审计。
 - 超时：执行器调用 `host.cancel` 取消会话回合，返回 `timeout`；不 SIGKILL 任何进程。
 - **单回合上限 90 秒**（`MODEL_TURN_TIMEOUT_MS`，回复器和执行器共用）：本机模型首 token 可能 15–30 秒，90 秒给慢但健康的回合留出余量。它与任务总超时是两回事：任务的总预算仍是 `tasks.timeoutMinutes`，只是不会低于一个回合的上限。
 - 取消：`cancel(taskId)` 先中止调用方生命周期，再 `agent.cancel({ kind: 'hook', reason }, { keepInbox: false })`——中止当前回合并清空队列，避免取消后又被排队消息唤醒。重复取消是幂等的，运行结束后再取消返回 `false`。

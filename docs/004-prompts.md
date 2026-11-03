@@ -201,6 +201,11 @@ AI 角标和任务批准。
   （实测 141k token）进入每次 classification/draft 的 prefill，T3 真机因此超时。
 - 单次调用的时间预算由 brain 的 `withDeadline`（`timeoutMs`，默认 15s）控制；`LlmModel`
   不自带超时，只把调用方的 `AbortSignal` 传给 `ctx.llm.stream`。
+- 输出预算由 `maxChars` 换算：`maxTokens = clamp(maxChars/4, 1024, 4096)`。下限 1024 是给
+  reasoning 模型留的——分类只要 800 字符、草稿只要 300 字符，压缩成 200/75 token 会让推理
+  吃光预算，JSON 被截断或为空，表现为 `classify:invalid`。
+- 解析失败时 `detail` 附带**原始输出前 200 字符**（空白折叠、超长加 `…`），用来区分
+  「空 / 散文 / 截断」；审计只存这个样本，不存整段回答。
 
 ## 相关文档
 

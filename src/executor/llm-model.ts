@@ -34,8 +34,22 @@ import { assemblePrompt } from './model.ts'
 import { routeSelection, type RoleSelection } from './role-model.ts'
 import type { ExecutorLogger } from './types.ts'
 
-/** Ceiling on one reply request's output tokens, whatever `maxChars` implies. */
+/**
+ * Ceiling on one reply request's output tokens, whatever `maxChars` implies.
+ */
 export const MAX_OUTPUT_TOKENS = 4_096
+
+/**
+ * Floor on one reply request's output tokens.
+ *
+ * A reasoning model spends part of the budget thinking before it emits the
+ * answer, so a small character hint (a classification asks for 800 characters,
+ * a reply for 300) would be spent on reasoning alone: the JSON arrives
+ * truncated or empty and the brain reports `classify:invalid` on a model that
+ * answered correctly. One kilotoken leaves room for the reasoning plus the
+ * answer, and the brain still bounds the visible text itself.
+ */
+export const MIN_OUTPUT_TOKENS = 1_024
 
 /** Ratio between the brain's character hint and the token budget. */
 export const CHARS_PER_TOKEN = 4
@@ -82,10 +96,16 @@ function asSelection(value: ModelSelection | RoleSelection): RoleSelection {
   }
 }
 
-/** Output-token budget implied by the brain's character hint. */
+/**
+ * Output-token budget implied by the brain's character hint.
+ *
+ * `maxChars / 4` is the *content* budget; reasoning comes on top of it, so the
+ * result is floored at `MIN_OUTPUT_TOKENS` and capped at `MAX_OUTPUT_TOKENS`.
+ */
 export function outputTokensFor(maxChars: number | undefined): number | undefined {
   if (maxChars === undefined || !Number.isFinite(maxChars) || maxChars <= 0) return undefined
-  return Math.max(1, Math.min(MAX_OUTPUT_TOKENS, Math.floor(maxChars / CHARS_PER_TOKEN)))
+  const budget = Math.floor(maxChars / CHARS_PER_TOKEN)
+  return Math.max(MIN_OUTPUT_TOKENS, Math.min(MAX_OUTPUT_TOKENS, budget))
 }
 
 /** `ModelPort` over `ctx.llm.stream`: one system text plus one user message, no tools. */

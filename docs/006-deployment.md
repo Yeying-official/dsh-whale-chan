@@ -86,15 +86,15 @@ dws chat +chat-list --types p2p --page-size 50 --format json
 
 ```bash
 # 群
-dws event consume user_im_message_receive_group --flatten -f ndjson --ttl 24 \
+dws event consume user_im_message_receive_group --flatten -f ndjson --ttl 24h \
   --group <openConversationId> --dry-run
 
 # 单聊（userId）
-dws event consume user_im_message_receive_o2o --flatten -f ndjson --ttl 24 \
+dws event consume user_im_message_receive_o2o --flatten -f ndjson --ttl 24h \
   --user <userId> --dry-run
 
 # 单聊（只有 openDingTalkId 时）
-dws event consume user_im_message_receive_o2o --flatten -f ndjson --ttl 24 \
+dws event consume user_im_message_receive_o2o --flatten -f ndjson --ttl 24h \
   --open-dingtalk-id <openDingTalkId> --dry-run
 ```
 

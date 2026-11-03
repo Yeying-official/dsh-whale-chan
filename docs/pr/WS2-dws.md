@@ -51,7 +51,7 @@
 ```text
 pnpm install --frozen-lockfile   -> Done, exit 0
 pnpm typecheck                   -> tsc --noEmit, exit 0
-pnpm test                        -> 44 files, 572 tests passed (WS2: 10 files / 119 tests)
+pnpm test                        -> 45 files, 576 tests passed (WS2: 11 files / 123 tests)
 pnpm build                       -> lib/index.js, lib/index.d.ts, lib/client.js, exit 0
 node scripts/check-pack.mjs      -> pack check passed: 10 artifacts, icon 711 bytes
 pnpm format:check                -> All matched files use Prettier code style!
@@ -71,6 +71,7 @@ WS2 用例分布：
 | `channel-facade.spec.ts`        | 8    | paused/disabled 不订阅、无目标空闲、重复 start、dryRun skipped、owner 拒绝                             |
 | `channel-review.spec.ts`        | 8    | owner userId 与脱敏、owner 拒绝启动、dryRun skipped、纯媒体、JSON 脱敏                                 |
 | `channel-command.spec.ts`       | 10   | win32 解析顺序、APPDATA/ProgramFiles/LOCALAPPDATA 回退、路径/扩展名原样、无命中、非 win32、shim 端到端 |
+| `channel-ttl.spec.ts`           | 4    | `--ttl` Go duration（1h/24h）、fake 拒收裸数字、validate argv 记录 24h                                 |
 
 ### 4.1 Review round 1 修复（REQUEST_CHANGES）
 
@@ -93,6 +94,10 @@ review 同步：已 merge `main` `b69177d`（仅 `docs/PROGRESS.md` 格式修复
 - `channel-command.spec.ts` 10 条：PATH `.cmd`、`%APPDATA%` 回退、`%ProgramFiles%` 与 `.cmd` 优先、`%LOCALAPPDATA%` 存在性、`Path` 拼写、绝对路径、已带扩展名、无命中、非 win32、以及通过 `.cmd` shim 端到端 `probeAuth`（win32）。
 
 现网复核（由整合方执行）：`available=true`、`authenticated=true`、`ownerKnown=true`、channel idle。
+
+### 4.3 Review round 3：T1 实测 `--ttl` 需要 Go duration
+
+T1 真机 dry-run 发现 `--ttl 1` 被 dws 拒绝：`exit=3`、`invalid argument "1" for "--ttl" flag: time: missing unit in duration "1"`。修复：`consumeSpec` 通过 `ttlDuration(hours)` 统一输出 `<hours>h`（1→`1h`、24→`24h`），`fake-dws` 同步校验单位并在缺失时退出 3，validate 成功路径经 fake trace 断言 argv 为 `24h`。
 
 ## 5. 风险与未验证项
 
@@ -134,6 +139,7 @@ review round 1/2 已决定，不再需要额外决策：
 3. **`at-me` 目标 id**：保留 `target.id` 作为消息 `targetId`；WS5 会把该行初始化为 `at-me`。
 4. **dryRun 发送**：`skipped`，不改变 Outbound 状态、不按失败重试。
 5. **`format:check`**：整合方已在 `main` `b69177d` 修复 `docs/PROGRESS.md`，本分支 merge 后整仓通过。
-6. **Windows `dws` 解析**：自动解析 npm shim；找不到时保留原命令或由 `dws.binaryPath` 绝对路径覆盖，不再要求宿主 `PATH` 与交互 shell 一致。
+6. **`--ttl` 单位**：dws 按 Go duration 解析，v1 固定 `<hours>h`；T1 裸数字被拒的回归已由测试固化。
+7. **Windows `dws` 解析**：自动解析 npm shim；找不到时保留原命令或由 `dws.binaryPath` 绝对路径覆盖，不再要求宿主 `PATH` 与交互 shell 一致。
 
 遗留只有真机验证：§5 列出的 provisional 项需要在 T1–T2 逐项核对；不一致时先改 009 与测试，再改实现。

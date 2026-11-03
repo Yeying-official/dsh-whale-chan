@@ -81,7 +81,7 @@ WS8 已在 Windows + `1.0.66` 上确认：群事件键与 snake_case 扁平字�
 任何“支持某版本”的声明都必须留下证据：
 
 1. **静态门禁**：`pnpm check`、`pnpm format:check`、`node scripts/check-pack.mjs` 全绿；
-2. **安装**：在干净 profile 或干净机器上安装本地 bundle，重启后侧栏出现「鲸鱼酱」，`GET /whale-chan/api/state` 200；
+2. **安装**：在干净 profile 或干净机器上安装本地 bundle，重启后侧栏出现「DSH助理」，`GET /whale-chan/api/state` 200；
 3. **T0 只读**：`dws --version`、`dws auth status --format json` 的布尔字段；不订阅、不发送；
 4. **T1 观察**：测试群订阅 + `dryRun`，确认事件解码、去重、断线重连、`unknown` 不重发；
 5. **T2 单条**：面板确认后向测试群发一条，确认 AI 角标、幂等键、回执；

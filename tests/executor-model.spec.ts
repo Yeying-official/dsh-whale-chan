@@ -193,10 +193,13 @@ describe('delivery id', () => {
     await model.complete(request(), new AbortController().signal)
     const delivered = host.deliveries[0]
     const awaited = host.awaited[0]
+    // `requestId` is optional on the wait options, so narrow it to a string first:
+    // the assertion below is about the value, not about the option being set.
+    const awaitedId = awaited?.options.requestId ?? ''
     expect(delivered?.requestId.startsWith(DELIVERY_ID_PREFIX)).toBe(false)
     expect(delivered?.id).toBe(deliveryId(delivered?.requestId ?? ''))
-    expect(awaited?.options.requestId).toBe(delivered?.id)
-    expect(awaited?.options.requestId.startsWith(DELIVERY_ID_PREFIX)).toBe(true)
+    expect(awaitedId).toBe(delivered?.id)
+    expect(awaitedId.startsWith(DELIVERY_ID_PREFIX)).toBe(true)
   })
 })
 

@@ -261,3 +261,27 @@ KILLED  compare by sender name on the allowed list
 
 整改后门禁：`pnpm typecheck` OK、`pnpm test` **226 passed**、`pnpm format:check` OK、
 `git status --porcelain` 为空。
+
+## 7. 真机预算修复（T3 连续 `classify:timeout`）
+
+真机 T3 连续两次分类超时，但 replier 会话已创建且模型有输出：默认预算低于本机模型首轮
+实际耗时（15–40s）。只调整预算，不改判定逻辑。
+
+| 改动         | 之前                                      | 之后                                                       | 落点                                                 |
+| ------------ | ----------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------- |
+| 分类预算     | 15s                                       | **60s**                                                    | `DEFAULT_CLASSIFY_TIMEOUT_MS`                        |
+| 回复草稿预算 | 20s                                       | **60s**                                                    | `DEFAULT_REPLY_TIMEOUT_MS`                           |
+| 检索预算     | `settings.timeoutMs`（默认 8s、上限 20s） | `max(设置值, 30s)`；`ResearchOptions.timeoutMs` 可显式覆盖 | `DEFAULT_RESEARCH_TIMEOUT_MS`、`researchTimeoutMs()` |
+
+新增/更新测试：
+
+- `classifier.spec`：`defaults to a 60s budget and accepts a slow answer inside it`（注入 1s 预算 + 40ms 延迟，慢调用成功）。
+- `reply.spec`：`defaults to a 60s budget and accepts a slow draft inside it`（同上）。
+- `research.spec`：`floors the retrieval budget at 30s and lets an explicit override win`；预算透传用例改为断言端口收到 30s；两个超时用例改用注入的 `options.timeoutMs`。
+
+门禁：`pnpm typecheck` OK、`pnpm test` **229 passed**（brain 122）、`pnpm build` OK、
+`pnpm format:check` OK、`git status --porcelain` 为空。
+
+备注：`docs/007-architecture.md` 没有模型预算段落，本轮未改（避免与 WS4 整合冲突）；
+`LIMITS.research.timeoutMs.max` 目前是 20s，而 brain 下限是 30s——面板可配范围与运行时
+下限不一致，建议 WS5 把该上限提到 30s 以上（WS3 不改 `src/shared`）。

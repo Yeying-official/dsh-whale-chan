@@ -46,8 +46,12 @@
    已在 `package.json` 的 `files` 中，`check-pack` 会验证。
 2. **`ModelPort`**：`complete({ system, messages, maxChars? }, signal)`，只发 user 轮；
    实现负责路由（`settings.models.reply`）、重试与超时。`maxChars` 是提示而不是保证。
+   brain 侧预算为 **分类 60s / 草稿 60s**（`DEFAULT_CLASSIFY_TIMEOUT_MS`、
+   `DEFAULT_REPLY_TIMEOUT_MS`）：真机首轮 15–40s 属正常，预算低于此会把成功的调用判成
+   `timeout` 并 defer。实现方的超时不应短于 brain 的预算，否则由实现方决定失败。
 3. **`ResearchPort`**：`search(query, { limit, timeoutMs }, signal)` → `{ facts, sources }`；
-   实现独占网络与凭据。`research()` 只做预算、去重、URL 校验、缓存与降级。
+   实现独占网络与凭据。`research()` 只做预算、去重、URL 校验、缓存与降级。预算取
+   `max(settings.timeoutMs, 30s)`（检索是网络调用，8s 默认值不够）。
 4. **消息映射**：`BrainMessage` 由 `InboundMessage` 映射（`id/text/senderId/senderName/kind/
 conversationType/addressed/broadcast/at`）。`broadcast` 与 `kind` 由通道给出；通道仍负责
    过滤机器人/系统消息（`isSelf` 只是第二道保险）。
@@ -80,8 +84,8 @@ conversationType/addressed/broadcast/at`）。`broadcast` 与 `kind` 由通道�
 
 ## 5. 测试
 
-- 新增 **119** 条 brain 测试（persona 7、prompts 11、classifier 17、reply 20、research 16、
-  policy 20、rate-limit 9、loop-guard 11、contract 8），仓库总数 107 → **226**。
+- 新增 **122** 条 brain 测试（persona 7、prompts 11、classifier 18、reply 21、research 17、
+  policy 20、rate-limit 9、loop-guard 11、contract 8），仓库总数 107 → **229**。
 - 7 个变异自测全部被杀死（去掉 loop guard、去掉 need_search 归一、放开 URL 白名单、
   不丢示例、缺失模板返回空串，以及把发送者名单改回按昵称比较的两条 P0 回归）。
 - 5 个实现/测试提交逐一导出后执行 `tsc --noEmit` 与全量测试，历史可独立构建（142 / 178 /

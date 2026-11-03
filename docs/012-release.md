@@ -1,6 +1,6 @@
 # 012 发布
 
-> 当前状态：**v0.2.0 发布提交已就绪，tag 未打、未 push**。WS0–WS10 已完成；T3/T4 在本版工作区改造后做过真机冒烟（[WS9/WS10 报告](test-reports/WS9-10.md)）。本文是发布复核与打 tag 的清单。
+> 当前状态：**v0.2.0 已本地打 tag、未 push**。WS0–WS10 已完成；T3/T4 在本版工作区改造后做过真机冒烟（[WS9/WS10 报告](test-reports/WS9-10.md)）。本文是发布复核与打 tag 的清单。
 >
 > 版本 `0.2.0`，日期 `2026-11-03`。`private: true`，不发布到 npm。
 
@@ -43,7 +43,7 @@ git status --porcelain
 - [x] `scripts/check-pack.mjs` → 版本断言 `0.2.0`
 - [x] `CHANGELOG.md` → `## [0.2.0] - 2026-11-03`，含 Added / Changed / Fixed / Migration；`0.1.0` 段落保留
 - [x] `docs/compatibility.md` → 适用版本、WS9/WS10 工作区结论
-- [x] `docs/PROGRESS.md` → WS9/WS10 收口、main HEAD、测试数、T3/T4 冒烟、测试群停用、tag 未打
+- [x] `docs/PROGRESS.md` → WS9/WS10 收口、main HEAD、测试数、T3/T4 冒烟、测试群停用、tag `v0.2.0`
 - [x] `README.md` → v0.2.0 状态、按会话工作区行为、迁移说明、目标页工作区展示、安装验证版本 `0.2.0`
 - [x] `docs/013-security.md` → 追加共享工作区安全边界（同会话共享、`@我` 按会话隔离、旧目录保留、显式覆盖是人工例外）
 - [x] `docs/006-deployment.md` / `docs/007-architecture.md` → 与最终实现核对（路径规则、预建、标题归属、目标页投影）

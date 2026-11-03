@@ -28,12 +28,12 @@
 
 | 项          | 值                                                                 |
 | ----------- | ------------------------------------------------------------------ |
-| `main` HEAD | `1ffb919`（WS9 合并 `5c713f7`；WS10 合并即 HEAD `1ffb919`）        |
-| 发布分支    | `feat/ws11-release`，发布提交 `chore(release): v0.2.0`             |
+| `main` HEAD | `5e01938`（v0.2.0 发布合并；tag 指向随后的文档修正提交）           |
+| 发布分支    | `feat/ws11-release`，发布提交 `chore(release): v0.2.0`，已合并     |
 | 版本        | `0.2.0`（`package.json`、`PLUGIN_VERSION`、`check-pack` 三处一致） |
-| 全量测试    | **755 tests / 60 files**（`main` `1ffb919`；发布提交复跑确认）     |
+| 全量测试    | **755 tests / 60 files**（发布门禁实跑）                           |
 | 打包        | `15 artifacts`，icon 711 bytes（本版不增删产物）                   |
-| tag         | **未打**；`v0.2.0` 由发布负责人复核后打，实现代理不 tag            |
+| tag         | **`v0.2.0`**（本地，未 push；指向发布复核提交）                    |
 | 安装        | 未执行 profile 安装/升级；真机验收使用已安装的 link 版本           |
 
 ## 3. WS9/WS10 真机结论

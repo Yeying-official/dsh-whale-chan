@@ -12,7 +12,7 @@
 | -------------------------------- | ----------------------------------------------------------------------------------- |
 | `pnpm install --frozen-lockfile` | `Done in 1m 34.6s using pnpm v11.4.0`，exit 0                                       |
 | `pnpm typecheck`                 | `tsc --noEmit`，无错误，exit 0                                                      |
-| `pnpm test`                      | `45` 个文件、`576` 条测试全部通过（其中 WS2 `11` 文件 / `123` 条）                  |
+| `pnpm test`                      | `46` 个文件、`579` 条测试全部通过（其中 WS2 `12` 文件 / `126` 条）                  |
 | `pnpm build`                     | `lib/index.js` 19.94 kB、`lib/index.d.ts` 0.75 kB、`lib/client.js` 42.04 kB，exit 0 |
 | `node scripts/check-pack.mjs`    | `pack check passed: 10 artifacts, icon 711 bytes`，exit 0                           |
 | `pnpm format:check`（整仓）      | `All matched files use Prettier code style!`，exit 0（merge `main` `b69177d` 后）   |
@@ -25,15 +25,16 @@ tests/channel-normalize.spec.ts      22 passed
 tests/channel-targets.spec.ts        11 passed
 tests/channel-process.spec.ts        11 passed
 tests/channel-supervisor.spec.ts      9 passed
-tests/channel-send.spec.ts           15 passed
+tests/channel-send.spec.ts           18 passed
+tests/channel-confirm.spec.ts         3 passed
 tests/channel-discover-auth.spec.ts  16 passed
 tests/channel-log.spec.ts             9 passed
 tests/channel-facade.spec.ts          8 passed
 tests/channel-review.spec.ts          8 passed
 tests/channel-command.spec.ts        10 passed
 tests/channel-ttl.spec.ts             4 passed
-WS2 total                           123 passed
-整仓 total                          576 passed / 45 files
+WS2 total                           126 passed
+整仓 total                          579 passed / 46 files
 ```
 
 ## 2. 覆盖策略
@@ -48,6 +49,7 @@ WS2 total                           123 passed
 - **facade**：paused/disabled 不启动、无目标空闲、缺 sink 与重复 start 报错、dryRun 返回 `skipped` 且不 spawn、owner 缺失抛 `owner-unknown`、真实发送走同一设置源、发现/校验/auth 透出。
 - **命令解析**：`resolveDwsCommand` 的 win32 搜索顺序（PATH `.cmd`、`%APPDATA%`、`%ProgramFiles%`、`%LOCALAPPDATA%` 存在性）、`.cmd` 优先、`Path` 拼写、绝对路径/已带扩展名原样、无命中回退、非 win32 原样，以及通过 `.cmd` shim 端到端 `probeAuth`。
 - **TTL 单位**：`consumeSpec` 精确断言 `--ttl 6h`/`1h`/`24h`；fake 拒收裸数字（exit 3）；validate 经 fake trace 断言 `24h`。
+- **发送确认与回执**：`--yes` 固定追加；缺 `--yes` fake 返回 exit 3 且映射 failed；成功解析 `openMessageId`/`deliveryStatus`；非白名单状态与重复 key 均映射 unknown 且不重发。
 
 所有测试只运行 `tests/fixtures/fake-dws.mjs`，不存在真实钉钉流量。
 
@@ -65,7 +67,9 @@ WS2 total                           123 passed
 | `--format json` 是否被 chat 命令接受 | 发现命令可能直接失败               | 失败会以 `ChannelError` 暴露，不静默；T1 核对                                |
 | `--profile` 位置                     | 参数被拒/被忽略                    | 统一追加末尾；T1 核对                                                        |
 | `--ttl` 裸数字被 dws 拒绝            | dry-run/订阅直接失败               | 已改为 `<hours>h`；fake 同步校验；T1 实测证据写入 009 §3                     |
+| 重复幂等键                           | dws exit 1 `CONFLICT_ERROR`        | 映射 unknown、禁止重发、按 key 对账；fake ledger 只保留一条                  |
 | 宿主 PATH 缺少 npm 全局目录          | `available=false`，但终端可运行    | `resolveDwsCommand` 自动解析 `.cmd` shim；可用 `dws.binaryPath` 绝对路径覆盖 |
+| 非交互发送缺 `--yes`                 | dws exit 3 `confirmation_required` | 已固定追加；fake 同步模拟，映射 failed                                       |
 | Windows `SIGTERM` 无法被捕获         | 优雅停止可能退化为强杀语义         | 停止先关 stdin；文档明确要求 T1 验证；不依赖信号做清理                       |
 | `event stop` 语法未实测              | 孤儿清理可能失败                   | best-effort，失败只记 debug，不改变 orphaned 状态                            |
 
@@ -75,7 +79,7 @@ WS2 total                           123 passed
 2. NDJSON 真实字段名与嵌套结构（见上表）。
 3. `dws event status` / `dws event stop <id> --yes` 的真实输出与权限。
 4. `stdin.end()` 在 Windows 上能否让 `event consume` 自行退出。
-5. `+messages-send --wait-delivery` 的成功/失败回执字段与 AI 角标效果。
+5. `+messages-send --wait-delivery` 的成功字段（`openMessageId`/`deliveryStatus`）已由 T2 证实；其余失败码分类与 AI 角标效果仍待 T3。
 6. TTL 过期、断线重连、重复投递的真实语义（通道透传重复事件，去重由领域按 message id 保证）。
 7. `--profile` 与 `auth status --format json` 在真实账号上的字段拼写（含账号 id 的 `user_id`/`userId`/`staff_id` 等别名）；`--ttl` 的单位已由 T1 证实为 Go duration。
 8. 群目标订阅全部消息是否受管理员授权限制。
@@ -98,7 +102,7 @@ pnpm format:check
   -> All matched files use Prettier code style!
 ```
 
-WS2 新增/改写的全部文件也通过 Prettier（`src/channel`、11 个 spec、fake fixture、006/009、PR 与测试报告）。
+WS2 新增/改写的全部文件也通过 Prettier（`src/channel`、12 个 spec、fake fixture、006/009、PR 与测试报告）。
 
 ## 7. 自评
 

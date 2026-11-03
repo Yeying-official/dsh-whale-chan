@@ -51,6 +51,17 @@ const GONE_MARKERS = [
   /不在(?:该)?群/,
 ]
 
+/** A duplicate idempotency key proves the message was already accepted; never resend it. */
+const DUPLICATE_MARKERS = [
+  /request\s+is\s+repeated/i,
+  /repeated\s+with\s+uuid/i,
+  /conflict_error/i,
+  /duplicate\s+(?:idempotency|request|message|uuid)/i,
+]
+
+/** Delivery states that prove the message reached the conversation. */
+const DELIVERED_STATUS = new Set(['delivered', 'sent', 'ok'])
+
 /** Phrases that prove a definite rejection rather than an uncertain outcome. */
 const REJECT_MARKERS = [
   /invalid/i,
@@ -60,6 +71,9 @@ const REJECT_MARKERS = [
   /not\s+allowed/i,
   /unauthori[sz]ed/i,
   /bad\s+request/i,
+  /confirmation_required/i,
+  /validation/i,
+  /需要用户确认/,
   /无权限/,
   /权限不足/,
   /参数错误/,
@@ -90,7 +104,8 @@ function parseJsonDocument(text: string): Record<string, unknown> | undefined {
 
 function failureCode(payload: Record<string, unknown> | undefined): unknown {
   if (!payload) return undefined
-  return payload.errcode ?? payload.errCode ?? payload.errorCode ?? payload.code
+  const nested = isRecord(payload.error) ? payload.error : undefined
+  return payload.errcode ?? payload.errCode ?? payload.errorCode ?? payload.code ?? nested?.code ?? nested?.errcode
 }
 
 function isFailureCode(code: unknown): boolean {
@@ -102,7 +117,7 @@ function isFailureCode(code: unknown): boolean {
 
 function receiptOf(payload: Record<string, unknown> | undefined): string | undefined {
   if (!payload) return undefined
-  for (const field of ['messageId', 'msgId', 'processQueryKey', 'requestId', 'id']) {
+  for (const field of ['openMessageId', 'messageId', 'msgId', 'processQueryKey', 'requestId', 'id']) {
     const value = payload[field]
     if (typeof value === 'string' && value.trim() !== '') return value.trim()
     if (typeof value === 'number' && Number.isFinite(value)) return String(value)
@@ -124,12 +139,26 @@ function explicitSuccess(payload: Record<string, unknown> | undefined): boolean 
 
 function failureText(payload: Record<string, unknown> | undefined, stderr: string): string {
   const parts: string[] = [stderr]
-  if (payload) {
-    for (const field of ['error', 'message', 'errorMsg', 'errorMessage', 'errmsg', 'reason', 'errorCode', 'errCode']) {
-      const value = payload[field]
+  const readFields = (record: Record<string, unknown>): void => {
+    for (const field of [
+      'message',
+      'errorMsg',
+      'errorMessage',
+      'errmsg',
+      'reason',
+      'category',
+      'errorCode',
+      'errCode',
+    ]) {
+      const value = record[field]
       if (typeof value === 'string') parts.push(value)
       else if (typeof value === 'number') parts.push(String(value))
     }
+  }
+  if (payload) {
+    readFields(payload)
+    // dws wraps rejections as `{"error": {"category": ..., "reason": ...}}`.
+    if (isRecord(payload.error)) readFields(payload.error)
   }
   return parts.filter((part) => part.trim() !== '').join(' ')
 }
@@ -139,10 +168,21 @@ export function classifySendOutcome(result: CommandResult): SendDetail {
   if (result.error) return { result: 'failed', error: truncate(redact(result.error), 200) }
   if (result.timedOut) return { result: 'unknown', error: 'dws send timed out; delivery cannot be proven' }
 
-  const payload = parseJsonDocument(result.stdout)
+  // A rejected send may print its JSON on stderr; treat both streams as receipts.
+  const payload = parseJsonDocument(result.stdout) ?? parseJsonDocument(result.stderr)
   const text = failureText(payload, result.stderr)
   const gone = GONE_MARKERS.some((marker) => marker.test(text))
   const rejected = REJECT_MARKERS.some((marker) => marker.test(text))
+
+  // A repeated uuid means the first attempt was already accepted. It is not a
+  // failure and definitely not a reason to resend: the caller must treat the
+  // outbound as unknown and reconcile by the idempotency key.
+  if (DUPLICATE_MARKERS.some((marker) => marker.test(text))) {
+    return {
+      result: 'unknown',
+      error: 'duplicate idempotency key; the message was already accepted, do not retry',
+    }
+  }
 
   if (result.code === 0) {
     if (explicitFailure(payload)) {
@@ -151,6 +191,18 @@ export function classifySendOutcome(result: CommandResult): SendDetail {
         result: 'failed',
         error: truncate(redact(text || `dws reported failure code ${String(failureCode(payload))}`), 200),
       }
+    }
+    const deliveryStatus =
+      typeof payload?.deliveryStatus === 'string' ? payload.deliveryStatus.trim().toLowerCase() : undefined
+    if (deliveryStatus !== undefined) {
+      if (!DELIVERED_STATUS.has(deliveryStatus)) {
+        return {
+          result: 'unknown',
+          error: truncate(redact(`dws reported deliveryStatus=${deliveryStatus}`), 200),
+        }
+      }
+      const statusReceipt = receiptOf(payload)
+      return { result: 'sent', ...(statusReceipt ? { receipt: statusReceipt } : {}) }
     }
     if (!payload || !explicitSuccess(payload)) {
       // Exit 0 without a confirming receipt is not proof of delivery.
@@ -198,6 +250,10 @@ export function buildSendArgs(outbound: Outbound, settings: Settings): string[] 
     '--wait-delivery',
     '-f',
     'json',
+    // Non-interactive confirmation. Sending is always part of a flow the owner
+    // already configured or approved; dws rejects the call without `--yes`
+    // (T2: exit 3, `confirmation_required`).
+    '--yes',
   ]
 
   const target = outbound.target

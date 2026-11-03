@@ -51,7 +51,7 @@
 ```text
 pnpm install --frozen-lockfile   -> Done, exit 0
 pnpm typecheck                   -> tsc --noEmit, exit 0
-pnpm test                        -> 45 files, 576 tests passed (WS2: 11 files / 123 tests)
+pnpm test                        -> 46 files, 579 tests passed (WS2: 12 files / 126 tests)
 pnpm build                       -> lib/index.js, lib/index.d.ts, lib/client.js, exit 0
 node scripts/check-pack.mjs      -> pack check passed: 10 artifacts, icon 711 bytes
 pnpm format:check                -> All matched files use Prettier code style!
@@ -65,7 +65,8 @@ WS2 用例分布：
 | `channel-targets.spec.ts`       | 11   | 事件键、群/单聊/open 参数、TTL、profile、去重、owner 无回退                                            |
 | `channel-process.spec.ts`       | 11   | 就绪行、行切分、stdin 停止、SIGTERM、orphaned、dry-run、超时、spawn 失败                               |
 | `channel-supervisor.spec.ts`    | 9    | 双目标、顺序、sink 抛错、坏行、退避重启、无重叠、非法目标、stop 收敛、孤儿清理、无 owner 拒绝          |
-| `channel-send.spec.ts`          | 15   | 四种结果、幂等键、ledger、超时 unknown、回执分类                                                       |
+| `channel-send.spec.ts`          | 18   | 四种结果、幂等键、ledger、超时 unknown、回执分类                                                       |
+| `channel-confirm.spec.ts`       | 3    | 缺 `--yes` → failed；`deliveryStatus` 非白名单 → unknown；重复 key → unknown 且一条 ledger             |
 | `channel-discover-auth.spec.ts` | 16   | 发现容错/上限/去重、dry-run 校验、auth 降级、owner userId 与脱敏                                       |
 | `channel-log.spec.ts`           | 9    | token/secret/query/JSON 脱敏、单行错误、截断                                                           |
 | `channel-facade.spec.ts`        | 8    | paused/disabled 不订阅、无目标空闲、重复 start、dryRun skipped、owner 拒绝                             |
@@ -98,6 +99,17 @@ review 同步：已 merge `main` `b69177d`（仅 `docs/PROGRESS.md` 格式修复
 ### 4.3 Review round 3：T1 实测 `--ttl` 需要 Go duration
 
 T1 真机 dry-run 发现 `--ttl 1` 被 dws 拒绝：`exit=3`、`invalid argument "1" for "--ttl" flag: time: missing unit in duration "1"`。修复：`consumeSpec` 通过 `ttlDuration(hours)` 统一输出 `<hours>h`（1→`1h`、24→`24h`），`fake-dws` 同步校验单位并在缺失时退出 3，validate 成功路径经 fake trace 断言 argv 为 `24h`。
+
+### 4.4 Review round 4：T2 发送确认与真实回执
+
+T2 真机发现非交互 `+messages-send` 缺少 `--yes` 会被 dws 拒绝（exit 3，`confirmation_required`）；成功回执为 `{conversationId, deliveryStatus, idempotencyKey, openMessageId}`；同一 key 第二次返回 exit 1 的 `CONFLICT_ERROR` / `Request is repeated with uuid`。
+
+- `buildSendArgs` 固定追加 `--yes`（发送属于主人已配置/已批准流程，不能依赖 stdin）；`event stop` 原本已带 `--yes`，`chat +chat-search`/`+chat-list`/`auth status` 经审计无需确认。
+- `receiptOf` 优先 `openMessageId`，保留 messageId/msgId/processQueryKey；`deliveryStatus` 缺失或为 `delivered|sent|ok` 才算 sent，非白名单（unknown/pending/failed）→ unknown。
+- 重复 key 明确映射 unknown（detail=`duplicate idempotency key`），不重发、不产生第二条；回执 JSON 允许出现在 stderr，并按嵌套 `error` 取 code/message。
+- fake 同步模拟：缺 `--yes` → `confirmation_required` + exit 3 且不写 ledger；同 key 第二次 → `CONFLICT_ERROR` + exit 1 且不新增 ledger；成功回执改为真实字段。
+
+测试：`buildSendArgs` 精确 argv 含 `--yes`；缺 `--yes` → failed（非 unknown）且 ledger 空；成功解析 `openMessageId` 且 ledger 含 `--yes`；`deliveryStatus: unknown` → unknown；重复 key → unknown 且 ledger 保持 1 条；dryRun 仍不 spawn。
 
 ## 5. 风险与未验证项
 
@@ -140,6 +152,7 @@ review round 1/2 已决定，不再需要额外决策：
 4. **dryRun 发送**：`skipped`，不改变 Outbound 状态、不按失败重试。
 5. **`format:check`**：整合方已在 `main` `b69177d` 修复 `docs/PROGRESS.md`，本分支 merge 后整仓通过。
 6. **`--ttl` 单位**：dws 按 Go duration 解析，v1 固定 `<hours>h`；T1 裸数字被拒的回归已由测试固化。
-7. **Windows `dws` 解析**：自动解析 npm shim；找不到时保留原命令或由 `dws.binaryPath` 绝对路径覆盖，不再要求宿主 `PATH` 与交互 shell 一致。
+7. **非交互发送**：`--yes` 固定追加；重复 key 视为已受理（unknown），按幂等键对账，不重发。
+8. **Windows `dws` 解析**：自动解析 npm shim；找不到时保留原命令或由 `dws.binaryPath` 绝对路径覆盖，不再要求宿主 `PATH` 与交互 shell 一致。
 
 遗留只有真机验证：§5 列出的 provisional 项需要在 T1–T2 逐项核对；不一致时先改 009 与测试，再改实现。

@@ -184,7 +184,50 @@ async function runConsume(args) {
   exitAfterSignal(Number.isFinite(signalDelay) && signalDelay > 0 ? signalDelay : 0)
 }
 
+function ledgerHasKey(key) {
+  const file = process.env.FAKE_DWS_LEDGER
+  if (!file || !existsSync(file)) return false
+  const lines = readFileSync(file, 'utf8')
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== '')
+  for (const line of lines) {
+    let entry
+    try {
+      entry = JSON.parse(line)
+    } catch {
+      continue
+    }
+    const argv = Array.isArray(entry?.argv) ? entry.argv : []
+    const index = argv.indexOf('--idempotency-key')
+    if (index >= 0 && argv[index + 1] === key) return true
+  }
+  return false
+}
+
 async function runSend(args) {
+  // Non-interactive sends require dws's explicit confirmation.
+  if (!hasFlag(args, '--yes')) {
+    const message = 'dws chat +messages-send 需要用户确认，当前环境无法交互；加 --dry-run 预览，或确认后加 --yes 执行'
+    process.stderr
+      .write(`${JSON.stringify({ error: { category: 'validation', code: 3, reason: 'confirmation_required', message } })}
+`)
+    trace('exit', { reason: 'confirmation-required', code: 3 })
+    process.exit(3)
+  }
+
+  const key = flagValue(args, '--idempotency-key')
+  // A second attempt with the same key is a duplicate: the first send is
+  // already accepted, so this must not append a second ledger row.
+  if (key && ledgerHasKey(key)) {
+    const message = `sendPersonalMessageByServerPush error: Request is repeated with uuid '${key}'.`
+    process.stderr.write(
+      `${JSON.stringify({ error: { category: 'api', code: 1, reason: 'business_error', server_error_code: 'CONFLICT_ERROR', message } })}
+`,
+    )
+    trace('exit', { reason: 'duplicate-key', code: 1 })
+    process.exit(1)
+  }
+
   ledger()
   const mode = process.env.FAKE_DWS_SEND_RESULT ?? 'sent'
   if (mode === 'unknown') {
@@ -203,7 +246,14 @@ async function runSend(args) {
     print({ success: false, errorCode: 'chat_not_found', message: 'chat not found' })
     process.exit(1)
   }
-  print({ success: true, messageId: `fake-msg-${process.pid}`, processQueryKey: `pq-${process.pid}` })
+  const conversationId =
+    flagValue(args, '--chat-id') ?? flagValue(args, '--open-dingtalk-id') ?? flagValue(args, '--user') ?? 'unknown'
+  print({
+    conversationId,
+    deliveryStatus: process.env.FAKE_DWS_DELIVERY_STATUS ?? 'delivered',
+    idempotencyKey: key ?? 'missing',
+    openMessageId: `msg0/fake-${process.pid}`,
+  })
   process.exit(0)
 }
 

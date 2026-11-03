@@ -48,7 +48,7 @@
 - 触发：另一成员 @ 主人并请求「在测试工作区创建 t4.txt，内容写 T4 ok」。
 - 分类为 task → `awaiting-approval`；经 `POST /tasks/:id/approve` 批准 → `queued` → `running` → `succeeded`。
 - 产物：`<stateDir>/tasks/<taskId>/t4.txt`，内容 `T4 ok`。
-- 结果回复：outbound `sent`、receipt 已收到；文本含完成摘要与 worker 会话 `whale-task-<taskId>-<assignment8>`。
+- 结果回复：outbound `sent`、receipt 已收到；首次文本含内部 `Route:` 与 `会话：whale-task-…`，验收中已修复——现只发面向发起人的完成摘要（见 §3 第 5 项）。
 
 ## 2. 真机与测试环境的差异
 
@@ -65,6 +65,7 @@
 | 2 | 发送永远失败 | 非交互缺 `--yes` | `buildSendArgs` 追加 `--yes`；回执解析 `openMessageId`/`deliveryStatus`；重复键映射 `unknown` 不重发 |
 | 3 | 群消息整条被跳过 | 归一化只认 camelCase/atUsers | 适配真实 snake_case；`conversationType` 按目标类型推断；`title` 回退目标名；`@ownerNick` 判定 |
 | 4 | 模型 7–12 秒完成但插件等到超时 | ① `TurnTracker` 用上一轮 `current` 认领新消息；② `awaitTurnEnd` 用裸 requestId 比较带前缀的消息 id | `pending` 状态等下一个 `turn/start` 认领；新增 `deliveryId()` 统一前缀，等待用带前缀 id |
+| 5 | T4 结果回复泄漏内部信息 | worker 汇报含 `Route: fast-path` 与会话 id，模板原样发到群里 | worker prompt 明确“面向发起人”的禁写清单；结果模板再脱敏内部行，会话 id 只进审计/面板 |
 
 其中 ④ 的两个缺陷都由真实顺序/真实 id 触发，旧测试的桩恰好把两者都“假掉”了；修复时先补会红的复现测试（3 条 + 4 条），再改实现。
 

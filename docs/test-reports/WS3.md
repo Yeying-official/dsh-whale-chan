@@ -23,13 +23,13 @@ $ pnpm test
  ✓ tests/brain-classifier.spec.ts (17 tests) 42ms
  ✓ tests/brain-reply.spec.ts (20 tests) 75ms
  ✓ tests/brain-research.spec.ts (16 tests) 137ms
- ✓ tests/brain-policy.spec.ts (18 tests) 27ms
+ ✓ tests/brain-policy.spec.ts (20 tests) 21ms
  ✓ tests/brain-rate-limit.spec.ts (9 tests) 12ms
  ✓ tests/brain-loop-guard.spec.ts (11 tests) 10ms
 （另有既有 9 个 spec 文件）
 
  Test Files  18 passed (18)
-      Tests  224 passed (224)
+      Tests  226 passed (226)
    Duration  2.95s
 
 $ pnpm build
@@ -82,12 +82,17 @@ total artifacts: 15
 | `bbe1544` | 契约测试                | 0   | 224 passed |
 | `71d3b9b` | 文档                    | 0   | 224 passed |
 | `f32bed5` | 合并 `main`（仅格式化） | 0   | 224 passed |
+| `735f378` | 文档（最终门禁）        | 0   | 224 passed |
+| `15de9f1` | `fix`：名单只按 userId  | 0   | 224 passed |
+| `0f4accc` | `test`：id-only + 静默  | 0   | 226 passed |
+| `669eaba` | `docs`：名单/时区/草稿  | 0   | 226 passed |
 
-另做导入闭包检查覆盖 5 个提交：每个提交引用的相对模块与 `prompts/` 都存在于该提交的树中。
+另做导入闭包检查覆盖 5 个实现/测试提交：每个提交引用的相对模块与 `prompts/` 都存在于该提交
+的树中。
 
 自测结果：通过（见第 3 节）。
 
-## 2. 新增测试（117 条）
+## 2. 新增测试（119 条）
 
 | 文件                             | 条数 | 覆盖                                                                                                                        |
 | -------------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------- |
@@ -96,45 +101,48 @@ total artifacts: 15
 | `tests/brain-classifier.spec.ts` | 17   | 裸/围栏/带噪声 JSON、schema strict、task 缺 title、need_search 归一、低置信、超时、模型异常、提示内容                       |
 | `tests/brain-reply.spec.ts`      | 20   | 围栏/引号/免责声明清理、长度截断、URL 白名单、引用追加与预算、无检索不动链接、回声弃稿、空稿、超时/异常、提示组装、凭证脱敏 |
 | `tests/brain-research.spec.ts`   | 16   | 预算透传、事实/来源上限与去重、URL 校验、降级（禁用/空/超时/异常/忽略 signal）、缓存命中/过期/关闭/失败不缓存、规范渲染     |
-| `tests/brain-policy.spec.ts`     | 18   | 策略矩阵全量、跨午夜、边界时刻、优先级、`isQuietHour`、目标精确匹配                                                         |
+| `tests/brain-policy.spec.ts`     | 20   | 策略矩阵全量、跨午夜、边界时刻、优先级、`isQuietHour`、目标精确匹配、名单只按 userId、静默只给 review                       |
 | `tests/brain-rate-limit.spec.ts` | 9    | 窗口内计数、出窗清理、key 隔离、gapMs、乱序写入、注入时钟、LRU 淘汰、forget/clear、gate 快照                                |
 | `tests/brain-loop-guard.spec.ts` | 11   | 自消息（id/昵称/近似昵称）、规范化、引用前缀、整段/引用/包含/短文本、连续上限                                               |
 | `tests/brain-contract.spec.ts`   | 8    | 端口注入与禁用导入、分层、文件系统仅 prompts、五份模板就位、变量契约、安全条款、分类契约文档                                |
 
-仓库总数从 **107** 增加到 **224**。
+仓库总数从 **107** 增加到 **226**。
 
 ### 2.1 策略矩阵（`tests/brain-policy.spec.ts` 逐条对应）
 
-| #   | 条件                                   | 期望                         | 测试名                                              |
-| --- | -------------------------------------- | ---------------------------- | --------------------------------------------------- |
-| 1   | 普通私聊                               | `auto` / `allowed`           | allows an automatic reply…                          |
-| 2   | `monitor.enabled=false`                | `off` / `monitor_disabled`   | turns everything off…                               |
-| 3   | `monitor.paused=true`（且目标 off）    | `off` / `monitor_paused`     | 同上                                                |
-| 4   | 目标不存在                             | `off` / `target_missing`     | refuses a conversation…                             |
-| 5   | 目标 `enabled=false`                   | `off` / `target_disabled`    | 同上                                                |
-| 6   | 目标 `replyMode=off`                   | `off` / `target_off`         | lets a target force off or review…                  |
-| 7   | 目标 `replyMode=review`                | `review` / `target_review`   | 同上                                                |
-| 8   | 发送者在 blocklist                     | `off` / `sender_blocked`     | honours the sender allow/block list                 |
-| 9   | allowlist 非空且不在内                 | `off` / `sender_not_allowed` | 同上                                                |
-| 10  | allowlist 命中                         | `auto`                       | 同上                                                |
-| 11  | 群聊未 @                               | `off` / `not_addressed`      | requires a mention in groups…                       |
-| 12  | 群聊已 @                               | `auto`                       | 同上                                                |
-| 13  | `requireMentionInGroups=false`         | `auto`                       | 同上                                                |
-| 14  | 广播                                   | `off` / `broadcast`          | ignores broadcasts…                                 |
-| 15  | `ignoreBroadcast=false` + 广播         | `auto`                       | 同上                                                |
-| 16  | 同日静默 13:00（12–14）                | `review` / `quiet_hours`     | downgrades to review inside a same-day window       |
-| 17  | 跨午夜 22/23/0/7 点                    | `review`                     | downgrades to review across midnight                |
-| 18  | 跨午夜 8/12/21 点                      | `auto`                       | 同上                                                |
-| 19  | `replyDuringQuiet=true` 23 点          | `auto`                       | lets the owner reply during quiet hours…            |
-| 20  | `quietHours.enabled=false` 23 点       | `auto`                       | 同上                                                |
-| 21  | `autoReply=false`                      | `review` / `auto_reply_off`  | downgrades to review when automatic replies are off |
-| 22  | 本小时达上限                           | `review` / `rate_limited`    | downgrades to review at the hourly cap…             |
-| 23  | 间隔 7999ms（阈值 8000）               | `review` / `min_gap`         | 同上                                                |
-| 24  | 间隔 8000ms                            | `auto`                       | 同上                                                |
-| 25  | 连续 AI 回复 2 条                      | `auto`                       | stops a conversation after three…                   |
-| 26  | 连续 AI 回复 3 条                      | `off` / `loop_guard`         | 同上                                                |
-| 27  | blocklist + 静默 + `autoReply=false`   | `off` / `sender_blocked`     | reports the most authoritative reason…              |
-| 28  | 目标按 id 精确匹配（同名 kind 不误配） | `auto`                       | matches a target by its exact id                    |
+| #   | 条件                                   | 期望                         | 测试名                                                  |
+| --- | -------------------------------------- | ---------------------------- | ------------------------------------------------------- |
+| 1   | 普通私聊                               | `auto` / `allowed`           | allows an automatic reply…                              |
+| 2   | `monitor.enabled=false`                | `off` / `monitor_disabled`   | turns everything off…                                   |
+| 3   | `monitor.paused=true`（且目标 off）    | `off` / `monitor_paused`     | 同上                                                    |
+| 4   | 目标不存在                             | `off` / `target_missing`     | refuses a conversation…                                 |
+| 5   | 目标 `enabled=false`                   | `off` / `target_disabled`    | 同上                                                    |
+| 6   | 目标 `replyMode=off`                   | `off` / `target_off`         | lets a target force off or review…                      |
+| 7   | 目标 `replyMode=review`                | `review` / `target_review`   | 同上                                                    |
+| 8   | 发送者 userId 在 blocklist             | `off` / `sender_blocked`     | honours the sender allow list and block list by user id |
+| 9   | allowlist 非空且 userId 不在其中       | `off` / `sender_not_allowed` | 同上                                                    |
+| 10  | userId 在 allowlist（含首尾空白）      | `auto`                       | 同上                                                    |
+| 11  | 群聊未 @                               | `off` / `not_addressed`      | requires a mention in groups…                           |
+| 12  | 群聊已 @                               | `auto`                       | 同上                                                    |
+| 13  | `requireMentionInGroups=false`         | `auto`                       | 同上                                                    |
+| 14  | 广播                                   | `off` / `broadcast`          | ignores broadcasts…                                     |
+| 15  | `ignoreBroadcast=false` + 广播         | `auto`                       | 同上                                                    |
+| 16  | 同日静默 13:00（12–14）                | `review` / `quiet_hours`     | downgrades to review inside a same-day window           |
+| 17  | 跨午夜 22/23/0/7 点                    | `review`                     | downgrades to review across midnight                    |
+| 18  | 跨午夜 8/12/21 点                      | `auto`                       | 同上                                                    |
+| 19  | `replyDuringQuiet=true` 23 点          | `auto`                       | lets the owner reply during quiet hours…                |
+| 20  | `quietHours.enabled=false` 23 点       | `auto`                       | 同上                                                    |
+| 21  | `autoReply=false`                      | `review` / `auto_reply_off`  | downgrades to review when automatic replies are off     |
+| 22  | 本小时达上限                           | `review` / `rate_limited`    | downgrades to review at the hourly cap…                 |
+| 23  | 间隔 7999ms（阈值 8000）               | `review` / `min_gap`         | 同上                                                    |
+| 24  | 间隔 8000ms                            | `auto`                       | 同上                                                    |
+| 25  | 连续 AI 回复 2 条                      | `auto`                       | stops a conversation after three…                       |
+| 26  | 连续 AI 回复 3 条                      | `off` / `loop_guard`         | 同上                                                    |
+| 27  | blocklist + 静默 + `autoReply=false`   | `off` / `sender_blocked`     | reports the most authoritative reason…                  |
+| 28  | 目标按 id 精确匹配（同名 kind 不误配） | `auto`                       | matches a target by its exact id                        |
+| 29  | 昵称与白名单成员相同、userId 不同      | `off` / `sender_not_allowed` | never authorizes by display name…                       |
+| 30  | 黑名单里写的是昵称                     | `auto`（不匹配任何 userId）  | 同上                                                    |
+| 31  | 静默期 22/23/0/3/7 点                  | `review`（无发送权）         | keeps a quiet-hours reply at review…                    |
 
 ### 2.2 变异自测（全部被杀死）
 
@@ -147,6 +155,8 @@ total artifacts: 15
 | 忽略 URL 白名单（保留模型写的任何链接） | `brain-reply.spec.ts`      | KILLED |
 | 超长人设不再先丢示例                    | `brain-persona.spec.ts`    | KILLED |
 | 模板缺失时返回空串而不是抛错            | `brain-prompts.spec.ts`    | KILLED |
+| 名单改回按发送者昵称比较（P0 回归）     | `brain-policy.spec.ts`     | KILLED |
+| 名单改回按昵称比较（allowlist 分支）    | `brain-policy.spec.ts`     | KILLED |
 
 ```text
 $ node .artifacts/ws3-mutate.mjs
@@ -156,6 +166,14 @@ KILLED  keep every URL the model wrote (tests/brain-reply.spec.ts)
 KILLED  stop dropping examples first when the persona is too long (tests/brain-persona.spec.ts)
 KILLED  treat a missing prompt file as an empty one (tests/brain-prompts.spec.ts)
 all mutations killed
+```
+
+复核轮补跑的两条 P0 回归变异：
+
+```text
+$ node "$TEMP/ws3-mutate-p0.mjs"
+KILLED  compare by sender name on the blocked list
+KILLED  compare by sender name on the allowed list
 ```
 
 ## 3. 提示示例
@@ -226,8 +244,20 @@ all mutations killed
 
 | 项目                 | 结论                                                        |
 | -------------------- | ----------------------------------------------------------- |
-| 测试能否杀死错误实现 | 5/5 变异被杀死                                              |
+| 测试能否杀死错误实现 | 7/7 变异被杀死（含 2 个 P0 名单回归）                       |
 | 契约测试             | 端口注入、分层、文件系统边界、模板变量、安全条款、JSON 契约 |
 | 文档一致性           | 004/002 的规则顺序、reason code、默认值与 `policy.ts` 一致  |
 | 工作区               | 提交后 `git status --porcelain` 为空                        |
 | 依赖                 | 未新增依赖、未改 `package.json`、未新增网络访问             |
+| 身份授权             | 名单只比较 userId，昵称不参与（P0 已修）                    |
+
+## 6. 审核整改（复核轮）
+
+| 审核项                         | 处理                                                                                                                                                                                    | 落点                                                                        |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| P0：名单按昵称匹配等于允许冒充 | `matchesSender` 改为 `matchesSenderId`，只对 `senderId` 做 trim 后全等比较；删除昵称分支；新增“昵称相同、userId 不同”与“黑名单写昵称不匹配”测试；把两条名单改回按昵称比较的变异均被杀死 | `src/brain/policy.ts`、`tests/brain-policy.spec.ts`（`15de9f1`、`0f4accc`） |
+| 静默时区未写明                 | 文档写明按宿主本地时区、跨午夜按本地小时解释；`isQuietHour` 注释同步                                                                                                                    | `docs/002-authorization.md` §3、`src/brain/policy.ts`                       |
+| review 草稿是否会自动补发      | 实现无定时器/重算路径：`review` 只是决策结果，不进入发送队列；文档写明“静默期草稿只能由本人在面板发送或丢弃”，并用 `keeps a quiet-hours reply at review…` 测试固定“只给 review”         | `docs/002-authorization.md` §3、`tests/brain-policy.spec.ts`                |
+
+整改后门禁：`pnpm typecheck` OK、`pnpm test` **226 passed**、`pnpm format:check` OK、
+`git status --porcelain` 为空。

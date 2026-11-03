@@ -76,15 +76,19 @@ conversationType/addressed/broadcast/at`）。`broadcast` 与 `kind` 由通道�
 | 计数器                  | 内存                      | 重启忘记限速，好过持久化一个错误的“不能说话”                         |
 | 连续上限                | 常量 3                    | 主人不需要调这个数；改设置只会制造新故障                             |
 | persona 超长            | 示例 → 知识 → 规则 → 截断 | 示例最可丢，身份与规则最不可丢                                       |
+| 发送者名单              | 只比较 userId（全等）     | 昵称可被任意改动，按昵称匹配等于允许冒充                             |
 
 ## 5. 测试
 
-- 新增 **117** 条 brain 测试（persona 7、prompts 11、classifier 17、reply 20、research 16、
-  policy 18、rate-limit 9、loop-guard 11、contract 8），仓库总数 107 → **224**。
-- 5 个变异自测全部被杀死（去掉 loop guard、去掉 need_search 归一、放开 URL 白名单、
-  不丢示例、缺失模板返回空串）。
+- 新增 **119** 条 brain 测试（persona 7、prompts 11、classifier 17、reply 20、research 16、
+  policy 20、rate-limit 9、loop-guard 11、contract 8），仓库总数 107 → **226**。
+- 7 个变异自测全部被杀死（去掉 loop guard、去掉 need_search 归一、放开 URL 白名单、
+  不丢示例、缺失模板返回空串，以及把发送者名单改回按昵称比较的两条 P0 回归）。
 - 5 个实现/测试提交逐一导出后执行 `tsc --noEmit` 与全量测试，历史可独立构建（142 / 178 /
   216 / 224 条）。
+- 审核整改：`fix(brain): match allow lists by user id only`（P0，名单只按 userId 全等匹配）、
+  `test(brain): cover id-only allow lists and quiet review`；`docs/002-authorization.md` 补
+  “名单存 userId、面板解析姓名”“静默按宿主本地时区”“静默期草稿不会自动发送”。
 - 详细命令输出、策略矩阵与自评见 [WS3 测试报告](../test-reports/WS3.md)。
 
 ## 6. 影响面与风险
@@ -117,7 +121,7 @@ conversationType/addressed/broadcast/at`）。`broadcast` 与 `kind` 由通道�
 | ④   | 策略矩阵覆盖静默跨午夜/限速/防环    | 16 条规则固定顺序；`isQuietHour` 边界单测；18 条 gate 测试                    |
 | ⑤   | 检索预算/缓存/降级                  | 超时 abort、LRU+TTL、失败不缓存、空结果 degraded；16 条测试                   |
 | ⑥   | 端口注入、无网络、无 DSH 依赖       | 三个端口 + 源码扫描契约测试                                                   |
-| ⑦   | 测试能杀死错误实现                  | 5 个变异全部被杀死                                                            |
+| ⑦   | 测试能杀死错误实现                  | 7 个变异全部被杀死（含 2 个 P0 名单回归）                                     |
 | ⑧   | 文档与实现一致                      | 004/002 重写，reason code 与顺序和 `policy.ts` 一致                           |
 | ⑨   | `prompts/` 随包发布、缺失 fail-fast | `files` 白名单 + `check-pack` 校验 + `PromptLoadError`                        |
 | ⑩   | 提交规范、工作区干净                | 见 §9                                                                         |

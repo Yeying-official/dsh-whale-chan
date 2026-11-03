@@ -29,8 +29,8 @@
 | 3    | 目标不在 `targets.rows` 中                            | `off`    | `target_missing`     |
 | 4    | 目标 `enabled = false`                                | `off`    | `target_disabled`    |
 | 5    | 目标 `replyMode = 'off'`                              | `off`    | `target_off`         |
-| 6    | 发送者在 `reply.blockedSenders`                       | `off`    | `sender_blocked`     |
-| 7    | `allowedSenders` 非空且发送者不在其中                 | `off`    | `sender_not_allowed` |
+| 6    | 发送者 userId 在 `reply.blockedSenders`               | `off`    | `sender_blocked`     |
+| 7    | `allowedSenders` 非空且发送者 userId 不在其中         | `off`    | `sender_not_allowed` |
 | 8    | 群聊、`requireMentionInGroups`、且未 @ 助理           | `off`    | `not_addressed`      |
 | 9    | `ignoreBroadcast` 且消息是广播                        | `off`    | `broadcast`          |
 | 10   | 连续 AI 回复达到 3 条                                 | `off`    | `loop_guard`         |
@@ -49,7 +49,9 @@
 
 ## 3. 静默时段
 
-- 时间窗来自 `monitor.quietHours`（本地时间 `HH:mm`，默认 22:00–08:00、启用、不回复）。
+- 时间窗来自 `monitor.quietHours`（`HH:mm`，默认 22:00–08:00、启用、不回复）。
+- 时间按**宿主本地时区**解释：`gateReply` 读取注入 `Date` 的 `getHours()`，所以跨午夜窗口
+  命中的是这台机器上的 22 点、23 点、0–7 点，而不是消息发送方所在地的时区。
 - **支持跨午夜**：`start > end` 时，命中 `hour >= start || hour < end`；`22:00–08:00`
   覆盖 22、23、0–7 点。`start == end` 视为“没有窗口”（不用关开关也能停用）。
 - 边界是**左闭右开**：22:00 命中、08:00 不命中。
@@ -57,6 +59,8 @@
 - `quietHours.enabled = false` 时整条规则跳过。
 - 静默期的结果是 `review` 而不是 `off`：夜里不该“主动回”，但一条草稿留在面板里，
   第二天主人可以直接发，比让消息自生自灭更符合“少打扰但别误事”。
+- **静默期草稿不会在静默结束后自动发送**：`review` 只是决策结果，不进入发送队列；草稿只能由
+  本人在面板里发送或丢弃，而且这条消息的决策不会因为时间跨过 08:00 而重算。
 
 ## 4. 限速
 
@@ -92,8 +96,12 @@
 
 - `targets.rows` 是白名单：不在其中的会话一律 `target_missing`，宁可漏答也不误答
   （`010` §2.2/§9：只允许测试群与显式配置的目标）。
-- `reply.blockedSenders` 优先于允许名单；匹配 userId 精确相等或昵称大小写不敏感相等。
+- `reply.blockedSenders` 优先于允许名单。
 - `reply.allowedSenders` 非空时，只有名单内的人能触发回复；空表示“不限”。
+- **两张名单都只存并只比较 userId**：匹配方式是去掉首尾空白后的**全等**，大小写敏感。
+  昵称不参与授权——任何人都能把昵称改成名单里某个人的名字，所以按昵称匹配等于允许冒充。
+- 面板负责把“选人”解析成 userId 再保存；名字只用于展示。名单里误存的昵称不会匹配任何人
+  （既不会放行，也不会拦截）。
 - 群聊默认必须 @（`requireMentionInGroups`）；`at-me` 目标由通道保证 `addressed`。
 - 广播（公告、群发）默认忽略；`ignoreBroadcast = false` 时才处理。
 

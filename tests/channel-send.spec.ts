@@ -70,6 +70,7 @@ describe('buildSendArgs', () => {
       '--wait-delivery',
       '-f',
       'json',
+      '--yes',
       '--chat-id',
       'cid-1',
       '--markdown',
@@ -109,14 +110,15 @@ describe('buildSendArgs', () => {
 })
 
 describe('send with the fake dws', () => {
-  it('returns sent with a receipt and passes the key and body through argv', async () => {
+  it('returns sent with the open message id and records --yes in the ledger', async () => {
     const { runner, ledger } = fakeRunner({ FAKE_DWS_SEND_RESULT: 'sent' })
     const detail = await sendDetailed(outbound(), settings(), { runner })
     expect(detail.result).toBe('sent')
-    expect(detail.receipt).toMatch(/^fake-msg-/)
+    expect(detail.receipt).toMatch(/^msg0\//)
     const entries = ledgerEntries(ledger)
     expect(entries).toHaveLength(1)
     const argv = entries[0]?.argv ?? []
+    expect(argv).toContain('--yes')
     expect(argv[argv.indexOf('--idempotency-key') + 1]).toBe('key-1')
     expect(argv).not.toContain('--text')
     expect(argv[argv.indexOf('--markdown') + 1]).toBe('hello')

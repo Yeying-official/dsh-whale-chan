@@ -30,7 +30,7 @@
 | 版本        | `0.1.0`（`package.json`、`PLUGIN_VERSION`、`check-pack` 三处一致） |
 | 全量测试    | **702 tests**（脱敏修复合并后的 main；发布提交需复跑确认）         |
 | 打包        | `15 artifacts`，icon 711 bytes                                     |
-| tag         | **未打**；由发布复核后执行 `v0.1.0`                                |
+| tag         | **`v0.1.0`**（本地，未 push；指向发布复核提交）                    |
 | 安装        | 未执行 profile 安装/升级；真机验收使用已安装的 link 版本           |
 
 ## 3. WS8 真机结论（T0–T4）

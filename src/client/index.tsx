@@ -1,8 +1,10 @@
 /**
  * Browser entry: registers the sidebar icon and the `whale-chan` main panel.
  *
- * WS0 has no client-side host imports. The only runtime calls are the DSH slot
- * and locale services; all product copy comes from `locale/*.json`.
+ * The panel only talks to the management HTTP API through `api.ts`; the two
+ * DSH client services it uses are navigation (`uiWorkspace.openSession`) and
+ * the session catalog (`sessions`), which keeps the README promise that the
+ * client never imports a host implementation package.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
@@ -15,6 +17,27 @@ import { PanelProvider } from './provider.tsx'
 import { PANEL_ID } from '../shared/limits.ts'
 
 type WhalePanelId = MainPanelId
+
+/** The narrow session-catalog face the panel uses to resolve one session id. */
+interface SessionCatalog {
+  readonly list: {
+    getSnapshot(): { readonly phase: string; readonly byId: Readonly<Record<string, unknown>> }
+  }
+  refresh(): Promise<void>
+}
+
+/** The host Session catalog is not ready or does not list the requested session. */
+class SessionNavigationError extends Error {
+  constructor(readonly reason: 'not-ready' | 'not-listed') {
+    super(reason)
+    this.name = 'SessionNavigationError'
+  }
+}
+
+type PanelContext = Context & {
+  readonly sessions: SessionCatalog
+  readonly uiWorkspace: { openSession(target: never): void }
+}
 
 function WhaleIcon({ size }: SidebarPanelIconOwnerProps) {
   return (
@@ -38,23 +61,41 @@ function WhaleIcon({ size }: SidebarPanelIconOwnerProps) {
   )
 }
 
-function MainPanel({ t }: { t: T }) {
+function MainPanel({ ctx, t }: { ctx: PanelContext; t: T }) {
+  const openSession = async (sessionId: string): Promise<void> => {
+    const read = () => ctx.sessions.list.getSnapshot()
+    let snapshot = read()
+    if (snapshot.phase !== 'ready' || snapshot.byId[sessionId] === undefined) {
+      await ctx.sessions.refresh()
+      snapshot = read()
+    }
+    if (snapshot.phase !== 'ready') throw new SessionNavigationError('not-ready')
+    if (snapshot.byId[sessionId] === undefined) throw new SessionNavigationError('not-listed')
+    ctx.uiWorkspace.openSession(sessionId as never)
+  }
+
   return (
-    <PanelProvider>
-      <App t={t} />
+    <PanelProvider t={t} openSession={openSession}>
+      <App />
     </PanelProvider>
   )
 }
 
-export const inject = ['slots', 'locale'] as const
+/** Friendly copy for the two session-navigation failures. */
+export function sessionErrorKey(reason: 'not-ready' | 'not-listed'): 'session.notReady' | 'session.notListed' {
+  return reason === 'not-ready' ? 'session.notReady' : 'session.notListed'
+}
+
+export const inject = ['slots', 'locale', 'sessions', 'uiWorkspace'] as const
 
 export function apply(ctx: Context): void {
   ctx.effect(() => ctx.locale.register(NS, dictionaries))
   const t = ctx.locale.bind(NS)
+  const panel = ctx as PanelContext
 
   ctx.slots.inject('main', () =>
     ctx.slots.register({ name: 'main', key: PANEL_ID as WhalePanelId, locale: NS }, (props: { t: T }) => (
-      <MainPanel t={props.t} />
+      <MainPanel ctx={panel} t={props.t} />
     )),
   )
   ctx.slots.inject('sidebar.panellist', () =>

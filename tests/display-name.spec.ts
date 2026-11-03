@@ -133,3 +133,36 @@ describe('default persona', () => {
     expect(stringAt(en, 'settings.persona.name.label')).toBe('Assistant name')
   })
 })
+
+describe('workspace copy', () => {
+  const workspaceKeys = [
+    'targets.workspace.title',
+    'targets.workspace.ready',
+    'targets.workspace.perConversation',
+    'targets.workspace.copy',
+    'targets.workspace.copied',
+    'targets.workspace.hint',
+  ] as const
+
+  it('translates every read-only workspace key in both locales', () => {
+    for (const key of workspaceKeys) {
+      expect(stringAt(zh, key).trim().length, `zh:${key}`).toBeGreaterThan(0)
+      expect(stringAt(en, key).trim().length, `en:${key}`).toBeGreaterThan(0)
+      expect(stringAt(zh, key), `zh:${key}`).not.toContain(DEFAULT_PERSONA)
+      expect(stringAt(en, key), `en:${key}`).not.toContain(DEFAULT_PERSONA)
+    }
+    expect(stringAt(zh, 'targets.workspace.perConversation')).toBe('按会话创建')
+    expect(stringAt(en, 'targets.workspace.perConversation')).toBe('Per conversation')
+  })
+
+  it('explains the shared root and the absolute-path exception', () => {
+    expect(stringAt(zh, 'settings.tasks.workspaceRoot.hint')).toContain('相对路径')
+    expect(stringAt(zh, 'settings.tasks.workspaceRoot.hint')).toContain('共用')
+    expect(stringAt(en, 'settings.tasks.workspaceRoot.hint')).toContain('relative path')
+    expect(stringAt(en, 'settings.tasks.workspaceRoot.hint')).toContain('Shared root')
+    expect(stringAt(zh, 'tasks.approve.workspaceHint')).toContain('会话')
+    expect(stringAt(zh, 'tasks.approve.workspaceHint')).toContain('绝对路径')
+    expect(stringAt(en, 'tasks.approve.workspaceHint')).toContain('conversation')
+    expect(stringAt(en, 'tasks.approve.workspaceHint')).toContain('absolute path')
+  })
+})

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
 import { userEvent } from '@testing-library/user-event'
 import { zh } from '../src/client/locale.ts'
@@ -15,7 +15,10 @@ import {
   targetsFixture,
 } from './client-harness.tsx'
 
-afterEach(resetPanelTest)
+afterEach(() => {
+  Reflect.deleteProperty(navigator, 'clipboard')
+  resetPanelTest()
+})
 
 const row = {
   kind: 'group' as const,
@@ -158,6 +161,50 @@ describe('targets page', () => {
     await waitFor(() => expect(requestBodies(view.fetchMock, 'PUT', 'settings/targets')).toHaveLength(1))
     const body = requestBodies(view.fetchMock, 'PUT', 'settings/targets')[0] as { value: { rows: readonly unknown[] } }
     expect(body.value.rows).toHaveLength(0)
+  })
+
+  it('shows the read-only workspace projection and copies a ready path', async () => {
+    const user = userEvent.setup()
+    const path = 'E:/state/workspaces/conversation-0123456789abcdef'
+    const writeText = vi.fn(async () => undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const workspaceTargets = targetsFixture([
+      targetFixture({ workspace: { path, title: '钉钉 · 项目群', mode: 'ready' } }),
+      targetFixture({
+        kind: 'at-me',
+        id: 'at-me',
+        label: '@我',
+        workspace: { path: null, title: '钉钉 · @我', mode: 'per-conversation' },
+      }),
+    ])
+    // The editable draft and the read-only projection are independent: the
+    // draft keeps its own rows while the projection follows the server view.
+    const view = renderTargets(handler({ targets: workspaceTargets }))
+    expect(await screen.findByText(path)).toBeTruthy()
+    expect(screen.getByText(zh['targets.workspace.hint'])).toBeTruthy()
+    expect(screen.getByText(zh['targets.workspace.ready'])).toBeTruthy()
+    expect(screen.getByText(zh['targets.workspace.perConversation'])).toBeTruthy()
+    const copy = screen.getAllByRole('button', { name: new RegExp(zh['targets.workspace.copy']) })
+    expect(copy).toHaveLength(1)
+    await user.click(copy[0] as HTMLElement)
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(path))
+    expect(await screen.findByText(zh['targets.workspace.copied'])).toBeTruthy()
+
+    // The projection is display-only: a save must never carry it back.
+    await screen.findByDisplayValue('项目群')
+    await user.click(screen.getByRole('switch', { name: '仅 @ 1' }))
+    await user.click(screen.getByRole('button', { name: zh['targets.save'] }))
+    await waitFor(() => expect(requestBodies(view.fetchMock, 'PUT', 'settings/targets')).toHaveLength(1))
+    const body = requestBodies(view.fetchMock, 'PUT', 'settings/targets')[0] as { value: { rows: readonly unknown[] } }
+    expect(JSON.stringify(body.value.rows)).not.toContain('"workspace"')
+    expect(JSON.stringify(body.value.rows)).not.toContain('"per-conversation"')
+  })
+
+  it('hides the workspace section when the host omits the projection', async () => {
+    renderTargets(handler())
+    await screen.findByDisplayValue('项目群')
+    expect(screen.queryByText(zh['targets.workspace.hint'])).toBeNull()
+    expect(screen.queryByText(zh['targets.workspace.title'])).toBeNull()
   })
 
   it('shows the empty state when no target is configured', async () => {

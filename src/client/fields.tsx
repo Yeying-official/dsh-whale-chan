@@ -345,6 +345,7 @@ export function RowsField({ rows, onChange, disabled, rowErrors = {} }: RowsFiel
                   </td>
                   <td>
                     <input
+                      id={`wc-target-row-${index}`}
                       className="wc-input wc-mono"
                       aria-label={`${t('settings.rows.id')} ${index + 1}`}
                       value={row.id}
@@ -478,3 +479,146 @@ export function useEnumLabel(path: string): (option: string) => string {
 export const FIELD_REGISTRY = FIELDS
 
 export type { SettingsBlock }
+
+/** Stable DOM id for one registry field, used for focus management after an error. */
+export function fieldDomId(block: SettingsBlock, path: string): string {
+  return `wc-field-${block}-${path.replace(/\./g, '-')}`
+}
+
+/** Locally enforce the numeric bounds before a round trip; the host stays authoritative. */
+export function validateBlock(
+  block: SettingsBlock,
+  value: Record<string, unknown>,
+  t: (key: Parameters<ReturnType<typeof usePanel>['t']>[0], params?: Record<string, unknown>) => string,
+): Record<string, string> {
+  const errors: Record<string, string> = {}
+  for (const spec of fieldsOf(block)) {
+    const current = getPath(value, spec.path)
+    if (spec.type === 'number') {
+      if (typeof current !== 'number' || !Number.isFinite(current)) {
+        errors[spec.path] = t('settings.numberRequired')
+        continue
+      }
+      const min = spec.min ?? Number.NEGATIVE_INFINITY
+      const max = spec.max ?? Number.POSITIVE_INFINITY
+      if (current < min || current > max) {
+        errors[spec.path] = t('settings.numberRange', { min, max })
+      }
+    } else if (spec.type === 'string' && typeof current !== 'string') {
+      errors[spec.path] = t('settings.fieldRequired')
+    } else if (spec.type === 'enum' && (typeof current !== 'string' || !(spec.options ?? []).includes(current))) {
+      errors[spec.path] = t('settings.fieldRequired')
+    }
+  }
+  return errors
+}
+
+const LONG_TEXT = new Set(['persona.identity', 'persona.knowledge'])
+
+export interface RegistryFieldProps {
+  readonly spec: FieldSpec
+  readonly value: unknown
+  readonly error?: string | undefined
+  readonly note?: string | undefined
+  readonly wide?: boolean
+  readonly disabled?: boolean
+  readonly onChange: (next: unknown) => void
+}
+
+/** Render one registry leaf with the component its declared type calls for. */
+export function RegistryField({ spec, value, error, note, wide, disabled, onChange }: RegistryFieldProps) {
+  const { t } = usePanel()
+  const label = t(spec.labelKey as Parameters<typeof t>[0])
+  const hint = t(spec.hintKey as Parameters<typeof t>[0])
+  const id = fieldDomId(spec.block, spec.path)
+  const unit = spec.unit ? t(`settings.unit.${spec.unit}` as 'settings.unit.seconds') : undefined
+  const className = wide ? 'wc-field-wide' : undefined
+  const optionLabel = (option: string) => {
+    const key = `settings.enum.${spec.path}.${option}` as 'settings.enum.language.auto'
+    const text = t(key)
+    return text === key ? option : text
+  }
+
+  if (spec.type === 'boolean') {
+    return (
+      <div className={className}>
+        <SwitchField
+          id={id}
+          checked={value === true}
+          label={label}
+          hint={hint}
+          disabled={disabled}
+          onChange={(next) => onChange(next)}
+        />
+        {note ? <span className="wc-field-note">{note}</span> : null}
+        {error ? (
+          <span className="wc-field-error" role="alert">
+            {error}
+          </span>
+        ) : null}
+      </div>
+    )
+  }
+  if (spec.type === 'number') {
+    return (
+      <FieldRow className={className} label={label} hint={hint} note={note} error={error}>
+        <NumberField
+          value={typeof value === 'number' && Number.isFinite(value) ? value : ''}
+          min={spec.min}
+          max={spec.max}
+          unit={unit}
+          disabled={disabled}
+          onChange={onChange}
+        />
+      </FieldRow>
+    )
+  }
+  if (spec.type === 'enum') {
+    return (
+      <FieldRow className={className} label={label} hint={hint} note={note} error={error}>
+        <EnumField
+          value={typeof value === 'string' ? value : ''}
+          options={spec.options ?? []}
+          optionLabel={optionLabel}
+          disabled={disabled}
+          onChange={onChange}
+        />
+      </FieldRow>
+    )
+  }
+  if (spec.type === 'string-list') {
+    return (
+      <FieldRow className={className} label={label} hint={hint} note={note} error={error}>
+        <ListField
+          items={Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []}
+          disabled={disabled}
+          onChange={onChange}
+        />
+      </FieldRow>
+    )
+  }
+  if (spec.type === 'rows') {
+    return (
+      <FieldRow className={className} label={label} hint={hint} note={note} error={error}>
+        <RowsField
+          rows={(Array.isArray(value) ? value : []) as TargetRowValue[]}
+          disabled={disabled}
+          onChange={(next) => onChange(next)}
+        />
+      </FieldRow>
+    )
+  }
+  const text = typeof value === 'string' ? value : ''
+  return (
+    <FieldRow className={className} label={label} hint={hint} note={note} error={error}>
+      <TextField
+        value={text}
+        multiline={LONG_TEXT.has(`${spec.block}.${spec.path}`)}
+        disabled={disabled}
+        onChange={onChange}
+      />
+    </FieldRow>
+  )
+}
+
+export { fieldsOf }

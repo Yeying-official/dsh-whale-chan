@@ -115,7 +115,10 @@ function reasonOf(data: unknown): { kind: string; detail?: string } | undefined 
  * Matches one delivery's turn boundary in a session log.
  *
  * The delivery's own `user/message` event identifies its turn; the tracker is
- * satisfied by the `turn/end` of exactly that turn. Without a request id it is
+ * satisfied by the `turn/end` of exactly that turn. DSH records the inbox
+ * append *before* the driver opens the turn, so a message that arrives outside
+ * a turn is held as `pending` and claimed by the next `turn/start` instead of
+ * inheriting a stale `current`. Without a request id it is
  * satisfied by the first turn that ends after the ones already in the log at
  * construction, which is what a steering delivery into an already-running turn
  * needs.
@@ -127,7 +130,10 @@ function reasonOf(data: unknown): { kind: string; detail?: string } | undefined 
  */
 export class TurnTracker {
   private readonly requestId: string | undefined
+  /** The turn currently open between `turn/start` and its `turn/end`. */
   private current: number | undefined
+  /** A matched message that queued before any turn opened; the next turn owns it. */
+  private pending = false
   private claimed: number | undefined
   /** Highest turn already ended when this tracker was created. */
   private readonly baseline: number
@@ -173,19 +179,32 @@ export class TurnTracker {
     switch (event.type) {
       case 'turn/start': {
         const turn = turnOf(event.data)
-        if (turn !== undefined) this.current = turn
+        if (turn === undefined) return false
+        this.current = turn
+        // A message that queued before any turn opened belongs to this one.
+        if (this.pending && this.claimed === undefined) {
+          this.claimed = turn
+          this.pending = false
+        }
         return false
       }
       case 'user/message': {
         if (this.requestId === undefined || messageIdOf(event.data) !== this.requestId) return false
-        // A message is recorded inside its turn's step; fall back to the next
-        // turn number only if the log somehow lacks the opening event.
-        this.claimed = this.current ?? (this.claimed ?? 0) + 1
+        // A live session records the inbox append before the driver opens the
+        // turn, so `current` may still be the previous turn's number (or none).
+        // Claiming it would wait for a `turn/end` that can never match, so only
+        // an open turn may be claimed here; otherwise the next `turn/start` does.
+        if (this.current === undefined) this.pending = true
+        else {
+          this.claimed = this.current
+          this.pending = false
+        }
         return false
       }
       case 'turn/end': {
         const turn = turnOf(event.data)
         if (turn === undefined) return false
+        if (this.current === turn) this.current = undefined
         // Without a request id the boundary is the first turn that ends after
         // the ones already in the log at construction.
         const matched =

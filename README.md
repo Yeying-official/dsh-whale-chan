@@ -280,7 +280,7 @@ pnpm build          # 生成 lib/index.js 与 lib/client.js
 - WS0 骨架与冻结合约、WS1 领域与持久化、WS2 `dws` 通道、WS3 人设与策略、WS4 执行器、WS5a 设置/API、WS5b 组合根、WS6 面板、WS7 文档与安全基线、WS8 真机验收、WS9 按会话工作区、WS10 目标页工作区与显示名、WS11 发布收口、WS12 空默认人设与可选预设：**全部完成**。
 - 当前版本 `0.3.0`，2026-11-03 完成 Windows 真机 T0–T4、v0.2.0 工作区复验与 v0.3.0 人设默认/预设核对；tag `v0.3.0` 由发布复核后打，**尚未打 tag、未 push**。
 - 真机范围：Windows 10/11、DSH Desktop `0.2.1-rc.5`、`dws` `1.0.66`；单聊 o2o、`@我`/`open:` 惰性工作区、macOS/Linux 未真机覆盖，见 [WS8 真机报告](docs/test-reports/WS8-live.md)、[WS9/WS10 报告](docs/test-reports/WS9-10.md)、[WS12 人设报告](docs/test-reports/WS12-persona.md) 与 [兼容矩阵](docs/compatibility.md)。
-- 验收后测试群目标已停用（`targets.rows=[]`），通道回到 `idle: no enabled targets`；重新启用前请先核对目标、`dryRun` 与回复模式。
+- 验收后测试群目标为 `enabled=false`（保留该行与工作区），通道回到 `idle: no enabled targets`；重新启用前请先核对目标、`dryRun` 与回复模式。
 
 ## 许可证
 

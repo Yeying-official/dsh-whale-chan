@@ -126,7 +126,7 @@ locale/en.json
 
 - 证据写入对应报告：WS12 写入 `docs/test-reports/WS12-persona.md`，其余沿用 WS8 / WS9-10；日期、DSH 版本、`dws` 版本、OS、Node、目标类型（不要写真实群名/账号）、命令、脱敏输出与结论齐全。
 - 截图必须裁掉真实群名、成员昵称、账号 id 与消息正文；README 的截图使用 mock/裁切版本。本轮未新增浏览器截图，页面行为由组件测试覆盖。
-- 验收后停用测试群目标（`targets.rows=[]`），让通道回到 `idle: no enabled targets`；重新启用前先核对目标与回复模式。
+- 验收后把测试群目标设为 `enabled=false`（保留该行与工作区），让通道回到 `idle: no enabled targets`；重新启用前先核对目标与回复模式。
 
 ## 7. 打 tag
 

@@ -9,17 +9,17 @@
 
 ## 0. 结论
 
-| 项                             | 结果             | 证据                                                                                                               |
-| ------------------------------ | ---------------- | ------------------------------------------------------------------------------------------------------------------ |
-| 默认人设（重载后）             | 通过             | `GET /whale-chan/api/persona` 的 `persona` 与 `defaults` 均为空人设：仅 `name=鲸鱼酱`，其余字段空，`language=auto` |
-| 预设投影                       | 通过             | 同一响应的 `presets` 含 `whale-maid`（蓝白鲸鱼女仆）；`zh-CN`、6 条规则、非空 `identity`                           |
-| 页面「恢复默认（空人设）」     | 通过（组件测试） | 草稿被清空为 `defaults` 并置 dirty；不发 `PUT`，保存按钮点击后才写入                                               |
-| 页面「载入预设：蓝白鲸鱼女仆」 | 通过（组件测试） | 草稿被填满 `presets[0].persona`；只在点保存时发 `PUT`                                                              |
-| 已保存自定义人设               | 通过             | 不自动套模板、不被覆盖；旧 persona 行原样保留                                                                      |
-| 旧 host 兼容                   | 通过（组件测试） | host 不返回 `defaults`/`presets` 时两个按钮整块隐藏，页面行为与升级前一致                                          |
-| 显示名与内部标识               | 通过             | 侧栏/面板仍显示「DSH助理」；包名、状态目录、API 前缀与 panel/session/preset id 不变                                |
-| 回归门禁                       | 通过             | `pnpm check` 765 tests / 60 files；`node scripts/check-pack.mjs` 15 artifacts，icon 711 bytes                      |
-| 测试目标                       | 已停用           | `targets.rows=[]`，通道回到 `idle: no enabled targets`                                                             |
+| 项                             | 结果               | 证据                                                                                                               |
+| ------------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| 默认人设（重载后）             | 通过               | `GET /whale-chan/api/persona` 的 `persona` 与 `defaults` 均为空人设：仅 `name=鲸鱼酱`，其余字段空，`language=auto` |
+| 预设投影                       | 通过               | 同一响应的 `presets` 含 `whale-maid`（蓝白鲸鱼女仆）；`zh-CN`、6 条规则、非空 `identity`                           |
+| 页面「恢复默认（空人设）」     | 通过（组件测试）   | 草稿被清空为 `defaults` 并置 dirty；不发 `PUT`，保存按钮点击后才写入                                               |
+| 页面「载入预设：蓝白鲸鱼女仆」 | 通过（组件测试）   | 草稿被填满 `presets[0].persona`；只在点保存时发 `PUT`                                                              |
+| 已保存自定义人设               | 通过               | 不自动套模板、不被覆盖；旧 persona 行原样保留                                                                      |
+| 旧 host 兼容                   | 通过（组件测试）   | host 不返回 `defaults`/`presets` 时两个按钮整块隐藏，页面行为与升级前一致                                          |
+| 显示名与内部标识               | 通过               | 侧栏/面板仍显示「DSH助理」；包名、状态目录、API 前缀与 panel/session/preset id 不变                                |
+| 回归门禁                       | 通过               | `pnpm check` 765 tests / 60 files；`node scripts/check-pack.mjs` 15 artifacts，icon 711 bytes                      |
+| 测试目标                       | 已停用（保留目标） | 测试群目标 `enabled=false`（保留该行与工作区），通道 `idle: no enabled targets`                                    |
 
 ## 1. 范围与实现
 
@@ -33,7 +33,7 @@ WS12 把「默认人设是一个角色」拆成两件事：
 
 ## 2. 真机核对
 
-前置：沿用已安装的 `link:` 版本，不改 profile；测试群目标保持停用。
+前置：沿用已安装的 `link:` 版本，不改 profile；测试群目标保持 `enabled=false`（保留该行与工作区）。
 
 1. 重载 DSH 后打开面板，侧栏与插件列表仍显示「DSH助理」，面板版本随 `0.3.0` 发布提交更新（本报告记录的是人设行为，不把版本号当作验收对象）。
 2. 带 `x-whale-chan-request: 1` 读取 `GET /whale-chan/api/persona`：
@@ -41,7 +41,7 @@ WS12 把「默认人设是一个角色」拆成两件事：
    - `defaults`：与 `persona` 相同的空人设；
    - `presets`：包含 `id=whale-maid`，`language=zh-CN`、6 条规则、非空 `identity`；与 `defaults` 不相等。
 3. 打开「人设」页：两个动作可见；页面没有因预设存在而自动改变草稿或自动保存。
-4. 确认测试群目标仍为停用（`targets.rows=[]`），通道 `idle`；本轮没有新增真机群消息。
+4. 确认测试群目标为 `enabled=false`（保留该行与工作区），通道 `idle: no enabled targets`；本轮没有新增真机群消息。
 
 说明：本轮**未做浏览器截图**，页面可见行为由组件测试覆盖；也**没有新增真机群回复**，因为 WS12 不涉及分类、发送、任务执行或回帖链路。
 
@@ -71,7 +71,7 @@ WS12 把「默认人设是一个角色」拆成两件事：
 - `pnpm check`：typecheck 0 错误，**765 tests / 60 files**，build 成功（宿主 ESM + 客户端 CJS）。
 - `pnpm format:check` 通过。
 - `node scripts/check-pack.mjs` → `15 artifacts`，icon 711 bytes（本版未增删打包文件）。
-- 验收后测试群目标保持停用；测试期间未产生临时文件，未入库。
+- 验收后测试群目标保持 `enabled=false`（保留该行与工作区）；测试期间未产生临时文件，未入库。
 
 ## 6. 未覆盖与说明
 

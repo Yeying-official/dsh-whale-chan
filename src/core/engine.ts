@@ -63,6 +63,27 @@ export interface QueueReplyOptions {
   readonly target: OutboundTarget
 }
 
+/**
+ * One follow-up message, queued without a Decision.
+ *
+ * A task result has no inbound message to classify, so it cannot ride the
+ * reply chain. It still needs the same delivery guarantees, which is why it is
+ * a full `Outbound` bounded by its own idempotency key.
+ */
+export interface QueueFollowupOptions {
+  readonly threadKey: string
+  readonly target: OutboundTarget
+  readonly text: string
+  readonly idempotencyKey: string
+  readonly kind: 'reply' | 'notice'
+  readonly outboundId: string
+}
+
+export interface FollowupTimingOptions {
+  /** Instant the queue command is stamped with; defaults to the engine clock. */
+  readonly at?: IsoTime
+}
+
 export interface ApproveOptions {
   readonly by: 'owner'
   readonly note?: string
@@ -299,6 +320,123 @@ export class Engine {
         data: { decisionId, outboundId: outbound.id, idempotencyKey: outbound.idempotencyKey },
       })
       return outbound
+    })
+  }
+
+  /**
+   * Queue a follow-up message that is not part of a reply decision.
+   *
+   * Task results and v1 notices need an outbox entry but no Decision: nothing
+   * classified them and no inbound message owns them. The thread must exist and
+   * the target must address that same kind of conversation, so a follow-up
+   * cannot be silently delivered to someone else. The idempotency key is the
+   * delivery bound: queueing the same key twice returns the message staged the
+   * first time, with no second external message.
+   */
+  queueFollowup(options: QueueFollowupOptions, timing: FollowupTimingOptions = {}): Outbound {
+    return this.command((emit) => {
+      const at = timing.at === undefined ? this.now() : this.stamped(timing.at)
+      const thread = this.repos.threads.get(options.threadKey)
+      if (!thread) throw new UserError('unknownThread')
+      const text = options.text
+      if (text.trim().length === 0) throw new UserError('emptyOutbound')
+      const key = options.idempotencyKey.trim()
+      if (key.length === 0) throw new UserError('emptyIdempotencyKey')
+      if (options.target.kind !== thread.kind) throw new UserError('outboundTargetMismatch')
+
+      const existing = this.repos.outbound.byIdempotencyKey(key)
+      if (existing) return existing
+
+      const outbound: Outbound = {
+        id: options.outboundId,
+        idempotencyKey: key,
+        kind: options.kind,
+        target: {
+          kind: options.target.kind,
+          conversationId: options.target.conversationId,
+          ...(options.target.peerUserId ? { peerUserId: options.target.peerUserId } : {}),
+        },
+        text,
+        status: 'pending',
+        attempts: 0,
+        lastError: null,
+        sentAt: null,
+        receipt: null,
+      }
+      this.repos.outbound.save(outbound)
+      emit({
+        type: 'outbound.queued',
+        at,
+        data: { outboundId: outbound.id, threadKey: thread.key, outboundKind: outbound.kind },
+      })
+      return outbound
+    })
+  }
+
+  /**
+   * Record a confirmed delivery of a follow-up.
+   *
+   * Only a `pending` row changes: a terminal row keeps its first outcome, so a
+   * duplicate report after a restart cannot rewrite delivery history.
+   */
+  outboundSent(id: string, receipt?: string): Outbound {
+    return this.command((emit) => {
+      const outbound = this.requireOutbound(id)
+      if (outbound.status !== 'pending') return outbound
+      const at = this.now()
+      const sent: Outbound = { ...outbound, status: 'sent', sentAt: at, receipt: receipt ?? null, lastError: null }
+      this.repos.outbound.save(sent)
+      emit({ type: 'outbound.sent', at, data: { outboundId: id } })
+      return sent
+    })
+  }
+
+  /** Delivery could not be proven. Terminal, and never retried automatically. */
+  outboundUnknown(id: string, error: string): Outbound {
+    return this.command((emit) => {
+      const outbound = this.requireOutbound(id)
+      if (outbound.status !== 'pending') return outbound
+      const at = this.now()
+      const unknown: Outbound = {
+        ...outbound,
+        status: 'unknown',
+        attempts: outbound.attempts + 1,
+        lastError: error,
+      }
+      this.repos.outbound.save(unknown)
+      emit({ type: 'outbound.unknown', at, data: { outboundId: id, error } })
+      return unknown
+    })
+  }
+
+  /** Delivery definitely failed. Terminal until a person decides what to do. */
+  outboundFailed(id: string, error: string): Outbound {
+    return this.command((emit) => {
+      const outbound = this.requireOutbound(id)
+      if (outbound.status !== 'pending') return outbound
+      const at = this.now()
+      const failed: Outbound = {
+        ...outbound,
+        status: 'failed',
+        attempts: outbound.attempts + 1,
+        lastError: error,
+      }
+      this.repos.outbound.save(failed)
+      emit({ type: 'outbound.failed', at, data: { outboundId: id, error } })
+      return failed
+    })
+  }
+
+  /** Drop a follow-up that can never be delivered, such as one whose thread is gone. */
+  outboundDropped(id: string, reason: string): Outbound {
+    return this.command((emit) => {
+      const outbound = this.requireOutbound(id)
+      if (outbound.status !== 'pending') return outbound
+      const at = this.now()
+      const dropped: Outbound = { ...outbound, status: 'dropped', lastError: reason }
+      this.repos.outbound.save(dropped)
+      emit({ type: 'outbound.dropped', at, data: { outboundId: id, reason } })
+      return dropped
     })
   }
 
@@ -654,6 +792,11 @@ export class Engine {
     })
   }
 
+  /** Follow-up messages still waiting for delivery; the outbox resume pass reads this. */
+  pendingOutbounds(): readonly Outbound[] {
+    return this.repos.outbound.pending()
+  }
+
   // Helpers
 
   private now(): IsoTime {
@@ -675,6 +818,12 @@ export class Engine {
   private storedInstant(value: IsoTime): number | null {
     const time = Date.parse(value)
     return Number.isFinite(time) ? time : null
+  }
+
+  /** Validate a caller-supplied instant and echo it back for an event stamp. */
+  private stamped(value: IsoTime): IsoTime {
+    this.instant(value)
+    return value
   }
 
   private command<T>(work: (emit: Emit) => T): T {
@@ -722,7 +871,11 @@ export class Engine {
 
   private requireOutboundOf(decision: Decision): Outbound {
     if (!decision.outboundId) throw new UserError('outboundMissing')
-    const outbound = this.repos.outbound.get(decision.outboundId)
+    return this.requireOutbound(decision.outboundId)
+  }
+
+  private requireOutbound(id: string): Outbound {
+    const outbound = this.repos.outbound.get(id)
     if (!outbound) throw new UserError('unknownOutbound')
     return outbound
   }

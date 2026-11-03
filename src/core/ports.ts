@@ -112,6 +112,17 @@ export interface DomainEvents {
   'task.expired': { taskId: string; approvalId: string }
   'assignment.started': { taskId: string; assignmentId: string }
   'assignment.ended': { taskId: string; assignmentId: string; outcome: AssignmentOutcome }
+  /**
+   * Follow-up outbox lifecycle, independent from any decision.
+   *
+   * A task result has no inbound message to classify, so its outbound row is
+   * tracked by these events instead of the `reply.*` family.
+   */
+  'outbound.queued': { outboundId: string; threadKey: string; outboundKind: 'reply' | 'notice' }
+  'outbound.sent': { outboundId: string }
+  'outbound.unknown': { outboundId: string; error: string }
+  'outbound.failed': { outboundId: string; error: string }
+  'outbound.dropped': { outboundId: string; reason: string }
 }
 
 /** One domain event, stamped with the command's clock reading. */

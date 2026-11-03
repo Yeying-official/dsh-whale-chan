@@ -61,6 +61,15 @@ export const USER_ERRORS = {
   assignmentNotPending: ['refused', 'The assignment is not pending'],
   assignmentNotRunning: ['refused', 'The assignment is not running'],
   outboundMissing: ['refused', 'The decision has no outbound message to update'],
+  /** A follow-up needs a body the owner could reasonably send. */
+  emptyOutbound: ['invalid', 'The outbound message needs a non-empty text'],
+  /** Delivery is bounded by one key, so a blank key could never be sent safely. */
+  emptyIdempotencyKey: ['invalid', 'The outbound message needs a non-empty idempotency key'],
+  /**
+   * A follow-up is addressed by the thread it belongs to; a target of another
+   * kind would send it to a different conversation than the one it reports on.
+   */
+  outboundTargetMismatch: ['invalid', 'The outbound target kind does not match the thread kind'],
   /** A caller-supplied instant did not parse; the owner can resend it. */
   invalidTime: ['invalid', 'The supplied time is not a valid ISO-8601 instant'],
 } as const satisfies Record<string, readonly [UserErrorCategory, string]>

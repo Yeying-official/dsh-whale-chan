@@ -43,16 +43,21 @@ import type { Effects } from './effects.ts'
 import type { ChannelPort } from './channel-port.ts'
 import type { Store } from './store.ts'
 import type { ListOptions } from './store-read.ts'
-import type { RuntimeFacts, RuntimeInfo } from './runtime.ts'
+import type { RuntimeFacts, RuntimeInfo, RuntimeServiceStatus } from './runtime.ts'
 
 /** Everything a read-only view may observe. */
 export interface ViewContext {
-  readonly runtime: { info(): RuntimeInfo; facts(): RuntimeFacts }
+  readonly runtime: {
+    info(): RuntimeInfo
+    facts(): RuntimeFacts
+    /** Live service status; absent only on a bare state-view stub. */
+    status?(): RuntimeServiceStatus
+  }
   readonly settings: SettingsService
   readonly store: Store
   readonly clock: Clock
   readonly effects: Effects
-  /** Absent in WS5a; WS5b injects the real channel adapter. */
+  /** The attached channel, when the runtime composed one. */
   readonly channel?: ChannelPort
 }
 
@@ -262,9 +267,10 @@ function rollup(checks: readonly HealthCheck[]): HealthStatus {
 /**
  * Host health.
  *
- * Only checks the host owns decide the overall status: the channel and the
- * executor are reported as `degraded` with an `unknown` detail until WS5b
- * attaches them, and they do not make a healthy host look broken.
+ * The host-owned checks decide the overall status. Once the channel and the
+ * executor are attached, their checks are host-owned too: an expired `dws`
+ * authorization or a channel that failed to start is a real error, not an
+ * unknown. Pausing the monitor is intentional and stays `ok`.
  */
 export function healthView(ctx: ViewContext): Health {
   const info = ctx.runtime.info()
@@ -272,60 +278,136 @@ export function healthView(ctx: ViewContext): Health {
   const settings = ctx.settings.current()
   const observedAt = ctx.clock.now().toISOString()
   const warnings = ctx.settings.warnings()
+  const status = ctx.runtime.status?.()
+  const check = (id: string, value: HealthStatus, detail: string): HealthCheck => ({
+    id,
+    status: value,
+    detail,
+    observedAt,
+  })
   const checks: HealthCheck[] = [
-    {
-      id: 'state',
-      status: 'ok',
-      detail: `started at ${info.startedAt}`,
-      observedAt,
-    },
-    {
-      id: 'stateDir',
-      status: facts.stateDirWritable ? 'ok' : 'error',
-      detail: facts.stateDirWritable ? 'writable' : 'not writable',
-      observedAt,
-    },
-    {
-      id: 'database',
-      status: facts.databaseOpen ? 'ok' : 'error',
-      detail: `schema v${facts.schemaVersion}`,
-      observedAt,
-    },
-    {
-      id: 'lock',
-      status: facts.lockHeld ? 'ok' : 'degraded',
-      detail: facts.lockHeld ? 'state directory lock is held' : 'state directory lock is not held',
-      observedAt,
-    },
-    {
-      id: 'settings',
-      status: warnings.length > 0 ? 'degraded' : 'ok',
-      detail:
-        warnings.length > 0
-          ? warnings.map((warning) => `${warning.block}: ${warning.message}`).join('; ')
-          : 'every block loaded from state.db',
-      observedAt,
-    },
+    check('state', 'ok', `started at ${info.startedAt}`),
+    check('stateDir', facts.stateDirWritable ? 'ok' : 'error', facts.stateDirWritable ? 'writable' : 'not writable'),
+    check('database', facts.databaseOpen ? 'ok' : 'error', `schema v${facts.schemaVersion}`),
+    check(
+      'lock',
+      facts.lockHeld ? 'ok' : 'degraded',
+      facts.lockHeld ? 'state directory lock is held' : 'state directory lock is not held',
+    ),
+    check(
+      'settings',
+      warnings.length > 0 ? 'degraded' : 'ok',
+      warnings.length > 0
+        ? warnings.map((warning) => `${warning.block}: ${warning.message}`).join('; ')
+        : 'every block loaded from state.db',
+    ),
   ]
   const owned = [...checks]
-  checks.push(
-    ctx.channel === undefined
-      ? { id: 'channel', status: 'degraded', detail: 'unknown: the DingTalk channel is not attached', observedAt }
-      : { id: 'channel', status: 'ok', detail: 'channel attached', observedAt },
-    { id: 'executor', status: 'degraded', detail: 'unknown: the task executor is not attached', observedAt },
-  )
-  const status = rollup(owned)
-  return {
-    ok: status === 'ok',
-    status,
-    checks,
-    dws: {
-      binaryPath: settings.dws.binaryPath,
-      // The auth probe belongs to the channel; without one the answer is unknown.
-      available: false,
-      authenticated: null,
-    },
+
+  if (status === undefined) {
+    checks.push(
+      ctx.channel === undefined
+        ? check('channel', 'degraded', 'unknown: the DingTalk channel is not attached')
+        : check('channel', 'ok', 'channel attached'),
+      check('executor', 'degraded', 'unknown: the task executor is not attached'),
+    )
+    return finishHealth(checks, owned, settings.dws.binaryPath, false, null)
   }
+
+  const promptsCheck = check(
+    'prompts',
+    status.promptsReady ? 'ok' : 'error',
+    status.promptsReady ? 'all five templates loaded' : `templates unavailable (${status.promptError ?? 'unknown'})`,
+  )
+  const effectsCheck = check(
+    'effects',
+    status.effectsDead > 0 ? 'degraded' : 'ok',
+    `${status.effectsPending} pending, ${status.effectsDead} dead`,
+  )
+  checks.push(promptsCheck, effectsCheck)
+  owned.push(promptsCheck, effectsCheck)
+
+  const attached = status.auth !== null || status.monitorRunning || status.channelError !== null
+  const authCheck = authHealth(status, check)
+  const channelCheck = channelHealth(
+    status,
+    authCheck,
+    check,
+    settings.monitor.enabled,
+    settings.targets.rows.filter((row) => row.enabled).length,
+  )
+  checks.push(channelCheck, authCheck)
+  if (attached) owned.push(channelCheck, authCheck)
+
+  const executor = !status.executorAttached
+    ? check('executor', 'degraded', 'unknown: the task executor is not attached')
+    : status.executorActive.length === 0
+      ? check('executor', 'ok', 'idle')
+      : check('executor', 'ok', `${status.executorActive.length} task(s) running`)
+  checks.push(executor)
+  if (status.executorAttached) owned.push(executor)
+
+  return finishHealth(
+    checks,
+    owned,
+    settings.dws.binaryPath,
+    status.auth?.available ?? false,
+    status.auth?.authenticated ?? null,
+  )
+}
+
+function authHealth(status: RuntimeServiceStatus, check: CheckFactory): HealthCheck {
+  if (status.auth === null) return check('auth', 'degraded', 'unknown: the channel is not attached')
+  if (!status.auth.available) return check('auth', 'error', 'dws is not available')
+  if (!status.auth.authenticated) return check('auth', 'error', 'dws is not logged in')
+  if (!status.auth.tokenValid) return check('auth', 'error', 'the dws authorization is no longer valid')
+  if (!status.ownerKnown)
+    return check('auth', 'error', 'authorization did not report an account id; no subscription may start')
+  return check('auth', 'ok', 'dws authorization is valid')
+}
+
+/**
+ * Project one channel state into a health check.
+ *
+ * "Stopped" is not automatically unhealthy: the owner can disable monitoring,
+ * pause the assistant, or configure no enabled target at all. Those are normal
+ * idle states and stay `ok`; only a channel that should be subscribed but is
+ * not gets `degraded`.
+ */
+function channelHealth(
+  status: RuntimeServiceStatus,
+  auth: HealthCheck,
+  check: CheckFactory,
+  monitoringEnabled: boolean,
+  enabledTargets: number,
+): HealthCheck {
+  if (auth.status === 'error') return check('channel', 'error', 'not subscribed because authorization is invalid')
+  if (!monitoringEnabled) return check('channel', 'ok', 'monitoring is disabled in settings')
+  if (status.paused) return check('channel', 'ok', 'paused by the owner')
+  if (!status.channelAttached) return check('channel', 'degraded', 'unknown: the DingTalk channel is not attached')
+  if (status.channelError !== null) {
+    return check('channel', 'error', `the channel could not start (${status.channelError})`)
+  }
+  if (status.channelState === 'ready') {
+    return check('channel', 'ok', `ready; ${status.channelTargets.length} target(s)`)
+  }
+  if (status.channelState === 'starting') return check('channel', 'degraded', 'starting')
+  if (status.channelState === 'degraded') return check('channel', 'degraded', 'some subscriptions are unhealthy')
+  if (enabledTargets === 0) return check('channel', 'ok', 'idle: no enabled targets')
+  return check('channel', 'degraded', 'not running')
+}
+
+type CheckFactory = (id: string, value: HealthStatus, detail: string) => HealthCheck
+
+function finishHealth(
+  checks: readonly HealthCheck[],
+  owned: readonly HealthCheck[],
+  binaryPath: string,
+  available: boolean,
+  authenticated: boolean | null,
+): Health {
+  const status = rollup(owned)
+  return { ok: status === 'ok', status, checks, dws: { binaryPath, available, authenticated } }
 }
 
 /** Aggregate counters for the overview page. */
@@ -333,13 +415,13 @@ export function overviewView(ctx: ViewContext): Overview {
   const settings = ctx.settings.current()
   const counts = ctx.store.read.counts(ctx.clock.now())
   const tasks = Object.values(counts.tasks).reduce((total, value) => total + value, 0)
+  const status = ctx.runtime.status?.()
   return {
     generatedAt: ctx.clock.now().toISOString(),
     monitor: {
       enabled: settings.monitor.enabled,
       paused: settings.monitor.paused,
-      // Subscriptions are started by WS5b; the runtime never starts them here.
-      running: false,
+      running: status?.monitorRunning ?? false,
     },
     counts: {
       targets: settings.targets.rows.filter((row) => row.enabled).length,

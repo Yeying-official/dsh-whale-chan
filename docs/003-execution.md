@@ -1,6 +1,6 @@
 # 003 执行
 
-> 当前状态：WS1 已实现领域与持久化侧（`src/core`、`src/app`）；WS4 在其上实现真正的执行器：一个已批准的任务对应一个 DSH worker 会话（`src/executor`）。本文描述领域已经保证的生命周期、批准门与事务边界，以及执行器必须遵守的契约。WS5 负责把两者接起来（HTTP 路由、设置持久化、组合根）。
+> 当前状态：WS1 已实现领域与持久化侧（`src/core`、`src/app`）；WS4 在其上实现真正的执行器：一个已批准的任务对应一个 DSH worker 会话（`src/executor`）；WS5b 完成组合根：批准后 `launch` 真正执行，成功结果以 follow-up 消息回到原会话。本文描述领域已经保证的生命周期、批准门与事务边界，以及执行器必须遵守的契约。
 
 ## 1. 任务生命周期
 
@@ -153,13 +153,45 @@ interface ExecutorResult {
 4. 发出 `task.retried`（`{ taskId, assignmentId }`）。
 5. 旧派工保留在 `assignments` 表里（`ended`、`failed`），审计链不丢。
 
-HTTP `POST tasks/:id/retry` 在命令提交后 `effects.enqueue('launch', taskId, { assignmentId, workspace })`；`launch` 处理器由 WS5b 注册，WS5a 只保留 `waiting` 行。工作区缺省规则与批准相同：`tasks.workspaceRoot` 或 `<stateDir>/tasks` 加 `<taskId>`，`~` 展开且必须为绝对路径。
+HTTP `POST tasks/:id/retry` 在命令提交后 `effects.enqueue('launch', taskId, { assignmentId, workspace })`；`launch` 处理器由 WS5b 注册并执行（见 §8.2）。工作区缺省规则与批准相同：`tasks.workspaceRoot` 或 `<stateDir>/tasks` 加 `<taskId>`，`~` 展开且必须为绝对路径。
+
+### 8.2 任务结果回报链路（WS5b）
+
+任务结果的完整链路：
+
+```text
+classify(task) → Task + Approval(awaiting)
+      │  人在面板批准（POST tasks/:id/approve）
+      ▼
+approved + Assignment(pending) + effects.enqueue('launch', taskId)
+      │  launch handler：重查 task/approval/assignment，取 Assignment.workspace
+      ▼
+DshTaskExecutor.execute()
+      │  onStarted  → engine.assignmentStarted(taskId, assignmentId, { sessionId })
+      │  onFinished → engine.assignmentEnded(taskId, assignmentId, { outcome, result })
+      ▼
+succeeded ──► effects.enqueue('finish', taskId, { assignmentId, summary, sessionId })
+      │        finish handler：queueFollowup(threadKey, target, text, key)
+      ▼
+Outbound(pending) ──► effects.enqueue('send', outboundId) ──► channel.send()
+      │
+      └─ sent → outboundSent(id, receipt)；unknown/failed → 对应终态 + notice，绝不自动重发
+```
+
+关键约束：
+
+1. **批准门是双重的**：领域只给已批准任务建 `Assignment(pending)`；`launch` handler 在执行前再检查 `task.status === 'approved'`、`approval.status === 'approved'`、`approval.taskId === task.id`、`assignment.state === 'pending'` 且 `task.assignmentId` 指向它。任一不成立只写 `notice`，不创建会话。
+2. **成功才回帖**：`failed`/`timeout`/`cancelled` 只写 `notice`（v1 不进 DSH 收件箱、不发钉钉消息）；只有 `succeeded` 才 enqueue `finish`。
+3. **结果消息不绑定 Decision**：`Engine.queueFollowup` 创建独立 `Outbound`（`kind: 'reply'`），幂等键为 `task-finish:<taskId>:<assignmentId>`；模板为「任务「标题」已完成 + 摘要（最多 800 字）+ 会话 id」。目标从原线程推导：dm → `peerUserId`，group/at-me → 最近一条消息的 `conversationId`；`target.kind` 必须等于线程 kind。
+4. **会话 id 唯一来源**：执行器在 `assignmentStarted` 时绑定；`finish` 从 `onFinished` 的 `ExecutorResult.sessionId` 取值，任务 `result.sessionId` 只是冗余记录。
+5. **崩溃恢复**：`send` 只处理 `pending` 行；启动与通道恢复时把所有 `pending` Outbound 重新 enqueue。回复走 `replySent/replyUnknown/replyFailed`，任务结果走 `outboundSent/outboundUnknown/outboundFailed`，两者共用同一个 `send` handler。
+6. **并发**：`tasks.maxConcurrent` 由 `launch` handler 执行（`Later` 1 秒重试）；执行器本身只拒绝同一任务的第二次并发。
 
 ## 9. 并发
 
 - 会话层没有全局可变表：`SessionHost` 的每个方法都以调用方传入的 `SessionRef` 寻址，两个任务不可能读到对方的 inbox 或回合边界。
 - 执行器内部只有一张 `taskId → 运行记录` 的表，用来拒绝同一任务的第二次并发运行，以及让 `cancel` 找到要中止的运行；它不跨任务共享任何状态。
-- 全局并发上限（`tasks.maxConcurrent`）属于 app 层调度（WS5），执行器只保证「同一任务不并发」。
+- 全局并发上限（`tasks.maxConcurrent`）由 app 层的 `launch` handler 执行：达到上限时抛 `Later`，effect 在 1 秒后重试，不丢任务、不重复启动；没有全局排队表或面板排队。执行器只保证「同一任务不并发」。
 
 ## 10. 事务边界
 

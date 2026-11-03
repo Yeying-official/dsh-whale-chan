@@ -205,8 +205,6 @@
   "overview.monitor.active": "Monitoring",
   "overview.monitor.paused": "Paused",
   "overview.monitor.disabled": "Disabled",
-  "overview.monitor.runningNote": "Executor attached",
-  "overview.monitor.idleNote": "Executor not attached",
   "overview.pause.on": "Pause monitoring",
   "overview.pause.off": "Resume monitoring",
   "overview.pause.hint": "Pausing stops new DingTalk messages from being processed; recorded tasks are unaffected.",
@@ -463,7 +461,15 @@
   "threads.column.title": "Conversation",
   "threads.column.kind": "Kind",
   "settings.fieldRequired": "Fill in this field.",
-  "overview.monitor.executor": "Executor",
   "targets.validate.body": "Check that the targets are still reachable before saving; without an attached channel this reports unavailable.",
-  "threads.detail.info": "Conversation info"
+  "threads.detail.info": "Conversation info",
+  "overview.channel": "Channel",
+  "overview.channel.idle": "Idle (no enabled targets)",
+  "overview.channel.paused": "Paused",
+  "overview.channel.ready": "Running",
+  "overview.channel.disabled": "Monitoring disabled",
+  "overview.channel.error": "Error",
+  "overview.channel.degraded": "Not ready",
+  "overview.channel.absent": "Not attached",
+  "overview.channel.connected": "Attached"
 }

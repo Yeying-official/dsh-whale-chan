@@ -205,8 +205,6 @@
   "overview.monitor.active": "监控中",
   "overview.monitor.paused": "已暂停",
   "overview.monitor.disabled": "已停用",
-  "overview.monitor.runningNote": "执行通道已接入",
-  "overview.monitor.idleNote": "执行通道未接入",
   "overview.pause.on": "暂停监控",
   "overview.pause.off": "恢复监控",
   "overview.pause.hint": "暂停后不再处理新的钉钉消息，已记录的任务不受影响。",
@@ -463,7 +461,15 @@
   "threads.column.title": "会话",
   "threads.column.kind": "类型",
   "settings.fieldRequired": "请填写该字段。",
-  "overview.monitor.executor": "执行通道",
   "targets.validate.body": "在保存前校验目标是否仍可访问；通道未接入时会返回不可用。",
-  "threads.detail.info": "会话信息"
+  "threads.detail.info": "会话信息",
+  "overview.channel": "通道状态",
+  "overview.channel.idle": "空闲（未启用目标）",
+  "overview.channel.paused": "已暂停",
+  "overview.channel.ready": "运行中",
+  "overview.channel.disabled": "监控已关闭",
+  "overview.channel.error": "异常",
+  "overview.channel.degraded": "未就绪",
+  "overview.channel.absent": "未接入",
+  "overview.channel.connected": "已接入"
 }

@@ -1,21 +1,19 @@
 /**
  * Ports the runtime supplies to the reply effect handlers.
  *
- * The brain itself only knows `ModelPort`. Replies now use `LlmModel`, a direct
- * `ctx.llm.stream` call with no session, tools or workspace; the factory shape
- * survives because the pipeline asks for one port per thread and the route can
- * change at runtime. `reset()` is a compatibility no-op for a stateless model.
+ * The brain itself only knows `ModelPort`; a long-lived replier session is the
+ * executor's concern. The factory shape lets the runtime rotate those sessions
+ * (persona or model changes) without the handlers holding a dead object.
  */
 import type { ModelPort } from '../brain/index.ts'
 import type { ModelRoute } from '../shared/settings.ts'
 
 export interface BrainModelFactory {
-  /** One model port for a conversation; a direct LLM model has no per-thread state. */
+  /** One model port bound to a conversation; calls on one thread are serialized. */
   forThread(threadKey: string, title?: string): ModelPort
-  /** Compatibility hook; stateless models do nothing. */
+  /** Rebuild every cached replier session; used after a persona change. */
   reset(): Promise<void> | void
-  /** Adopt the current `settings.models.reply` route; rebuilds the direct model. */
+  /** Adopt the current `settings.models.reply` route for new sessions. */
   updateRoute(route: ModelRoute): Promise<void> | void
-  /** Release resources; the LLM stream is owned by the caller's signal. */
   dispose(): Promise<void> | void
 }

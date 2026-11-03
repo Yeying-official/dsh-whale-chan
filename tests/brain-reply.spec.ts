@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_REPLY_TIMEOUT_MS,
   composeReply,
   echoesSystemPrompt,
   sanitizeReply,
@@ -188,6 +189,21 @@ describe('composeReply', () => {
 
     const disclaimer = await composeReply(makeInput(), stubModel('我是人类'), new AbortController().signal)
     expect(disclaimer).toMatchObject({ ok: false, reason: 'empty' })
+  })
+
+  it('defaults to a 60s budget and accepts a slow draft inside it', async () => {
+    expect(DEFAULT_REPLY_TIMEOUT_MS).toBe(60_000)
+    const slow = stubModel(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40))
+      return '在的，稍等我看一下。'
+    })
+    const result = await composeReply(
+      makeInput({ options: { prompts, timeoutMs: 1_000 } }),
+      slow,
+      new AbortController().signal,
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.text).toBe('在的，稍等我看一下。')
   })
 
   it('reports a timeout and a provider error distinctly', async () => {

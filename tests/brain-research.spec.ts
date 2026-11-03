@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_RESEARCH_TIMEOUT_MS,
   EMPTY_MARKER,
   MAX_FACT_CHARS,
   ResearchCache,
@@ -7,6 +8,7 @@ import {
   normalizeSources,
   renderResearchGuide,
   research,
+  researchTimeoutMs,
 } from '../src/brain/research.ts'
 import type { ResearchSettings } from '../src/shared/settings.ts'
 import { hangingResearch, makeSettings, shippedPromptStore, stubResearch } from './fixtures/brain.ts'
@@ -23,11 +25,21 @@ describe('research budgeting', () => {
       facts: ['会议在 10:00 开始'],
       sources: [{ title: '日程页', url: 'https://example.com/schedule' }],
     })
+    // 2000ms is floored to the retrieval minimum: a cold provider round trip is
+    // slower than that, and cutting it short only yields deferrals.
     const result = await research('明天几点的会', settings({ maxResults: 3, timeoutMs: 2000 }), port, signal())
-    expect(port.calls).toEqual([{ query: '明天几点的会', options: { limit: 3, timeoutMs: 2000 } }])
+    expect(port.calls).toEqual([{ query: '明天几点的会', options: { limit: 3, timeoutMs: 30_000 } }])
     expect(result).toMatchObject({ degraded: false, cached: false, includeCitations: true })
     expect(result.facts).toEqual(['会议在 10:00 开始'])
     expect(result.sources).toEqual([{ title: '日程页', url: 'https://example.com/schedule' }])
+  })
+
+  it('floors the retrieval budget at 30s and lets an explicit override win', () => {
+    expect(DEFAULT_RESEARCH_TIMEOUT_MS).toBe(30_000)
+    expect(researchTimeoutMs({ timeoutMs: 1_000 })).toBe(30_000)
+    expect(researchTimeoutMs({ timeoutMs: 8_000 })).toBe(30_000)
+    expect(researchTimeoutMs({ timeoutMs: 45_000 })).toBe(45_000)
+    expect(researchTimeoutMs({ timeoutMs: 8_000 }, 250)).toBe(250)
   })
 
   it('keeps at most maxResults facts and clips each one', async () => {
@@ -83,7 +95,7 @@ describe('research budgeting', () => {
   })
 
   it('reports a timeout and a failing port as degraded', async () => {
-    const timedOut = await research('问题', { ...settings(), timeoutMs: 20 }, hangingResearch(), signal())
+    const timedOut = await research('问题', settings(), hangingResearch(), signal(), { timeoutMs: 20 })
     expect(timedOut).toMatchObject({ degraded: true, reason: 'timeout' })
 
     const failed = await research(
@@ -109,7 +121,7 @@ describe('research budgeting', () => {
         })
       },
     }
-    const result = await research('问题', { ...settings(), timeoutMs: 10 }, port, signal())
+    const result = await research('问题', settings(), port, signal(), { timeoutMs: 10 })
     expect(result).toMatchObject({ degraded: true, reason: 'timeout' })
     await new Promise((resolve) => setTimeout(resolve, 60))
     expect(closed).toBe(true)

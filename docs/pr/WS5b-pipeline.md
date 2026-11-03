@@ -71,7 +71,7 @@
 - 设置热应用：persona → 重建 replier；models → 更新路由并重建；monitor → 立即 reconcile；targets/dws → 500 ms 防抖重启。
 - 健康：`status()` 提供真实 `monitorRunning`、channel state/targets/error、auth 布尔、effects pending/dead、executor active、prompts ready/error；`healthView` 将它们映射为 checks，`overview.monitor.running` 不再写死。
 - 停止顺序：`effects.drain → channel.stop → executor.dispose → model.dispose → passes.stop → host.dispose → 释放锁/关闭 db`，可重复调用。
-- `src/index.ts`：`inject` 增加 `agents`/`sessionController`/`workspaceRegistry`/`permissionPresets`/`sessionPersistence`/`llm`/`web`（`systemPrompt` 经 agent context 访问，不注入），`new Runtime(config, { ctx })`，`ctx.effect` 注册 `stop`。
+- `src/index.ts`：`inject` 增加 `agents`/`sessionController`/`workspaceRegistry`/`permissionPresets`/`sessionPersistence`/`llm`/`web`（`systemPrompt` 经 agent context 访问，不注入），`new Runtime({ ctx, config })`（同时保留 `(config, options)` 旧签名），`ctx.effect` 注册 `stop`。
 
 ## 6. Passes
 
@@ -99,7 +99,9 @@
 2. `feat(app): rate counters and effect pipeline`
 3. `feat(runtime): compose channel, brain and executor`
 4. `test: cover reply, task and runtime pipelines`
-5. `docs: document the WS5b runtime`
+5. `feat(app): passes, pause and health`
+6. `fix(app): write capture notices directly and accept the runtime initializer`
+7. `docs: document the WS5b runtime`
 
 ## 9. 门禁
 

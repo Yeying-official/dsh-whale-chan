@@ -14,6 +14,8 @@
 | 产物       | `pnpm build` 生成 `lib/`；`npm pack --dry-run` 当前为 **15 个 artifacts**（README 已包含，CHANGELOG/docs 不随包） |
 | 合并与安装 | 由人工执行；实现代理不自动合并、不 push、不安装 profile                                                           |
 
+> 包内只带 `README.md`；`docs/` 与 `CHANGELOG.md` 只存在于仓库/发行页，README 中的 docs 链接在 npm 包内不可达。这是“保持 15 artifacts”的明确取舍。
+
 ## 2. 发布门禁
 
 在干净工作区（`git status --porcelain` 为空）按顺序执行：

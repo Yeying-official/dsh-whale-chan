@@ -200,7 +200,7 @@ pnpm build          # 生成 lib/index.js 与 lib/client.js
 - **失败关闭**：模板缺失、授权缺失、状态目录不可写、数据库版本高于当前插件时，插件拒绝启动订阅或任务，而不是猜一个降级路径。
 - **本地数据**：消息、决策、任务、审计与设置都在本机 SQLite；只有回复/分类/任务执行需要的文本会按 DSH 的模型路由发给模型提供方，检索查询会发给 DSH 的搜索适配器。
 
-更细的授权规则见 [002 授权与回复策略](docs/002-authorization.md)，发送与回执语义见 [009 DWS 协议](docs/009-dws-protocol.md)。
+更细的授权规则见 [002 授权与回复策略](docs/002-authorization.md)，发送与回执语义见 [009 DWS 协议](docs/009-dws-protocol.md)；完整的威胁模型、控制、数据保留与事件响应见 [013 安全基线](docs/013-security.md)。
 
 ## 排障
 
@@ -240,6 +240,7 @@ pnpm build          # 生成 lib/index.js 与 lib/client.js
 
 | 文档                                            | 内容                                            |
 | ----------------------------------------------- | ----------------------------------------------- |
+| [000 理念](docs/000-philosophy.md)              | 低打扰、人的批准、可解释与可停止的产品原则      |
 | [001 领域模型](docs/001-domain.md)              | 消息、决策、任务、批准、派工、Outbound 与状态机 |
 | [002 授权与回复策略](docs/002-authorization.md) | 三种回复模式、判定顺序、静默/限速/防环          |
 | [003 执行](docs/003-execution.md)               | 批准门、派工、工作区、超时、取消与重试          |
@@ -247,10 +248,12 @@ pnpm build          # 生成 lib/index.js 与 lib/client.js
 | [005 面板](docs/005-panel.md)                   | 七个页签、交互、错误态、i18n 与无障碍           |
 | [006 部署](docs/006-deployment.md)              | `dws` 检查、目标发现、Windows shim、日志与健康  |
 | [007 架构](docs/007-architecture.md)            | 分层、数据流、effect、outbox 与组合根           |
+| [008 开发手册](docs/008-cookbook.md)            | 命令、分层、扩展字段/API/页签与测试策略         |
 | [009 DWS 协议](docs/009-dws-protocol.md)        | 事件键、NDJSON、发送回执、provisional 字段      |
 | [010 设计摘要](docs/010-design.md)              | WS0 冻结的产品与架构决策                        |
 | [011 设置合约](docs/011-settings-contract.md)   | 57 个字段、默认值、范围与错误码                 |
 | [012 发布](docs/012-release.md)                 | 发布门禁、干净 profile 安装、T0–T3、tag 与回滚  |
+| [013 安全基线](docs/013-security.md)            | 威胁模型、控制、明确不防御、数据保留与事件响应  |
 | [兼容矩阵](docs/compatibility.md)               | DSH / `dws` / OS / Node / 模型路由的验证状态    |
 | [PROGRESS](docs/PROGRESS.md)                    | 工作流进度与恢复快照                            |
 

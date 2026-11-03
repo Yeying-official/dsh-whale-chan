@@ -46,7 +46,7 @@
 
 ### 4.1 回复链
 
-- `classify`：读取 decision/message/thread，把 `InboundMessage` 映射为 `BrainMessage`（broadcast 由 mentions/@所有人 推导），带 20 条窗口调用 `SessionModel.forThread(...)`；失败/超时/低置信 → `engine.defer(decisionId, 'classify:<reason>')`。
+- `classify`：读取 decision/message/thread，把 `InboundMessage` 映射为 `BrainMessage`（broadcast 由 mentions/@所有人 推导），带 20 条窗口调用 `LlmModel` 的 `complete`（直接 `ctx.llm.stream`，无会话/工具）；失败/超时/低置信 → `engine.defer(decisionId, 'classify:<reason>')`。
 - task：`engine.classify(..., { intent:'task', task, approvalTtlMs })` 后写一条 `notice` 审计事件并结束；`tasks.enabled=false` 时 defer。
 - question + `need_search` → `research`，否则 chat → `compose`。
 - `research`：`research()`（brain 预算/缓存）包住注入的 `ResearchPort`；失败/降级也把 `ResearchResult` 交给 `compose`（无引用、无链接）。
@@ -68,7 +68,7 @@
 - 保持 WS5a 的 `Runtime(config, options)` 入口，新增 `options.ctx` 与 `options.overrides`（channel/model/research/executor/sessionHost/prompts/settings/command/baseArgs/env）与定时器 seam。
 - 启动：存储 → 设置种子 → 模板预载 → 执行器/模型/检索/流水线装配 → 授权探测 → `Effects.start` → `Passes.start` → 通道启动 → outbox 恢复。
 - 授权门：`available && authenticated && tokenValid && userId`；缺一不订阅。无 owner 的探测通道用于 `probeAuth()`，成功后再以 owner 构造运行通道。
-- 设置热应用：persona → 重建 replier；models → 更新路由并重建；monitor → 立即 reconcile；targets/dws → 500 ms 防抖重启。
+- 设置热应用：persona → 无需重建（随请求渲染）；models → 用新路由重建 `LlmModel`；monitor → 立即 reconcile；targets/dws → 500 ms 防抖重启。
 - 健康：`status()` 提供真实 `monitorRunning`、channel state/targets/error、auth 布尔、effects pending/dead、executor active、prompts ready/error；`healthView` 将它们映射为 checks，`overview.monitor.running` 不再写死。通道 `disabled`/`paused`/无 enabled target 均投影为 `ok`（idle），只有应有订阅却 `stopped` 才 `degraded`。
 - 停止顺序：`effects.drain → channel.stop → executor.dispose → model.dispose → passes.stop → host.dispose → 释放锁/关闭 db`，可重复调用。
 - `src/index.ts`：`inject` 增加 `agents`/`sessionController`/`workspaceRegistry`/`permissionPresets`/`sessionPersistence`/`llm`/`web`（`systemPrompt` 经 agent context 访问，不注入），`new Runtime({ ctx, config })`（生产入口；旧 `(config, options)` 标注 `@deprecated`，仅供无 ctx 的 API 测试），`ctx.effect` 注册 `stop`。
@@ -81,16 +81,16 @@
 
 ## 7. 测试
 
-WS5b 自身新增 6 个 spec、68 条用例；合并 `main`（WS2 T3 + WS6）后全量为 57 个 spec、667 条：
+WS5b 自身新增 6 个 spec、69 条用例；合并 `main`（WS2 T3 + WS4 直连 + WS6）后全量为 58 个 spec、691 条：
 
-| 文件                             | 条数 | 覆盖                                                                                |
-| -------------------------------- | ---- | ----------------------------------------------------------------------------------- |
-| `tests/core-outbound.spec.ts`    | 10   | follow-up 幂等、目标匹配、空值、终态与重复上报                                      |
-| `tests/rate-counters.spec.ts`    | 11   | 窗口、裁剪、跨重启、gap、损坏、线程窗口/连续回复/目标/broadcast                     |
-| `tests/pipeline-chat.spec.ts`    | 18   | 自动回复、闸门 review/defer、检索、回声、unknown/failed/skipped                     |
-| `tests/pipeline-task.spec.ts`    | 7    | 待批准可见、批准执行回帖、未批准/取消/派工不符不执行、失败只通知                    |
-| `tests/runtime-pipeline.spec.ts` | 18   | 授权门、暂停/恢复、防抖重启、outbox 恢复、过期/probe pass、停机顺序、ownerNick 透传 |
-| `tests/health-view.spec.ts`      | 4    | disabled / paused / 无 enabled target / 有目标但 stopped 的 channel 健康语义        |
+| 文件                             | 条数 | 覆盖                                                                                            |
+| -------------------------------- | ---- | ----------------------------------------------------------------------------------------------- |
+| `tests/core-outbound.spec.ts`    | 10   | follow-up 幂等、目标匹配、空值、终态与重复上报                                                  |
+| `tests/rate-counters.spec.ts`    | 11   | 窗口、裁剪、跨重启、gap、损坏、线程窗口/连续回复/目标/broadcast                                 |
+| `tests/pipeline-chat.spec.ts`    | 18   | 自动回复、闸门 review/defer、检索、回声、unknown/failed/skipped                                 |
+| `tests/pipeline-task.spec.ts`    | 7    | 待批准可见、批准执行回帖、未批准/取消/派工不符不执行、失败只通知                                |
+| `tests/runtime-pipeline.spec.ts` | 19   | 授权门、暂停/恢复、防抖重启、outbox 恢复、过期/probe pass、停机顺序、ownerNick、无 SessionModel |
+| `tests/health-view.spec.ts`      | 4    | disabled / paused / 无 enabled target / 有目标但 stopped 的 channel 健康语义                    |
 
 所有外部能力均为 fake：无真实 `dws`、模型、网络或 DSH 会话。
 
@@ -105,6 +105,7 @@ WS5b 自身新增 6 个 spec、68 条用例；合并 `main`（WS2 T3 + WS6）后
 7. `docs: document the WS5b runtime`
 8. `fix(app): report an idle channel as healthy`
 9. `fix(runtime): pass the owner nick to the channel`
+10. `fix(runtime): use the direct llm model for replies`
 
 ## 9. 门禁
 

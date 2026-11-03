@@ -9,12 +9,12 @@
  * 2. build settings, the domain engine and the effects queue;
  * 3. preload the prompt templates (a failure is reported, never guessed around);
  * 4. probe `dws` authorization; no owner means no subscription;
- * 5. build the replier model, retrieval and executor, register every effect
- *    handler, then start the queue and the passes;
+ * 5. build the direct reply model (`LlmModel`), retrieval and executor, register
+ *    every effect handler, then start the queue and the passes;
  * 6. start the channel only when prompts loaded and the owner is known.
  *
  * `stop()` reverses the list: the queue drains, the channel converges, the
- * executor and the replier sessions are disposed, the passes stop, then the
+ * executor and the direct reply model are disposed, the passes stop, then the
  * database closes and the lock is released. It is idempotent, and a stop that
  * races startup still releases everything already open.
  */
@@ -27,14 +27,14 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { lock } from 'proper-lockfile'
 import type { Clock, InboundMessage, Outbound } from '../core/index.ts'
 import { Engine } from '../core/index.ts'
-import type { PromptSource, ResearchPort } from '../brain/index.ts'
+import type { ModelPort, PromptSource, ResearchPort } from '../brain/index.ts'
 import { defaultPromptStore } from '../brain/index.ts'
 import type { ChannelLogger } from '../channel/index.ts'
 import {
   DshResearch,
   DshSessionHost,
   DshTaskExecutor,
-  SessionModel,
+  replyModelFor,
   type ExecutorLogger,
   type SessionHost,
   type TaskExecutor,
@@ -212,50 +212,44 @@ function stableReason(error: unknown): string {
 }
 
 /**
- * One long-lived replier session per conversation, rebuilt when the owner
- * changes the persona or the `settings.models.reply` route.
+ * The brain's `ModelPort` over DSH's LLM service directly.
+ *
+ * Replies no longer run in a DSH session: a session would mount the whole
+ * preset tool set (141k tokens in the T3 measurement) before the first token.
+ * `LlmModel` calls `ctx.llm.stream` with just the system text and one user
+ * message, so there is no conversation state to keep or rebuild here. The
+ * factory shape remains only because `Pipeline` asks for one port per thread.
  */
-class SessionModelPool implements BrainModelFactory {
-  private current: SessionModel
+class ReplyModelFactory implements BrainModelFactory {
+  private current: ModelPort
   private route: ModelRoute
 
   constructor(
-    private readonly host: SessionHost,
-    private readonly stateDir: string,
+    private readonly build: (route: ModelRoute) => ModelPort,
     route: ModelRoute,
-    private readonly logger: ExecutorLogger,
   ) {
     this.route = { ...route }
-    this.current = this.build()
+    this.current = this.build(this.route)
   }
 
-  forThread(threadKey: string, title?: string): ReturnType<SessionModel['forThread']> {
-    return this.current.forThread(threadKey, title)
+  forThread(): ModelPort {
+    return this.current
   }
 
-  async reset(): Promise<void> {
-    const previous = this.current
-    this.current = this.build()
-    await previous.dispose()
+  /** A direct LLM call has no session or cache to reset. */
+  reset(): void {
+    // no-op
   }
 
   async updateRoute(route: ModelRoute): Promise<void> {
     if (sameRoute(this.route, route)) return
     this.route = { ...route }
-    await this.reset()
+    this.current = this.build(this.route)
   }
 
+  /** Nothing to release: the LLM stream is owned by the caller's signal. */
   async dispose(): Promise<void> {
-    await this.current.dispose()
-  }
-
-  private build(): SessionModel {
-    return new SessionModel({
-      host: this.host,
-      logger: this.logger,
-      stateDir: this.stateDir,
-      model: this.route,
-    })
+    // no-op
   }
 }
 
@@ -552,8 +546,12 @@ export class Runtime {
 
     if (this.overrides.model !== undefined) {
       this.modelRef = this.overrides.model
-    } else if (this.hostRef !== undefined) {
-      this.modelRef = new SessionModelPool(this.hostRef, this.stateDir, this.settings.current().models.reply, logger)
+    } else if (this.ctx !== undefined) {
+      const ctx = this.ctx
+      this.modelRef = new ReplyModelFactory(
+        (route) => replyModelFor(ctx, route, logger),
+        this.settings.current().models.reply,
+      )
     }
 
     this.executorRef =
@@ -712,7 +710,8 @@ export class Runtime {
 
   private onSettingsChange(block: SettingsBlock): void {
     if (block === 'persona') {
-      void this.resetModel()
+      // The persona is rendered into every model request by the brain; a direct
+      // LLM call keeps no session whose prompt would need rebuilding.
       return
     }
     if (block === 'models') {
@@ -726,14 +725,6 @@ export class Runtime {
     }
     if (block === 'targets' || block === 'dws') {
       this.requestReconcile(CHANNEL_RESTART_DEBOUNCE_MS)
-    }
-  }
-
-  private async resetModel(): Promise<void> {
-    try {
-      await this.modelRef?.reset()
-    } catch (error) {
-      this.log('warn', `dsh-whale-chan: could not reset the replier session: ${stableReason(error)}`)
     }
   }
 

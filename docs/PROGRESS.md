@@ -1,7 +1,7 @@
 # 项目进度（v0.1.0 发布准备）
 
 > 快照时间：2026-11-03 16:45（Asia/Shanghai）。
-> 状态：**WS0–WS8 完成**；`0.1.0` 发布提交准备中。**tag、push、profile 安装均未执行**，等发布复核。
+> 状态：**WS0–WS8 完成**；`0.1.0` 发布提交已就绪。**tag、push、profile 安装均未执行**，等发布复核。
 > 真机：Windows + DSH Desktop `0.2.1-rc.5` + `dws` `1.0.66` 上 T0–T4 全过；验收后测试群目标已停用。
 
 ---
@@ -19,14 +19,14 @@
 | WS5b 组合根 + 流水线 + 健康                     | **完成并合并** | `main` `4ebb2ca`                                       |
 | WS6 面板 UI 全页签                              | **完成并合并** | `main` `28d5645`                                       |
 | WS7 README/安装/兼容矩阵/CHANGELOG/013 安全基线 | **完成并合并** | `b0891fc`（`docs: write the security baseline`）       |
-| WS8 端到端 + 真机 T0–T4 验收                    | **完成**       | [WS8-live](test-reports/WS8-live.md)，`main` `3ac76c8` |
+| WS8 端到端 + 真机 T0–T4 验收                    | **完成**       | [WS8-live](test-reports/WS8-live.md)，`main` `3ac88bb` |
 
 ## 2. 发布坐标与门禁
 
 | 项          | 值                                                                 |
 | ----------- | ------------------------------------------------------------------ |
-| `main` HEAD | `f43d7c3`（含 `7850149` / `90f95a5` 等 WS8 真机修复与 T4 脱敏）    |
-| 发布分支    | `feat/ws7-docs`，准备提交 `release: v0.1.0`                        |
+| `main` HEAD | `3ac88bb`（含 `7850149` / `90f95a5` 等 WS8 真机修复与 T4 脱敏）    |
+| 发布分支    | `feat/ws7-docs`，发布提交 `chore(release): v0.1.0`                 |
 | 版本        | `0.1.0`（`package.json`、`PLUGIN_VERSION`、`check-pack` 三处一致） |
 | 全量测试    | **702 tests**（脱敏修复合并后的 main；发布提交需复跑确认）         |
 | 打包        | `15 artifacts`，icon 711 bytes                                     |

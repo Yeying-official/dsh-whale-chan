@@ -12,6 +12,7 @@
  */
 import type { InboundMessage } from '../core/model.ts'
 import type { Settings } from '../shared/settings.ts'
+import { resolveDwsCommand } from './command.ts'
 import { ChannelError } from './errors.ts'
 import { describeError, describeExit, redact } from './log.ts'
 import { normalizeEvent, summarizeRawEvent } from './normalize.ts'
@@ -74,6 +75,7 @@ export class ChannelSupervisor {
   readonly #ownerUserId: string
   readonly #ownerNick: string | undefined
   readonly #command: string
+  #resolvedCommand: string
   readonly #baseArgs: readonly string[]
   readonly #env: NodeJS.ProcessEnv | undefined
   readonly #cwd: string | undefined
@@ -95,6 +97,7 @@ export class ChannelSupervisor {
     this.#ownerUserId = resolveOwnerUserId(options.ownerUserId)
     this.#ownerNick = options.ownerNick
     this.#command = options.command ?? options.settings.dws.binaryPath
+    this.#resolvedCommand = this.#command
     this.#baseArgs = options.baseArgs ?? []
     this.#env = options.env
     this.#cwd = options.cwd
@@ -125,6 +128,10 @@ export class ChannelSupervisor {
       throw new ChannelError('owner-unknown', 'owner identity is required before subscribing')
     }
     if (this.#running) throw new ChannelError('invalid-state', 'channel supervisor is already started')
+    // One resolution for the whole supervisor run, logged once so a host PATH
+    // problem is visible without exposing any account data.
+    this.#resolvedCommand = resolveDwsCommand(this.#command, this.#env ?? process.env)
+    this.#logger.info(`channel: dws command ${this.#resolvedCommand}`)
     this.#sink = sink
     this.#running = true
     this.#stopping = false
@@ -214,7 +221,7 @@ export class ChannelSupervisor {
 
     runtime.state = 'starting'
     const process = new DwsProcess({
-      command: this.#command,
+      command: this.#resolvedCommand,
       baseArgs: this.#baseArgs,
       args,
       env: this.#env,
@@ -390,6 +397,7 @@ export class ChannelSupervisor {
       ...(runtime.lastError ? { lastError: runtime.lastError } : {}),
       pending: runtime.pending,
       malformed: runtime.malformed,
+      command: this.#resolvedCommand,
     }
   }
 

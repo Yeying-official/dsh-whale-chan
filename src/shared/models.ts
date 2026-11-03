@@ -221,9 +221,26 @@ export interface SettingsView {
   readonly revision: number
 }
 
+/**
+ * One shipped persona template the owner can load into the persona draft.
+ *
+ * Presets are data, never defaults: loading one only fills the local draft, and
+ * the existing `PUT settings/persona` remains the only way to persist it.
+ */
+export interface PersonaPreset {
+  readonly id: string
+  readonly name: string
+  readonly description: string
+  readonly persona: PersonaSettings
+}
+
 export interface PersonaView {
   readonly persona: PersonaSettings
   readonly revision: number
+  /** Frozen default persona: a label with no character content; a fresh install uses it. */
+  readonly defaults: PersonaSettings
+  /** Shipped persona templates, such as the blue-white whale maid. */
+  readonly presets: readonly PersonaPreset[]
 }
 
 export interface MonitorPauseResult {

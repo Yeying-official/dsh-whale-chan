@@ -8,6 +8,7 @@ import type { ChannelPort } from '../src/app/channel-port.ts'
 import { conversationWorkspace, conversationWorkspaceTitle } from '../src/executor/workspace.ts'
 import { inboundMessage } from './fixtures/domain.ts'
 import { SETTINGS_BLOCKS, SETTINGS_DEFAULTS } from '../src/shared/settings.ts'
+import { EMPTY_PERSONA, WHALE_MAID_PERSONA } from '../src/shared/persona-defaults.ts'
 
 let root = ''
 let server: TestServer | undefined
@@ -209,10 +210,19 @@ describe('read routes', () => {
     }
 
     const persona = (await (await request(baseUrl, '/whale-chan/api/persona')).json()) as {
-      persona: { name: string }
+      persona: unknown
       revision: number
+      defaults: unknown
+      presets: readonly { id: string; persona: unknown }[]
     }
-    expect(persona).toEqual({ persona: SETTINGS_DEFAULTS.persona, revision: 0 })
+    expect(persona.revision).toBe(0)
+    expect(persona.persona).toEqual(EMPTY_PERSONA)
+    expect(persona.persona).toEqual(SETTINGS_DEFAULTS.persona)
+    expect(persona.defaults).toEqual(EMPTY_PERSONA)
+    expect(persona.presets.map((item) => item.id)).toEqual(['whale-maid'])
+    expect(persona.presets[0]?.persona).toEqual(WHALE_MAID_PERSONA)
+    // The preset is a template, not the default: a fresh profile keeps the empty persona.
+    expect(persona.presets[0]?.persona).not.toEqual(persona.defaults)
   })
 
   it('reports host health without leaking the state directory path', async () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { FIELDS } from '../src/shared/fields.ts'
+import { EMPTY_PERSONA, PERSONA_PRESETS, WHALE_MAID_PERSONA } from '../src/shared/persona-defaults.ts'
 import { SETTINGS_DEFAULTS, SettingsSchema, type Settings } from '../src/shared/settings.ts'
 
 function withPath(path: string, value: unknown): Settings {
@@ -29,6 +30,56 @@ describe('settings defaults', () => {
     expect(parsed.monitor.intervalSeconds).toBe(45)
     expect(parsed.targets.rows).toEqual([])
     expect(parsed.models.reply).toEqual({ provider: '', model: '', effort: '' })
+  })
+})
+
+describe('persona defaults and presets', () => {
+  it('defaults to the empty persona, not a character template', () => {
+    expect(SETTINGS_DEFAULTS.persona).toEqual(EMPTY_PERSONA)
+    expect(SettingsSchema.parse({}).persona).toEqual(EMPTY_PERSONA)
+    expect(EMPTY_PERSONA.name).toBe('鲸鱼酱')
+    expect(EMPTY_PERSONA.identity).toBe('')
+    expect(EMPTY_PERSONA.tone).toBe('')
+    expect(EMPTY_PERSONA.language).toBe('auto')
+    expect(EMPTY_PERSONA.signature).toBe('')
+    expect(EMPTY_PERSONA.rules).toEqual([])
+    expect(EMPTY_PERSONA.knowledge).toBe('')
+    expect(EMPTY_PERSONA.samples).toEqual([])
+  })
+
+  it('mirrors the empty persona in the field registry', () => {
+    const defaults = new Map(
+      FIELDS.filter((field) => field.block === 'persona').map((field) => [field.path, field.defaultValue]),
+    )
+    for (const [path, value] of Object.entries(EMPTY_PERSONA)) {
+      expect(defaults.get(path), path).toEqual(value)
+    }
+    expect(defaults.size).toBe(Object.keys(EMPTY_PERSONA).length)
+  })
+
+  it('does not share persona arrays between parses or with the frozen constant', () => {
+    const first = SettingsSchema.parse({}).persona
+    const second = SettingsSchema.parse({}).persona
+    expect(first.rules).not.toBe(second.rules)
+    expect(first.samples).not.toBe(second.samples)
+    expect(first.rules).not.toBe(EMPTY_PERSONA.rules)
+    first.rules.push('只有这一份草稿能看到')
+    expect(second.rules).toEqual([])
+    expect(EMPTY_PERSONA.rules).toEqual([])
+  })
+
+  it('ships the whale maid as an opt-in preset that differs from the default', () => {
+    expect(PERSONA_PRESETS).toHaveLength(1)
+    const preset = PERSONA_PRESETS[0]
+    expect(preset?.id).toBe('whale-maid')
+    expect(preset?.name).toBe('蓝白鲸鱼女仆')
+    expect(preset?.persona).toEqual(WHALE_MAID_PERSONA)
+    expect(preset?.persona.language).toBe('zh-CN')
+    expect(preset?.persona.tone.length).toBeGreaterThan(0)
+    expect(preset?.persona.rules.length).toBeGreaterThan(0)
+    expect(preset?.persona.knowledge.length).toBeGreaterThan(0)
+    expect(preset?.persona.samples.length).toBeGreaterThan(0)
+    expect(preset?.persona).not.toEqual(EMPTY_PERSONA)
   })
 })
 

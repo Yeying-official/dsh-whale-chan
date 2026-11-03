@@ -30,7 +30,7 @@ const rows = FIELDS.map(
 
 const doc = `# 011 设置合约
 
-> 状态：WS0 冻结字段，WS5a 起持久化（schema v2）。生成来源：\`src/shared/fields.ts\`；默认值来源：\`src/shared/settings.ts\`；持久化实现：\`src/app/settings.ts\`。
+> 状态：WS0 冻结字段，WS5a 起持久化（schema v2）。生成来源：\`src/shared/fields.ts\`；默认值来源：\`src/shared/settings.ts\`（persona 的默认值与预设定义在 \`src/shared/persona-defaults.ts\`）；持久化实现：\`src/app/settings.ts\`。
 
 本文件是设置字段的唯一人读表格，由 \`scripts/generate-settings-docs.mjs\` 生成。机器可读的唯一真源是：
 
@@ -65,6 +65,7 @@ ${rows.join('\n')}
 - \`PUT settings/:block\` 必须带非负整数 \`revision\`；缺失为 400 \`revision_required\`，过期 revision 为 409 \`settings_conflict\`。
 - 块内 patch 采用递归深合并（仅当两侧都是普通对象）；数组、标量和 \`null\` 整体替换；未知键仍由 strict 拒绝。
 - 人设唯一写入口是 \`PUT settings/persona\`；\`GET persona\` 只读；原 \`PUT persona\` 已删除。
+- \`GET persona\` 还返回只读的 \`defaults\`（空人设）与 \`presets\`（当前含 \`whale-maid\` 蓝白鲸鱼女仆）；两者都是深拷贝，不参与持久化，详见 \`docs/014-persona-defaults.md\`。
 - 所有管理请求要求 \`x-whale-chan-request: 1\`，缺失为 403 且不回传 \`stateDir\`。
 
 ## 持久化、revision 与 history（WS5a）

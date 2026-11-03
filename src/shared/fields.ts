@@ -6,6 +6,7 @@
  * proves a one-to-one correspondence with `SettingsSchema`.
  */
 import { LIMITS, LOG_LEVELS, PERMISSION_PRESETS, PERSONA_LANGUAGES } from './limits.ts'
+import { EMPTY_PERSONA } from './persona-defaults.ts'
 import type { SettingsBlock } from './settings.ts'
 
 export type FieldType = 'boolean' | 'number' | 'string' | 'enum' | 'string-list' | 'rows'
@@ -56,16 +57,19 @@ export const FIELDS: readonly FieldSpec[] = [
 
   field('targets', 'rows', 'rows', []),
 
-  field('persona', 'name', 'string', '鲸鱼酱'),
-  field('persona', 'identity', 'string', ''),
-  field('persona', 'tone', 'string', '二次元助理'),
-  field('persona', 'language', 'enum', 'auto', { options: PERSONA_LANGUAGES }),
-  field('persona', 'signature', 'string', ''),
-  field('persona', 'rules', 'string-list', []),
-  field('persona', 'knowledge', 'string', ''),
-  field('persona', 'samples', 'string-list', []),
-  field('persona', 'allowEmoji', 'boolean', true),
-  field('persona', 'maxReplyChars', 'number', 300, { ...LIMITS.persona.maxReplyChars, unit: 'characters' }),
+  field('persona', 'name', 'string', EMPTY_PERSONA.name),
+  field('persona', 'identity', 'string', EMPTY_PERSONA.identity),
+  field('persona', 'tone', 'string', EMPTY_PERSONA.tone),
+  field('persona', 'language', 'enum', EMPTY_PERSONA.language, { options: PERSONA_LANGUAGES }),
+  field('persona', 'signature', 'string', EMPTY_PERSONA.signature),
+  field('persona', 'rules', 'string-list', [...EMPTY_PERSONA.rules]),
+  field('persona', 'knowledge', 'string', EMPTY_PERSONA.knowledge),
+  field('persona', 'samples', 'string-list', [...EMPTY_PERSONA.samples]),
+  field('persona', 'allowEmoji', 'boolean', EMPTY_PERSONA.allowEmoji),
+  field('persona', 'maxReplyChars', 'number', EMPTY_PERSONA.maxReplyChars, {
+    ...LIMITS.persona.maxReplyChars,
+    unit: 'characters',
+  }),
 
   field('reply', 'autoReply', 'boolean', true),
   field('reply', 'allowedSenders', 'string-list', []),

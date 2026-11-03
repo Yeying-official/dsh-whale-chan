@@ -7,6 +7,7 @@ import { MIGRATIONS, SCHEMA_VERSION } from '../src/app/migration.ts'
 import { SettingsConflictError, SettingsService, SettingsValueError } from '../src/app/settings.ts'
 import { Store } from '../src/app/store.ts'
 import { SETTINGS_BLOCKS, SETTINGS_DEFAULTS } from '../src/shared/settings.ts'
+import { EMPTY_PERSONA, PERSONA_PRESETS, WHALE_MAID_PERSONA } from '../src/shared/persona-defaults.ts'
 import { createClock } from './fixtures/domain.ts'
 
 let root = ''
@@ -46,8 +47,36 @@ describe('settings service defaults', () => {
       expect(view.blocks[block]).toEqual({ block, value: SETTINGS_DEFAULTS[block], revision: 0 })
     }
     expect(settings.current()).toEqual(SETTINGS_DEFAULTS)
-    expect(settings.persona()).toEqual({ persona: SETTINGS_DEFAULTS.persona, revision: 0 })
+    expect(settings.persona()).toEqual({
+      persona: SETTINGS_DEFAULTS.persona,
+      revision: 0,
+      defaults: EMPTY_PERSONA,
+      presets: PERSONA_PRESETS,
+    })
     expect(settings.warnings()).toEqual([])
+  })
+
+  it('returns deep copies of the persona defaults and presets', () => {
+    const { settings } = open()
+    const first = settings.persona()
+    expect(first.defaults).not.toBe(EMPTY_PERSONA)
+    expect(first.defaults.rules).not.toBe(EMPTY_PERSONA.rules)
+    expect(first.presets).not.toBe(PERSONA_PRESETS)
+    expect(first.presets[0]).not.toBe(PERSONA_PRESETS[0])
+    expect(first.presets[0]?.persona).not.toBe(WHALE_MAID_PERSONA)
+    expect(first.presets[0]?.persona.rules).not.toBe(WHALE_MAID_PERSONA.rules)
+
+    // Mutating one response must not leak into the next one or into the current persona.
+    first.defaults.name = '被改坏的名字'
+    first.defaults.rules.push('被改坏的规则')
+    const preset = first.presets[0]
+    if (preset) preset.persona.samples.push('被改坏的示例')
+    const second = settings.persona()
+    expect(second.defaults.name).toBe('鲸鱼酱')
+    expect(second.defaults.rules).toEqual([])
+    expect(second.presets[0]?.persona.samples).toEqual(WHALE_MAID_PERSONA.samples)
+    expect(second.persona).toEqual(EMPTY_PERSONA)
+    expect(settings.current().persona).toEqual(EMPTY_PERSONA)
   })
 
   it('returns copies so a caller cannot mutate the service state', () => {

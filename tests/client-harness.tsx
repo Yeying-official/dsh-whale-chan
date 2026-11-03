@@ -10,6 +10,7 @@ import { App } from '../src/client/app.tsx'
 import { zh, type T } from '../src/client/locale.ts'
 import { PanelProvider } from '../src/client/provider.tsx'
 import { SETTINGS_BLOCKS, SETTINGS_DEFAULTS } from '../src/shared/settings.ts'
+import { PERSONA_PRESETS } from '../src/shared/persona-defaults.ts'
 import type { SettingsBlock } from '../src/shared/settings.ts'
 import type {
   Approval,
@@ -180,8 +181,21 @@ export function settingsFixture(
   return { blocks, revision: 9 }
 }
 
-export function personaFixture(overrides: Partial<PersonaView['persona']> = {}, revision = 3): PersonaView {
-  return { persona: { ...SETTINGS_DEFAULTS.persona, ...overrides }, revision }
+export function personaFixture(
+  overrides: Partial<PersonaView['persona']> = {},
+  revision = 3,
+  options: { readonly legacyHost?: boolean } = {},
+): PersonaView {
+  const view = {
+    persona: { ...structuredClone(SETTINGS_DEFAULTS.persona), ...overrides },
+    revision,
+    defaults: structuredClone(SETTINGS_DEFAULTS.persona),
+    presets: structuredClone(PERSONA_PRESETS),
+  }
+  if (!options.legacyHost) return view
+  // A pre-0.3 host omitted both fields; the page must hide the actions instead of crashing.
+  const { defaults: _defaults, presets: _presets, ...legacy } = view
+  return legacy as PersonaView
 }
 
 export function threadFixture(overrides: Partial<ThreadSummary> = {}): ThreadSummary {

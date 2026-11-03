@@ -1,6 +1,6 @@
 # 012 发布
 
-> 当前状态：**v0.1.0 发布准备完成，tag 未打、未 push**。WS0–WS8 已完成；WS8 在 Windows 上 T0–T4 全过（[报告](test-reports/WS8-live.md)）。本文是发布复核与打 tag 的清单；未打勾的项目不得发布。
+> 当前状态：**v0.1.0 已本地打 tag、未 push**。WS0–WS8 已完成；WS8 在 Windows 上 T0–T4 全过（[报告](test-reports/WS8-live.md)）。本文是发布复核与打 tag 的清单。
 >
 > 版本 `0.1.0`，日期 `2026-11-03`。`private: true`，不发布到 npm。
 
@@ -45,8 +45,8 @@ git status --porcelain
 - [x] `docs/compatibility.md` → 适用版本、WS8 结果与 T0–T4
 - [x] `docs/PROGRESS.md` → WS0–WS8 收口、main HEAD、测试数、测试群停用
 - [x] `README.md` → v0.1.0 状态、真机范围、安全默认、WS8 报告链接
-- [ ] 发布复核人确认 `docs/test-reports/WS8-live.md` 与 CHANGELOG 中的真机结论一致
-- [ ] 若复核期间还有代码改动：重新跑第 2 节全部门禁
+- [x] 发布复核人确认 `docs/test-reports/WS8-live.md` 与 CHANGELOG 中的真机结论一致
+- [x] 复核期间仅文档修正（CHANGELOG 措辞、PROGRESS 坐标）；代码未变，第 2 节门禁已复跑（702 tests、15 artifacts）
 
 ## 4. 安装与卸载
 

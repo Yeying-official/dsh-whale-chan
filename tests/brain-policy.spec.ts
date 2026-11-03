@@ -39,17 +39,17 @@ describe('gateReply', () => {
     })
   })
 
-  it('honours the sender allow list and block list', () => {
-    const blocked = settingsWithTarget({ reply: { blockedSenders: ['小明'] } })
+  it('honours the sender allow list and block list by user id', () => {
+    const blocked = settingsWithTarget({ reply: { blockedSenders: ['user-1'] } })
     expect(gateReply(makeGateInput({ settings: blocked }))).toEqual({ act: false, reason: 'sender_blocked' })
 
-    const allowedOther = settingsWithTarget({ reply: { allowedSenders: ['别人'] } })
+    const allowedOther = settingsWithTarget({ reply: { allowedSenders: ['user-2'] } })
     expect(gateReply(makeGateInput({ settings: allowedOther }))).toEqual({
       act: false,
       reason: 'sender_not_allowed',
     })
 
-    const allowed = settingsWithTarget({ reply: { allowedSenders: ['user-1'] } })
+    const allowed = settingsWithTarget({ reply: { allowedSenders: [' user-1 '] } })
     expect(gateReply(makeGateInput({ settings: allowed }))).toEqual({ act: true, mode: 'auto', reason: 'allowed' })
   })
 
@@ -173,7 +173,7 @@ describe('gateReply', () => {
 
   it('reports the most authoritative reason when several rules would fire', () => {
     const settings = settingsWithTarget({
-      reply: { blockedSenders: ['小明'], autoReply: false },
+      reply: { blockedSenders: ['user-1'], autoReply: false },
       monitor: { quietHours: { enabled: true, start: '22:00', end: '08:00' } },
     })
     expect(gateReply(makeGateInput({ settings, now: localTime(23) }))).toEqual({

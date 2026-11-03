@@ -31,11 +31,13 @@ function parseHour(value: string, fallback: number): number {
 }
 
 /**
- * Whether `hour` (0–23, local time) falls in `[start, end)`.
+ * Whether `hour` (0–23) falls in `[start, end)`.
  *
- * A window whose start is after its end crosses midnight (22:00–08:00 covers
- * 22 and 23 and 0–7). A window with equal ends covers nothing, which is how an
- * operator disables it without turning the switch off.
+ * Hours are the host machine's local hours: the caller's `Date` is read with
+ * `getHours()`, so a window that crosses midnight (22:00–08:00 covers 22, 23 and
+ * 0–7) is interpreted in the timezone the host runs in. A window with equal ends
+ * covers nothing, which is how an operator disables it without turning the
+ * switch off.
  */
 export function isQuietHour(hour: number, start: string, end: string): boolean {
   const from = parseHour(start, 22)
@@ -44,14 +46,18 @@ export function isQuietHour(hour: number, start: string, end: string): boolean {
   return from < to ? hour >= from && hour < to : hour >= from || hour < to
 }
 
-function matchesSender(list: readonly string[], senderId: string, senderName: string): boolean {
+/**
+ * Membership test for the allow/block lists.
+ *
+ * Only the sender's user id is compared, by exact trimmed equality. A display
+ * name is not an identity — anyone can rename themselves to a name on the list —
+ * so a name entry never authorizes or blocks anyone. The panel is responsible
+ * for resolving a picked person to their userId before it saves the list.
+ */
+function matchesSenderId(list: readonly string[], senderId: string): boolean {
   const id = senderId.trim()
-  const name = senderName.trim().toLowerCase()
-  return list.some((entry) => {
-    const value = entry.trim()
-    if (value.length === 0) return false
-    return value === id || value.toLowerCase() === name
-  })
+  if (id.length === 0) return false
+  return list.some((entry) => entry.trim() === id)
 }
 
 function findTarget(input: GateInput): TargetRow | undefined {
@@ -79,11 +85,11 @@ export function gateReply(input: GateInput): GateDecision {
   if (!target.enabled) return deny('target_disabled')
   if (target.replyMode === 'off') return deny('target_off')
 
-  if (matchesSender(settings.reply.blockedSenders, message.senderId, message.senderName)) {
+  if (matchesSenderId(settings.reply.blockedSenders, message.senderId)) {
     return deny('sender_blocked')
   }
   const allowed = settings.reply.allowedSenders
-  if (allowed.length > 0 && !matchesSender(allowed, message.senderId, message.senderName)) {
+  if (allowed.length > 0 && !matchesSenderId(allowed, message.senderId)) {
     return deny('sender_not_allowed')
   }
 

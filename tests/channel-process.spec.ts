@@ -133,7 +133,7 @@ describe('DwsProcess with the fake executable', () => {
     const subscription = new DwsProcess({
       command: process.execPath,
       baseArgs: [fakeDws],
-      args: ['event', 'consume', 'user_im_message_receive_at', '--flatten', '-f', 'ndjson', '--ttl', '1'],
+      args: ['event', 'consume', 'user_im_message_receive_at', '--flatten', '-f', 'ndjson', '--ttl', '1h'],
       env: env({ FAKE_DWS_EVENTS: eventsFile, FAKE_DWS_TRACE: traceFile }),
       graceMs: 2_000,
       onLine: (line) => lines.push(line),
@@ -165,7 +165,7 @@ describe('DwsProcess with the fake executable', () => {
     const subscription = new DwsProcess({
       command: process.execPath,
       baseArgs: [fakeDws],
-      args: ['event', 'consume', 'user_im_message_receive_at', '--flatten', '-f', 'ndjson', '--ttl', '1'],
+      args: ['event', 'consume', 'user_im_message_receive_at', '--flatten', '-f', 'ndjson', '--ttl', '1h'],
       env: env({ FAKE_DWS_EXIT: '7', FAKE_DWS_TRACE: traceFile }),
       onLine: () => undefined,
       onStderrLine: () => undefined,
@@ -180,7 +180,7 @@ describe('DwsProcess with the fake executable', () => {
     const subscription = new DwsProcess({
       command: process.execPath,
       baseArgs: [fakeDws],
-      args: ['event', 'consume', 'user_im_message_receive_at', '--flatten', '-f', 'ndjson', '--ttl', '1'],
+      args: ['event', 'consume', 'user_im_message_receive_at', '--flatten', '-f', 'ndjson', '--ttl', '1h'],
       env: env({ FAKE_DWS_DRY_RUN_EXIT: '3' }),
       onLine: () => undefined,
       onStderrLine: () => undefined,

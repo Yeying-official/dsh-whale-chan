@@ -42,7 +42,7 @@ describe('consumeSpec', () => {
       '-f',
       'ndjson',
       '--ttl',
-      '6',
+      '6h',
     ])
   })
 

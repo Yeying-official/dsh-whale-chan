@@ -21,6 +21,17 @@ export const EVENT_KEYS = {
   dm: 'user_im_message_receive_o2o',
 } as const
 
+/**
+ * Format one TTL for the `--ttl` flag.
+ *
+ * dws parses `--ttl` as a Go duration, not as a number: a bare `1` is rejected
+ * with `time: missing unit in duration "1"` (confirmed on a real host during
+ * T1). Settings store whole hours, so v1 always appends `h`.
+ */
+export function ttlDuration(hours: number): string {
+  return `${hours}h`
+}
+
 /** One `event consume` invocation, without the binary and its base args. */
 export interface ConsumeSpec {
   readonly eventKey: string
@@ -72,7 +83,16 @@ export function consumeSpec(target: DwsTarget, settings: Settings): ConsumeSpec 
   const id = target.id.trim()
   if (id === '') throw new ChannelError('invalid-target', 'target id is empty')
   const eventKey = EVENT_KEYS[target.kind]
-  const args = ['event', 'consume', eventKey, '--flatten', '-f', 'ndjson', '--ttl', String(settings.dws.eventTtlHours)]
+  const args = [
+    'event',
+    'consume',
+    eventKey,
+    '--flatten',
+    '-f',
+    'ndjson',
+    '--ttl',
+    ttlDuration(settings.dws.eventTtlHours),
+  ]
   if (target.kind === 'group') {
     args.push('--group', id)
   } else if (target.kind === 'dm') {

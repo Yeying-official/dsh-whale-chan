@@ -56,7 +56,7 @@ main(whale-chan)
 | `failed`            | —                             | —    | —    | ✅   |
 | 其他                | —                             | —    | —    | —    |
 
-- **批准**弹窗：工作区（可选）+ 备注（可选）。工作区留空时由宿主使用 `tasks.workspaceRoot/<taskId>`（未配置则 `<stateDir>/tasks/<taskId>`）；非空必须是绝对路径（`C:\…`、`/…`、`\\…` 或 `~/…`），否则本地拦截。提交体为 `{ approvalId?, workspace?, note? }`。
+- **批准**弹窗：工作区（可选）+ 备注（可选）。工作区留空时任务使用该会话的共用工作区（见 3.4）；非空必须是绝对路径（`C:\…`、`/…`、`\\…` 或 `~/…`），否则本地拦截。填写会覆盖并脱离共用工作区，属人工例外。提交体为 `{ approvalId?, workspace?, note? }`。
 - **重试**仅失败任务可用，提交 `{ workspace? }`；**拒绝/取消**可填理由。审批已过期时显示只读提示，批准/拒绝保持禁用。
 - 动作成功后关闭弹窗、提示、重拉详情与列表；`409`（如 `alreadyDecided`、`notAwaitingApproval`）或 `404` 会立即重拉详情纠正状态。`400 invalidWorkspace` 等错误定位到弹窗字段。
 - 详情接口当前不返回派工/结果/会话 ID；若响应中出现 `assignment.sessionId`（或顶层 `sessionId`），面板显示「打开执行会话」并调用 `uiWorkspace.openSession`，会话目录未就绪/未列出时给出本地化错误；否则明确显示「宿主未提供执行会话 ID」。
@@ -71,6 +71,7 @@ main(whale-chan)
 ### 3.4 目标
 
 - 行编辑：类型、目标 ID、名称、仅 @、回复模式、启用；新增/删除仅在草稿中生效，保存时才 `PUT settings/targets`。
+- 目标行编辑器下方是**只读工作区**区块：遍历 `GET targets` 的 `targets[].workspace`，显示目标名称/类型与 `path`（等宽字体，可复制到剪贴板）；`mode: 'ready'` 显示「已创建」，`mode: 'per-conversation'`（`at-me` 与 `open:` 单聊）显示「按会话创建」。该投影由宿主派生，不是可编辑字段，也从不写入 `PUT settings/targets`；响应中没有 `workspace` 时整个区块隐藏。`tasks.workspaceRoot` 是回复与任务的共用根，每个会话在根下拥有独立子目录；相对路径会被宿主忽略并回退到 `<stateDir>/workspaces`，设置页与目标页的提示文案同步说明这一点。
 - 发现：选择类型 + 关键词，`POST targets/discover` 返回候选；重复目标提示，加入草稿后需保存。通道未接入时宿主返回 `503 channel_unavailable`，面板显示「通道尚未接入」。
 - 校验：`POST targets/validate` 校验当前草稿行，显示有效/无效计数与逐行原因；同样处理 503。
 

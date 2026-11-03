@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { userErrorStatus } from '../src/app/http.ts'
 import { fakeChannel, jsonBody, request, startTestServer, type TestServer } from './fixtures/http.ts'
 import type { ChannelPort } from '../src/app/channel-port.ts'
 import { inboundMessage } from './fixtures/domain.ts'
@@ -376,6 +377,14 @@ describe('channel routes', () => {
     const body = (await response.json()) as { error: { code: string; message: string } }
     expect(body.error.code).toBe('channel_error')
     expect(body.error.message).not.toContain('dws')
+  })
+})
+
+describe('error classification', () => {
+  it('maps each user error category to one stable status', () => {
+    expect(userErrorStatus('missing')).toBe(404)
+    expect(userErrorStatus('invalid')).toBe(400)
+    expect(userErrorStatus('refused')).toBe(409)
   })
 })
 

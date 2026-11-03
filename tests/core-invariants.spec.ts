@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { UserError } from '../src/core/index.ts'
+import { USER_ERRORS, UserError } from '../src/core/index.ts'
 import { THREAD_KEY, createHarness, receiveDraft, receiveTask } from './fixtures/domain.ts'
 
 describe('domain invariants', () => {
@@ -323,6 +323,52 @@ describe('domain invariants', () => {
       harness.engine.approveTask(task.id, { by: 'owner', at: 'yesterday', workspace: '/workspace/invalid' }),
     ).toThrowError(expect.objectContaining({ code: 'invalidTime' }))
     expect(harness.engine.task(task.id)?.status).toBe('awaiting-approval')
+  })
+})
+
+describe('user error categories', () => {
+  it('pins every code to the category the API derives its status from', () => {
+    // This table is intentionally exhaustive: reclassifying a code (or adding a
+    // new one without a category) fails here before it can silently change an
+    // HTTP status. `missing` → 404, `invalid` → 400, `refused` → 409.
+    const expected: Record<string, 'missing' | 'invalid' | 'refused'> = {
+      unknownDecision: 'missing',
+      unknownTask: 'missing',
+      unknownMessage: 'missing',
+      unknownThread: 'missing',
+      unknownApproval: 'missing',
+      unknownAssignment: 'missing',
+      unknownOutbound: 'missing',
+      notQueued: 'refused',
+      notClassified: 'refused',
+      notDrafted: 'refused',
+      notSending: 'refused',
+      notDeferrable: 'refused',
+      missingTaskDetail: 'invalid',
+      missingApprovalTtl: 'invalid',
+      missingWorkspace: 'invalid',
+      invalidWorkspace: 'invalid',
+      alreadyDecided: 'refused',
+      approvalExpired: 'refused',
+      notAwaitingApproval: 'refused',
+      notApproved: 'refused',
+      notRunning: 'refused',
+      notFailed: 'refused',
+      notCancellable: 'refused',
+      assignmentMismatch: 'refused',
+      assignmentNotPending: 'refused',
+      assignmentNotRunning: 'refused',
+      outboundMissing: 'refused',
+      invalidTime: 'invalid',
+    }
+    const actual = Object.fromEntries(Object.entries(USER_ERRORS).map(([code, [category]]) => [code, category]))
+    expect(actual).toEqual(expected)
+
+    expect(new UserError('invalidWorkspace')).toMatchObject({ category: 'invalid', missing: false })
+    expect(new UserError('missingWorkspace')).toMatchObject({ category: 'invalid', missing: false })
+    expect(new UserError('invalidTime')).toMatchObject({ category: 'invalid', missing: false })
+    expect(new UserError('notFailed')).toMatchObject({ category: 'refused', missing: false })
+    expect(new UserError('unknownTask')).toMatchObject({ category: 'missing', missing: true })
   })
 })
 

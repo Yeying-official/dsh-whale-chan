@@ -117,7 +117,7 @@ describe('approving a task', () => {
       jsonBody('POST', { workspace: 'work/relative' }),
     )
     expect(relative.status).toBe(400)
-    expect(await relative.json()).toMatchObject({ ok: false, error: { code: 'invalid_workspace' } })
+    expect(await relative.json()).toMatchObject({ ok: false, error: { code: 'invalidWorkspace' } })
 
     const mismatched = await request(
       baseUrl,
@@ -137,9 +137,34 @@ describe('approving a task', () => {
     const { taskId } = seedTask(runtime)
     expect((await request(baseUrl, `/whale-chan/api/tasks/${taskId}/approve`, jsonBody('POST', {}))).status).toBe(200)
     const again = await request(baseUrl, `/whale-chan/api/tasks/${taskId}/approve`, jsonBody('POST', {}))
-    expect(again.status).toBe(400)
+    expect(again.status).toBe(409)
     expect(await again.json()).toMatchObject({ ok: false, error: { code: 'alreadyDecided' } })
     expect(runtime.effects.pending()).toHaveLength(1)
+  })
+
+  it('maps a state conflict to 409 and a correctable input to 400', async () => {
+    const { baseUrl, runtime } = await start()
+    const { taskId } = seedTask(runtime)
+    // A pending approval on a task that is no longer awaiting approval is a
+    // state conflict, not a malformed request.
+    const task = runtime.store.tasks.get(taskId)
+    if (!task) throw new Error('missing task')
+    runtime.store.tasks.save({ ...task, status: 'approved' })
+    const conflict = await request(baseUrl, `/whale-chan/api/tasks/${taskId}/approve`, jsonBody('POST', {}))
+    expect(conflict.status).toBe(409)
+    expect(await conflict.json()).toMatchObject({ ok: false, error: { code: 'notAwaitingApproval' } })
+
+    const unknown = await request(baseUrl, '/whale-chan/api/tasks/task-missing/approve', jsonBody('POST', {}))
+    expect(unknown.status).toBe(404)
+    expect(await unknown.json()).toMatchObject({ ok: false, error: { code: 'unknown_task' } })
+
+    const invalid = await request(
+      baseUrl,
+      `/whale-chan/api/tasks/${taskId}/approve`,
+      jsonBody('POST', { workspace: 'relative/dir' }),
+    )
+    expect(invalid.status).toBe(400)
+    expect(await invalid.json()).toMatchObject({ ok: false, error: { code: 'invalidWorkspace' } })
   })
 })
 
@@ -225,7 +250,7 @@ describe('retrying a failed task', () => {
       `/whale-chan/api/tasks/${awaiting.taskId}/retry`,
       jsonBody('POST', {}),
     )
-    expect(refusedAwaiting.status).toBe(400)
+    expect(refusedAwaiting.status).toBe(409)
     expect(await refusedAwaiting.json()).toMatchObject({ ok: false, error: { code: 'notFailed' } })
 
     const succeeded = seedTask(runtime, 'message-succeeded')
@@ -238,7 +263,7 @@ describe('retrying a failed task', () => {
       `/whale-chan/api/tasks/${succeeded.taskId}/retry`,
       jsonBody('POST', {}),
     )
-    expect(refusedSucceeded.status).toBe(400)
+    expect(refusedSucceeded.status).toBe(409)
     expect(await refusedSucceeded.json()).toMatchObject({ ok: false, error: { code: 'notFailed' } })
 
     const cancelled = seedTask(runtime, 'message-cancelled')
@@ -248,7 +273,7 @@ describe('retrying a failed task', () => {
       `/whale-chan/api/tasks/${cancelled.taskId}/retry`,
       jsonBody('POST', {}),
     )
-    expect(refusedCancelled.status).toBe(400)
+    expect(refusedCancelled.status).toBe(409)
     expect(await refusedCancelled.json()).toMatchObject({ ok: false, error: { code: 'notFailed' } })
   })
 
@@ -263,7 +288,7 @@ describe('retrying a failed task', () => {
       jsonBody('POST', { workspace: 'relative/dir' }),
     )
     expect(relative.status).toBe(400)
-    expect(await relative.json()).toMatchObject({ ok: false, error: { code: 'invalid_workspace' } })
+    expect(await relative.json()).toMatchObject({ ok: false, error: { code: 'invalidWorkspace' } })
 
     const missing = await request(baseUrl, '/whale-chan/api/tasks/task-missing/retry', jsonBody('POST', {}))
     expect(missing.status).toBe(404)

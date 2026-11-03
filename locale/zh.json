@@ -1,10 +1,10 @@
 {
   "meta": {
-    "title": "鲸鱼酱 · 钉钉助理",
-    "description": "通过 dws 个人授权把钉钉消息接入 DeepSeek Harness 的助理。"
+    "title": "DSH助理 · 钉钉助理",
+    "description": "DSH助理：通过 dws 个人授权把钉钉消息接入 DeepSeek Harness 的个人助理。"
   },
-  "panel.label": "鲸鱼酱",
-  "overview.title": "鲸鱼酱 · 钉钉助理",
+  "panel.label": "DSH助理",
+  "overview.title": "DSH助理 · 钉钉助理",
   "overview.subtitle": "助手运行概况与最近活动",
   "overview.errorOffline": "无法连接到 DSH Web 服务。请确认 Harness 正在运行，然后重试。",
   "settings.block.monitor.label": "监控",

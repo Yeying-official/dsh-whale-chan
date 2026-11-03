@@ -70,7 +70,9 @@ describe('host row', () => {
 describe('replier preset', () => {
   it('is the declaration the executor names', () => {
     expect(replier.id).toBe(REPLIER_PRESET)
-    expect(replier.name).toBe('鲸鱼酱 · 回复器')
+    expect(replier.name).toBe('DSH助理 · 回复器')
+    expect(replier.name).toContain('DSH助理')
+    expect(replier.description).toContain('DSH助理')
     expect(replier.order).toBe(90)
     expect(replier.description).toContain('不供手动选择')
   })
@@ -119,7 +121,9 @@ describe('replier preset', () => {
 describe('worker preset', () => {
   it('is the declaration the executor names', () => {
     expect(worker.id).toBe(WORKER_PRESET)
-    expect(worker.name).toBe('鲸鱼酱 · 任务执行器')
+    expect(worker.name).toBe('DSH助理 · 任务执行器')
+    expect(worker.name).toContain('DSH助理')
+    expect(worker.description).toContain('DSH助理')
     expect(worker.order).toBe(91)
     expect(worker.description).toContain('不供手动选择')
   })

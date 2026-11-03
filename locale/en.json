@@ -1,10 +1,10 @@
 {
   "meta": {
-    "title": "Whale Chan · DingTalk Assistant",
-    "description": "A DeepSeek Harness assistant that connects DingTalk through a personal dws authorization."
+    "title": "DSH Assistant · DingTalk Assistant",
+    "description": "DSH Assistant: a DeepSeek Harness assistant that connects DingTalk through a personal dws authorization."
   },
-  "panel.label": "Whale Chan",
-  "overview.title": "Whale Chan · DingTalk Assistant",
+  "panel.label": "DSH Assistant",
+  "overview.title": "DSH Assistant · DingTalk Assistant",
   "overview.subtitle": "Runtime summary and recent activity",
   "overview.errorOffline": "Cannot reach the DSH Web service. Check that the Harness is running, then retry.",
   "settings.block.monitor.label": "Monitor",

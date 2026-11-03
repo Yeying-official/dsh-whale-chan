@@ -43,6 +43,18 @@ describe('panel shell', () => {
     expect(screen.getByRole('tab', { name: zh['tabs.tasks'] }).getAttribute('aria-selected')).toBe('true')
   })
 
+  it('brands the sidebar label and the panel header with the renamed product', () => {
+    // `src/client/index.tsx` registers the sidebar label as `t('panel.label')`
+    // and `src/client/app.tsx` renders the same key as the header title, so the
+    // dictionary value is the single product display name for both surfaces.
+    expect(zh['panel.label']).toBe('DSH助理')
+    expect(zh['panel.label']).not.toContain('鲸鱼酱')
+    expect(zh['overview.title']).toBe('DSH助理 · 钉钉助理')
+    renderPanel(overviewHandler())
+    expect(document.getElementById('wc-title')?.textContent).toBe(zh['panel.label'])
+    expect(document.querySelector('.wc-brand-sub')?.textContent).toBe(zh['overview.title'])
+  })
+
   it('opens the tab named by the URL hash before the stored value', () => {
     window.localStorage.setItem('whale-chan.tab', 'targets')
     window.location.hash = '#audit'

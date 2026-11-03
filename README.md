@@ -1,12 +1,14 @@
-# 鲸鱼酱 · 钉钉助理
+# DSH助理 · 钉钉助理
 
-> **Whale Chan · DingTalk Assistant** — a DeepSeek Harness desktop plugin that replies as you, in your own DingTalk account, within a persona you define.
+> **DSH Assistant · DingTalk Assistant** — a DeepSeek Harness desktop plugin that replies as you, in your own DingTalk account, within a persona you define.
 > It watches @-mentions, selected groups and DMs, answers with web research when needed, and turns actionable requests into tasks that only you can approve in the DSH panel.
 > Status: v0.1.0 (2026-11-03), WS0–WS8 complete including Windows real-device acceptance. The release tag is cut after review.
 
-鲸鱼酱是运行在 DSH 桌面端里的**个人钉钉助理**：用主人本人的钉钉账号（`dws` 个人授权，不是机器人），按主人写的人设回复 @我、指定群与指定单聊；需要动手的事先变成任务，只有主人在面板里批准后，才会在 DSH 会话中执行，结果再回到原会话。
+DSH助理是运行在 DSH 桌面端里的**个人钉钉助理**：用主人本人的钉钉账号（`dws` 个人授权，不是机器人），按主人写的人设回复 @我、指定群与指定单聊；需要动手的事先变成任务，只有主人在面板里批准后，才会在 DSH 会话中执行，结果再回到原会话。
 
 它不追求“全自动群机器人”，而是把三件事做稳：**少打扰**（提及/私聊/白名单才响应）、**可解释**（每条回复与任务都能追溯到消息、决策和批准记录）、**可停止**（暂停、关自动回复、拒绝任务、卸载插件都是一等操作）。
+
+> 显示名与内部标识是两件事：面板与插件显示 **DSH助理**；**默认人设仍为「鲸鱼酱」**，可在面板「人设」页改名。内部包名 `dsh-whale-chan-assistant`、状态目录 `~/.dsh-whale-chan`、API 前缀 `/whale-chan`、panel/session/preset id 与数据库都不随显示名变化。
 
 ## 功能
 
@@ -97,7 +99,7 @@ flowchart TB
 
 ## 安装
 
-本插件是 DSH 的 Cordis bundle，`private: true`，**不发布到 npm**。本机已验证的安装形态是：`desktop` profile 里的一条 `link:` 依赖指向本仓库，安装后重启 DSH，侧栏出现「鲸鱼酱」。
+本插件是 DSH 的 Cordis bundle，`private: true`，**不发布到 npm**。本机已验证的安装形态是：`desktop` profile 里的一条 `link:` 依赖指向本仓库，安装后重启 DSH，侧栏出现「DSH助理」。
 
 ### 1. 准备
 
@@ -115,7 +117,7 @@ pnpm build          # 生成 lib/index.js 与 lib/client.js
 2. 打开「插件」→「添加插件」；选择「安装第三方插件」（不同版本可能直接打开输入框）。
 3. 在「包名或地址」中填入**本仓库的绝对路径**，例如 `E:\DSHWork\wt-ws7`。安装器支持 npm 包、Git 仓库和本地目录；本地目录会以 `link:` 依赖写入 profile。
 4. 点击安装，等待完成。界面提示「请重启 DSH」时重启桌面端。
-5. 重启后侧栏出现「鲸鱼酱」，打开面板应看到「已连接」与版本 `0.1.0`。
+5. 重启后侧栏出现「DSH助理」，打开面板应看到「已连接」与版本 `0.1.0`。
 
 > 桌面端的 `desktop` profile 由桌面端保留，命令行 `dsh plugin --profile desktop ...` 不用于管理它；请使用上面的 GUI 入口。自建 profile 可以用 `dsh plugin --profile <name> add <本地路径>`，该命令由 DSH CLI 转发给 profile 内的 pnpm。
 
@@ -125,7 +127,7 @@ pnpm build          # 生成 lib/index.js 与 lib/client.js
 
 ### 4. 验证
 
-- 侧栏「鲸鱼酱」面板能打开，概览显示版本与状态目录。
+- 侧栏「DSH助理」面板能打开，概览显示版本与状态目录。
 - `GET /whale-chan/api/state` 返回 200；管理请求必须带 `x-whale-chan-request: 1`。
 - 概览的健康检查里 `stateDir`、`database`、`lock`、`settings`、`prompts` 为正常；`channel` 在未配置目标时为 idle，这是正常状态。
 

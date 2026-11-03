@@ -1,4 +1,4 @@
-# 鲸鱼酱 · 钉钉助理 bundle layer。
+# DSH助理 · 钉钉助理 bundle layer。
 #
 # WS0 只插入宿主机行，不携带 config：状态目录使用默认的 ~/.dsh-whale-chan。
 # 安装后的状态目录与日志级别由 DSH profile 或未来的面板设置接管。
@@ -16,8 +16,8 @@
       name: '@deepseek-ai/dsh-agent-preset'
       config:
         id: dsh-whale-chan-replier
-        name: 鲸鱼酱 · 回复器
-        description: 鲸鱼酱的回复 Session 专用，不供手动选择。只做钉钉对话回复：没有 shell、文件、作业与 skill。
+        name: DSH助理 · 回复器
+        description: DSH助理的回复 Session 专用，不供手动选择。只做钉钉对话回复：没有 shell、文件、作业与 skill。
         order: 90
         plugins:
           - id: persona
@@ -64,8 +64,8 @@
       name: '@deepseek-ai/dsh-agent-preset'
       config:
         id: dsh-whale-chan-worker
-        name: 鲸鱼酱 · 任务执行器
-        description: 鲸鱼酱的任务执行 Session 专用，不供手动选择。前台命令超 5 秒转入后台，只含执行工作所需的工具。
+        name: DSH助理 · 任务执行器
+        description: DSH助理的任务执行 Session 专用，不供手动选择。前台命令超 5 秒转入后台，只含执行工作所需的工具。
         order: 91
         plugins:
           - id: persona

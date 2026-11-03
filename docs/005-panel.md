@@ -2,15 +2,15 @@
 
 > 状态：WS6 已实现七个页签的管理面板（`feat/ws6-panel`）。入口 `src/client/index.tsx`；视图在 `src/client/pages/*`；数据层在 `src/client/api.ts`；文案在 `locale/{zh,en}.json`（命名空间 `dshWhaleChan`）。面板只调用 `/whale-chan/api/*` 的 19 条冻结路由，不导入宿主实现层。
 
-面板是鲸鱼酱**唯一的人工入口**：查看运行状态、浏览只读会话、批准/拒绝/取消/重试任务、维护目标与人设、按块修改设置、核对审计记录。它不发送钉钉消息，也不直接写数据库。
+面板是DSH助理**唯一的人工入口**：查看运行状态、浏览只读会话、批准/拒绝/取消/重试任务、维护目标与人设、按块修改设置、核对审计记录。它不发送钉钉消息，也不直接写数据库。
 
 ## 1. 结构
 
 ```text
-sidebar.panellist  ──  鲸鱼酱图标
+sidebar.panellist  ──  DSH助理图标
 main(whale-chan)
 └─ wc-panel                    固定高度、内部滚动
-   ├─ wc-shell-head            标题「鲸鱼酱」+ 健康徽标 + 刷新
+   ├─ wc-shell-head            标题「DSH助理」+ 健康徽标 + 刷新
    ├─ wc-tabs                  role=tablist，七个页签
    └─ wc-tabpanel              role=tabpanel，独立滚动区域
       └─ 当前页签视图

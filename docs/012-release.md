@@ -27,6 +27,8 @@ pnpm install --frozen-lockfile
 pnpm check
 pnpm format:check
 node scripts/check-pack.mjs
+pnpm docs:settings
+git diff --exit-code docs/011-settings-contract.md
 git status --porcelain
 ```
 
@@ -36,6 +38,7 @@ git status --porcelain
 - `pnpm format:check`：`All matched files use Prettier code style!`；
 - `check-pack`：`pack check passed: 15 artifacts, icon 711 bytes`，版本断言 `0.4.0`；
 - `pnpm docs:settings`：`57 fields`，字段表无变化（本版没有新增设置字段）；
+- `git diff --exit-code docs/011-settings-contract.md`：无输出（生成模板与已提交的 011 同步；任何差异都说明生成器模板落后于正文，必须先把模板改对再提交，不能靠手工改 011）；
 - `git status --porcelain`：为空。
 
 任何一步失败都停止发布，不要在失败的工作区上打 tag。测试数相对 v0.3.0（765 / 60）增加 84 条：后端 68（`session-recovery`、`session-archive`、`executor-model`、`executor-task`、`api-routes`、`contract`）与前端 16（`client-targets`、`client-api`）。

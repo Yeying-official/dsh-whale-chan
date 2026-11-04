@@ -1,6 +1,6 @@
 # 010 设计摘要
 
-> 当前状态：本文是 WS0 冻结的设计基线。实现状态以 [007 架构](007-architecture.md) 与 [005 面板](005-panel.md) 为准；WS0–WS10 已完成，v0.2.0 于 2026-11-03 通过 Windows 真机 T0–T4 与工作区复验。
+> 当前状态：本文是 WS0 冻结的设计基线。实现状态以 [007 架构](007-architecture.md) 与 [005 面板](005-panel.md) 为准；WS0–WS14 已完成，当前版本 `0.4.0`（2026-11-04）。Windows 真机 T0–T4 与工作区复验在 v0.2.0 完成；v0.3.0 的人设默认/预设与 v0.4.0 的会话归档/工作区恢复由自动化测试覆盖，**未跑真机**。归档与恢复不改变 DSH 兼容声明（`engines.dsh` 仍 `^0.2.1-rc.5`，`dsh.compatibility` 仍只标记 `0.2.1-rc.5`，schema 仍为 2）。
 
 ## 1. 产品目标
 
@@ -82,6 +82,7 @@ WS1 的契约测试保证：`core` 只 import 本层模块与 `shared` 的纯类
 - **Approval**：人对待执行任务的明确授权；有有效期，只有 `pending` 能被批准，迟到批准无效。
 - **Assignment**：已批准任务到执行器 Session 的派工记录；记录工作区、状态、时间与结果。
 - **Outbound**：已排队的对外消息；`idempotencyKey` 唯一，状态由通道回执推进。
+- **Session generation**（WS14）：一个会话“第几代”回复器/worker 会话的持久标记，`g0` 与历史 id 逐字节一致；只有当当前会话被归档（或被宿主归档闸门拒绝）时才前进一代。它不属于领域表，存于 KV，只增不减，因此归档是“换新会话”，不是“删历史”。
 
 ### 4.2 任务状态机
 
@@ -147,7 +148,7 @@ approved / running ── cancel ─> cancelled
 
 ## 10. 版本、PR 与文档同步
 
-- 包版本遵循 SemVer；当前为 `0.2.0`，兼容的 DSH 版本写入 `dsh.compatibility.dshReleases`。
+- 包版本遵循 SemVer；当前为 `0.4.0`，管理 API 20 条，兼容的 DSH 版本写入 `dsh.compatibility.dshReleases`（归档/恢复不改变该声明）。
 - 分支使用 `feat/...`，提交遵循 Conventional Commits；PR 模板要求目标、方案、影响面、测试证据、风险和文档同步。
 - 任何共享合约变化必须同步：`settings.ts`、`fields.ts`、`api.ts`、`models.ts`、locale、`docs/011-settings-contract.md` 和契约测试。
 - 合并前必须有 `pnpm check`、`node scripts/check-pack.mjs` 和干净工作区；合并与安装到 profile 由人工执行，不由实现代理自动完成。

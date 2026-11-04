@@ -38,6 +38,8 @@ function harness(
     settings?: ReturnType<typeof makeSettings>
     stateDir?: string
     workspaceFor?: (task: ReturnType<typeof makeTask>) => { path: string; title: string }
+    ensureWorkspace?: (task: ReturnType<typeof makeTask>, workspace: { path: string; title: string }) => Promise<void>
+    prepareSessionId?: (task: ReturnType<typeof makeTask>, baseSessionId: string) => Promise<string>
   } = {},
 ): Harness {
   const host = new FakeSessionHost()
@@ -49,6 +51,8 @@ function harness(
     homeDir: '/home/owner',
     ...(options.stateDir === undefined ? {} : { stateDir: options.stateDir }),
     ...(options.workspaceFor === undefined ? {} : { workspaceFor: options.workspaceFor }),
+    ...(options.ensureWorkspace === undefined ? {} : { ensureWorkspace: options.ensureWorkspace }),
+    ...(options.prepareSessionId === undefined ? {} : { prepareSessionId: options.prepareSessionId }),
     clock: () => new Date('2026-11-03T01:00:00.000Z'),
     mkdir: async (path) => {
       dirs.push(path)
@@ -198,6 +202,107 @@ describe('session and workspace', () => {
     const expected = join('/home/owner', '.dsh-whale-chan', 'tasks', 'task-1')
     expect(dirs).toEqual([expected])
     expect(host.ensured[0]?.workspace).toBe(expected)
+  })
+
+  it('ensures the workspace record before the session is created', async () => {
+    const calls: Array<{ path: string; title: string; sessions: number }> = []
+    const { host, executor } = harness({
+      ensureWorkspace: async (_task, workspace) => {
+        calls.push({ path: workspace.path, title: workspace.title, sessions: host.ensured.length })
+      },
+    })
+    const task = makeTask()
+    await executor.execute({
+      task,
+      approval: makeApproval(task),
+      settings: makeSettings(),
+      signal: new AbortController().signal,
+    })
+    const expected = join('/home/owner', '.dsh-whale-chan', 'tasks', 'task-1')
+    expect(calls).toEqual([{ path: expected, title: '任务 · 整理会议纪要', sessions: 0 }])
+    expect(host.ensured).toHaveLength(1)
+    expect(host.ensured[0]?.workspace).toBe(expected)
+  })
+
+  it('passes the conversation workspace title to the record ensure', async () => {
+    const seen: Array<{ path: string; title: string }> = []
+    const { executor } = harness({
+      workspaceFor: () => ({ path: '/srv/conversations/dm:u1', title: '钉钉 · 小明' }),
+      ensureWorkspace: async (_task, workspace) => {
+        seen.push({ path: workspace.path, title: workspace.title })
+      },
+    })
+    const task = makeTask()
+    await executor.execute({
+      task,
+      approval: makeApproval(task),
+      settings: makeSettings(),
+      signal: new AbortController().signal,
+    })
+    expect(seen).toEqual([{ path: '/srv/conversations/dm:u1', title: '钉钉 · 小明' }])
+  })
+
+  it('propagates a workspace-record failure before the run starts', async () => {
+    const failure = new Error('the workspace registry is unavailable')
+    const { host, executor, starts, results } = harness({
+      ensureWorkspace: async () => {
+        throw failure
+      },
+    })
+    const task = makeTask()
+    await expect(
+      executor.execute({
+        task,
+        approval: makeApproval(task),
+        settings: makeSettings(),
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toBe(failure)
+    expect(host.ensured).toHaveLength(0)
+    expect(host.deliveries).toHaveLength(0)
+    expect(starts).toHaveLength(0)
+    expect(results).toHaveLength(0)
+  })
+
+  it('uses the prepared worker session id for the run', async () => {
+    const seen: string[] = []
+    const { host, executor } = harness({
+      prepareSessionId: async (_task, baseSessionId) => {
+        seen.push(baseSessionId)
+        return `${baseSessionId}-g1`
+      },
+    })
+    const task = makeTask()
+    const result = await executor.execute({
+      task,
+      approval: makeApproval(task),
+      settings: makeSettings(),
+      signal: new AbortController().signal,
+    })
+    const base = taskSessionId('task-1', 'assignment-1')
+    expect(seen).toEqual([base])
+    expect(host.ensured[0]?.sessionId).toBe(`${base}-g1`)
+    expect(result.sessionId).toBe(`${base}-g1`)
+  })
+
+  it('propagates a worker session-id failure before the run starts', async () => {
+    const failure = new Error('the archive set is unreadable')
+    const { host, executor, starts } = harness({
+      prepareSessionId: async () => {
+        throw failure
+      },
+    })
+    const task = makeTask()
+    await expect(
+      executor.execute({
+        task,
+        approval: makeApproval(task),
+        settings: makeSettings(),
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toBe(failure)
+    expect(host.ensured).toHaveLength(0)
+    expect(starts).toHaveLength(0)
   })
 
   it('runs in the workspace the approving person chose, over the settings default', async () => {

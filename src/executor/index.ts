@@ -28,4 +28,4 @@ export * from './llm-model.ts'
 export * from './research.ts'
 export * from './role-model.ts'
 
-export { SessionModel } from './model.ts'
+export { SessionModel, type PreparedSession } from './model.ts'

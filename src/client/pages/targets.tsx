@@ -1,7 +1,7 @@
 /** Targets tab: edit watched targets, discover new ones and validate them. */
 import { useEffect, useState } from 'react'
-import { ApiError, call, isRecord, useApi, useMutation } from '../api.ts'
-import { Alert, Badge, Button, Card, EmptyState, PageHeader, Skeleton } from '../controls.tsx'
+import { ApiError, archiveTargetSessions, call, isRecord, useApi, useMutation } from '../api.ts'
+import { Alert, Badge, Button, Card, EmptyState, Modal, PageHeader, Skeleton, Switch } from '../controls.tsx'
 import { asError, errorText } from '../errors.ts'
 import {
   EnumField,
@@ -13,7 +13,16 @@ import {
   type TargetRowValue,
 } from '../fields.tsx'
 import { usePanel } from '../provider.tsx'
-import type { Target, TargetCandidate, TargetValidation, TargetWorkspace } from '../../shared/models.ts'
+import type { T } from '../locale.ts'
+import type {
+  ArchiveTargetSessionsRequest,
+  ArchiveTargetSessionsResult,
+  ArchivedSessionActivity,
+  Target,
+  TargetCandidate,
+  TargetValidation,
+  TargetWorkspace,
+} from '../../shared/models.ts'
 import type { TargetKind } from '../../shared/limits.ts'
 
 function toRows(targets: readonly Target[]): TargetRowValue[] {
@@ -43,6 +52,105 @@ function rowsFromValue(value: unknown): TargetRowValue[] {
       },
     ]
   })
+}
+
+/**
+ * Localized copy for an archive failure.
+ *
+ * The route documents a refusal for a target without one workspace, an unknown
+ * target and an unavailable runtime; every other failure keeps the shared
+ * `errorText` mapping (offline, conflict, invalid body, server error).
+ */
+function archiveErrorText(error: Error, t: T): string {
+  if (error instanceof ApiError) {
+    if (error.code === 'per_conversation_workspace') return t('errors.archivePerConversation')
+    if (error.code === 'unknown_target') return t('errors.archiveUnknownTarget')
+    if (error.code === 'state_unavailable') return t('errors.archiveUnavailable')
+  }
+  return errorText(error, t)
+}
+
+/** Render one refused session's activity families; `kind` is data, never translated. */
+function activityText(activity: ArchivedSessionActivity): string {
+  if (activity.items === undefined || activity.items.length === 0) return activity.kind
+  const items = activity.items.map((item) => (item.label ? `${item.label} (${item.id})` : item.id)).join(', ')
+  return `${activity.kind}: ${items}`
+}
+
+/**
+ * The outcome of one archive pass, kept inside the still-open dialog so the
+ * owner can read it before closing. Counts partition the candidate set; the
+ * `truncated` note names how many candidates the enumeration found and how many
+ * of them this bounded pass actually handled.
+ */
+function ArchiveResult({ result, t }: { result: ArchiveTargetSessionsResult; t: T }) {
+  const processed =
+    result.archived.length +
+    result.alreadyArchived.length +
+    result.refused.length +
+    result.missing.length +
+    result.failed.length
+  return (
+    <div role="status" aria-live="polite">
+      <h3 style={{ marginTop: 0 }}>{t('targets.archive.resultTitle')}</h3>
+      <p className="wc-mono" style={{ marginTop: 0 }}>
+        {result.workspace.path}
+      </p>
+      <ul className="wc-health-list">
+        <li className="wc-health-row">
+          <span className="wc-health-name">{t('targets.archive.archived', { count: result.archived.length })}</span>
+        </li>
+        <li className="wc-health-row">
+          <span className="wc-health-name">
+            {t('targets.archive.alreadyArchived', { count: result.alreadyArchived.length })}
+          </span>
+        </li>
+        <li className="wc-health-row">
+          <span className="wc-health-name">{t('targets.archive.refused', { count: result.refused.length })}</span>
+        </li>
+        <li className="wc-health-row">
+          <span className="wc-health-name">{t('targets.archive.missing', { count: result.missing.length })}</span>
+        </li>
+        <li className="wc-health-row">
+          <span className="wc-health-name">{t('targets.archive.failed', { count: result.failed.length })}</span>
+        </li>
+      </ul>
+      {result.refused.length > 0 ? (
+        <ul className="wc-health-list" style={{ marginTop: 8 }}>
+          {result.refused.map((session) => (
+            <li key={session.sessionId} className="wc-health-row">
+              <div>
+                <span className="wc-mono">{session.sessionId}</span>
+                <span className="wc-health-detail-text">{session.activity.map(activityText).join(' · ')}</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {result.failed.length > 0 ? (
+        <ul className="wc-health-list" style={{ marginTop: 8 }}>
+          {result.failed.map((session) => (
+            <li key={session.sessionId} className="wc-health-row">
+              <div>
+                <span className="wc-mono">{session.sessionId}</span>
+                <span className="wc-health-detail-text">{session.error}</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {result.truncated ? (
+        <div style={{ marginTop: 10 }}>
+          <Alert tone="warning" role="status">
+            {t('targets.archive.truncated', { count: result.candidateCount, processed })}
+          </Alert>
+        </div>
+      ) : null}
+      <p className="wc-muted" style={{ marginTop: 10 }}>
+        {result.replySessionRotated ? t('targets.archive.rotated') : t('targets.archive.notRotated')}
+      </p>
+    </div>
+  )
 }
 
 export function TargetsPage() {
@@ -75,6 +183,14 @@ export function TargetsPage() {
         })),
       },
     }),
+  )
+  // Archiving is explicit and modal-scoped: no request is sent until the owner
+  // confirms, and the result stays in the dialog until they close it.
+  const [archiveTarget, setArchiveTarget] = useState<{ target: Target; workspace: TargetWorkspace }>()
+  const [stopActivity, setStopActivity] = useState(false)
+  const [archiveResult, setArchiveResult] = useState<ArchiveTargetSessionsResult>()
+  const archive = useMutation((targetId: string, request: ArchiveTargetSessionsRequest) =>
+    archiveTargetSessions(targetId, request),
   )
 
   useEffect(() => {
@@ -239,6 +355,39 @@ export function TargetsPage() {
     }
   }
 
+  /**
+   * Open the confirmation dialog for one ready workspace.
+   *
+   * Reopening always starts from a clean slate: no stale result, no stale error
+   * and the stop switch off, so the dialog never implies a request already ran.
+   */
+  const openArchive = (target: Target, workspace: TargetWorkspace) => {
+    archive.reset()
+    setArchiveResult(undefined)
+    setStopActivity(false)
+    setArchiveTarget({ target, workspace })
+  }
+
+  const closeArchive = () => {
+    if (archive.pending) return
+    archive.reset()
+    setArchiveResult(undefined)
+    setStopActivity(false)
+    setArchiveTarget(undefined)
+  }
+
+  const submitArchive = async () => {
+    if (!archiveTarget) return
+    try {
+      const result = await archive.run(archiveTarget.target.id, { stopActivity })
+      setArchiveResult(result)
+      // The live projection may now show a different rotation generation.
+      targetsApi.reload()
+    } catch {
+      // `useMutation` keeps the failure; the dialog renders it and stays open.
+    }
+  }
+
   const loadError = targetsApi.error ?? settingsApi.error
   const validCount = validation.filter((item) => item.valid).length
   const invalidCount = validation.length - validCount
@@ -328,6 +477,7 @@ export function TargetsPage() {
                 <tr>
                   <th scope="col">{t('targets.list.title')}</th>
                   <th scope="col">{t('targets.workspace.title')}</th>
+                  <th scope="col">{t('targets.workspace.actions')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -364,6 +514,17 @@ export function TargetsPage() {
                         ) : (
                           <Badge tone="neutral">{t('targets.workspace.perConversation')}</Badge>
                         )}
+                      </td>
+                      <td>
+                        {workspace.mode === 'ready' ? (
+                          <Button
+                            size="sm"
+                            aria-label={t('targets.archive.openAria', { label })}
+                            onClick={() => openArchive(target, workspace)}
+                          >
+                            {t('targets.archive.open')}
+                          </Button>
+                        ) : null}
                       </td>
                     </tr>
                   )
@@ -460,6 +621,72 @@ export function TargetsPage() {
           {validation.length === 0 && !validate.error ? <p className="wc-hint">{t('targets.discover.body')}</p> : null}
         </Card>
       </div>
+      <Modal
+        open={archiveTarget !== undefined}
+        title={t('targets.archive.title')}
+        closeLabel={t('dialog.close')}
+        onClose={closeArchive}
+        footer={
+          archiveResult !== undefined ? (
+            <Button size="sm" onClick={closeArchive}>
+              {t('targets.archive.close')}
+            </Button>
+          ) : (
+            <>
+              <Button size="sm" onClick={closeArchive} disabled={archive.pending}>
+                {t('targets.archive.cancel')}
+              </Button>
+              <Button size="sm" variant="primary" onClick={() => void submitArchive()} disabled={archive.pending}>
+                {archive.pending ? t('targets.archive.pending') : t('targets.archive.confirm')}
+              </Button>
+            </>
+          )
+        }
+      >
+        {archiveTarget ? (
+          archiveResult ? (
+            <ArchiveResult result={archiveResult} t={t} />
+          ) : (
+            <>
+              <p className="wc-hint" style={{ marginTop: 0 }}>
+                {archiveTarget.target.label || archiveTarget.target.id}
+                {archiveTarget.workspace.path ? ` · ${archiveTarget.workspace.path}` : ''}
+              </p>
+              <p className="wc-muted">{t('targets.archive.body')}</p>
+              <p className="wc-hint">{t('targets.archive.warning')}</p>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  marginTop: 12,
+                }}
+              >
+                <div>
+                  <div className="wc-cell-title">{t('targets.archive.stopActivity')}</div>
+                  <p className="wc-hint" style={{ marginTop: 4 }}>
+                    {t('targets.archive.stopActivityHint')}
+                  </p>
+                </div>
+                <Switch
+                  checked={stopActivity}
+                  onChange={setStopActivity}
+                  label={t('targets.archive.stopActivity')}
+                  disabled={archive.pending}
+                />
+              </div>
+              {archive.error ? (
+                <div style={{ marginTop: 12 }}>
+                  <Alert tone="error" role="alert">
+                    {t('targets.archive.error', { message: archiveErrorText(archive.error, t) })}
+                  </Alert>
+                </div>
+              ) : null}
+            </>
+          )
+        ) : null}
+      </Modal>
     </div>
   )
 }

@@ -120,6 +120,7 @@ describe('management API contract', () => {
     'GET targets',
     'POST targets/discover',
     'POST targets/validate',
+    'POST targets/:id/archive-sessions',
     'GET threads',
     'GET threads/:key',
     'GET tasks',
@@ -140,7 +141,7 @@ describe('management API contract', () => {
     expect(API_ROUTES.map((route) => route.key).sort()).toEqual([...expectedRoutes].sort())
     expect(new Set(API_ROUTES.map((route) => route.key)).size).toBe(API_ROUTES.length)
     expect(new Set(API_ROUTES.map((route) => `${route.method} ${route.path}`)).size).toBe(API_ROUTES.length)
-    expect(API_ROUTES).toHaveLength(19)
+    expect(API_ROUTES).toHaveLength(20)
   })
 
   it('uses the frozen prefix and consistent HTTP methods', () => {
@@ -156,6 +157,9 @@ describe('management API contract', () => {
     expect(apiUrl('GET state')).toBe('/whale-chan/api/state')
     expect(apiUrl('GET threads/:key', { key: 'a b/c' })).toBe('/whale-chan/api/threads/a%20b%2Fc')
     expect(apiUrl('GET tasks/:id', { id: 'task-1' })).toBe('/whale-chan/api/tasks/task-1')
+    expect(apiUrl('POST targets/:id/archive-sessions', { id: 'a b/c' })).toBe(
+      '/whale-chan/api/targets/a%20b%2Fc/archive-sessions',
+    )
     expect(apiUrl('PUT settings/:block', { block: 'monitor' })).toBe('/whale-chan/api/settings/monitor')
     expect(() => apiUrl('GET threads/:key')).toThrow(/Missing API path parameter/)
     for (const route of API_ROUTES) {

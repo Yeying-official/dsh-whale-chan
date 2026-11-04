@@ -159,6 +159,7 @@ bundle 在 `cordis.patch.yml` 里声明两个 `@deepseek-ai/dsh-agent-preset` �
 - 工作区目录在会话创建**之前**用 `mkdir -p` 建好：DSH 的 `workspaceRegistry.create` 只接受已存在的目录，不存在的路径会被拒绝。`ensureSession` 对已注册的目录是幂等的，且**只有显式传入 `workspaceTitle` 时才调用 `setTitle`**：会话标题只是新记录的名字，任务进入已有会话工作区时不会用「任务 · …」覆盖「钉钉 · …」。目标预建与回复器的显式标题负责改名。
 - 旧回退路径里的 `taskId` 必须是单一安全路径段；含 `/`、`\` 或 `..` 的 id 会被执行器拒绝，不会写到根目录之外。
 - 任务会话 id 是 `whale-task-<taskId>-<派工后缀>`（同一任务的每次派工都是一个新会话），标题 `任务 · <标题>`。**回复器也建会话**：每个线程一个 `whale-reply-<threadDigest 前 12 位>`，标题 `钉钉 · <thread 标题>`，工作区就是该会话的 `conversation-<digest>`；因此 DSH 会话列表里会同时出现任务会话与回复器会话，交互过程可查看。会话 id 的哈希输入从 v2 起包含布局版本（`<threadKey>\0v2`），所以升级后第一次回复会新建会话，旧会话与历史原样保留。
+- **会话代（generation）用于归档自愈**：v0.4.0 起回复器与 worker 会话 id 会带一个持久“代”，`g0` 与历史 id 逐字节一致，只有归档或被宿主闸门拒绝后才前进到 `g<n>`（worker 为 `<base>-g<n>`）。代只增不减，存在 KV（`session.reply-generation:<threadKey>` / `session.worker-generation:<base>`）；重启、升级、回到 v0.3.0 都不会丢库，旧版本按 `g0` 解析、忽略这些行。
 - 模型来自设置：worker 用 `models.worker`，回复器用 `models.reply`；两者都为空时用部署默认模型，且**不会**修改 DSH 的全局默认模型。
 - 单回合上限 **90 秒**（`MODEL_TURN_TIMEOUT_MS`）：本机模型首 token 可能 15–30 秒，这是为了让慢但健康的回合不被误判超时；任务总预算仍是 `tasks.timeoutMinutes`，只是不会低于这个值。
 
@@ -335,7 +336,8 @@ Windows 上 `auth` 为 `error` 但终端里 `dws --version` 正常时，先看�
 - 同一 `stateDir` 只能有一个实例；第二个实例启动失败（`already in use`），不会排队重试。这是有意的：两个进程同时消费同一账号的事件会重复回复。
 - v1 **没有历史补拉**：只处理启动后 `dws` 能消费到的消息，不补拉过去对话。
 - v1 的本地通知只写 `notice` 审计事件，**不创建 DSH 收件箱会话**；投递 unknown/failed 需在审计里核对后人工处理，插件不会自动重发。
-- **review 草稿没有发送路由**：v1 只 `draft`，WS6 面板只读展示并允许复制，由主人自行在钉钉发送。补 `POST decisions/:id/send` 需要扩 19 条冻结合约，列入 v0.2 backlog。
+- **review 草稿没有发送路由**：v1 只 `draft`，WS6 面板只读展示并允许复制，由主人自行在钉钉发送。补 `POST decisions/:id/send` 需要扩 20 条冻结合约，列入 v0.2 backlog。
+- **归档会话不删数据，也不可回滚**：目标页「归档会话」只把工作区里的会话从可见面隐藏，不删目录/文件/日志，不提供 unarchive；当前回复会话被归档后，下一条消息换新回复器会话（被拒绝的运行中会话继续使用），在 DSH 手动移除工作区后下一次回复/任务会重建记录。勾选 `stopActivity` 会取消运行中的回复与任务（任务可能失败）。详见 [013 安全基线](013-security.md) §10 与 [005 面板](005-panel.md) §3.4。
 - **模板缺失 = 插件不可用**：这是包完整性问题，不是运行时配置；health 的 `prompts` 为 error，通道与任务都不工作。修复方式是重新安装完整 bundle，而不是改设置。
 - 通道健康把「禁用监控 / 主人暂停 / 没有 enabled target」都视为正常 idle（`ok`）；只有「应有订阅却 stopped」才是 `degraded`。启用 targets 为 0 时 `monitor.running` 仍为 `false`，这是事实而非故障。
 

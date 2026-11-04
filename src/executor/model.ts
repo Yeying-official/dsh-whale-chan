@@ -20,14 +20,13 @@
  *   raise their own error class carrying a brain-facing `reason`, so the caller
  *   maps them to `timeout`/`model_error` instead of re-deriving the cause.
  */
-import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { clip, codePointLength } from '../brain/format.ts'
 import type { ModelMessage, ModelPort, ModelRequest } from '../brain/types.ts'
 import type { ModelRoute } from '../shared/settings.ts'
 import { ExecutorError, ModelAbortedError, ModelFailedError, ModelTimeoutError } from './errors.ts'
-import { WORKSPACE_LAYOUT_VERSION } from './workspace.ts'
+import { replySessionIdForGeneration, threadDigest } from './reply-session.ts'
 import {
   MODEL_TURN_TIMEOUT_MS,
   REPLIER_PRESET,
@@ -36,6 +35,7 @@ import {
   type ExecutorLogger,
   type SessionHost,
   type SessionRef,
+  type TurnEndOutcome,
 } from './types.ts'
 
 /** Longest assembled prompt, in Unicode code points, sent as one user message. */
@@ -149,6 +149,19 @@ interface ThreadState {
   chain: Promise<unknown>
 }
 
+/**
+ * What one session preflight resolved: the id the next turn must use, and
+ * optionally the workspace it belongs to.
+ *
+ * `workspace` wins over `workspaceFor`: the preflight is the only caller that
+ * knows whether the workspace record was just recreated (the owner removed it
+ * in DSH), and a recreated record must receive the next session.
+ */
+export interface PreparedSession {
+  readonly sessionId: string
+  readonly workspace?: { readonly path: string; readonly title: string }
+}
+
 /** Everything `SessionModel` needs from its composition root. */
 export interface SessionModelOptions {
   readonly host: SessionHost
@@ -172,6 +185,16 @@ export interface SessionModelOptions {
    * replier and every task of one conversation agree on the directory.
    */
   readonly workspaceFor?: (threadKey: string, title?: string) => { readonly path: string; readonly title: string }
+  /**
+   * Per-call session preflight, supplied by the app layer.
+   *
+   * It runs before every turn and decides which replier session the turn uses.
+   * A session the owner archived (or whose workspace record was removed in DSH)
+   * resolves to a new generation here, and the cached session is cancelled and
+   * replaced instead of delivering into a session the host now blocks. Without
+   * this hook the model keeps its historical behavior exactly.
+   */
+  readonly prepareSession?: (threadKey: string, title: string, currentSessionId?: string) => Promise<PreparedSession>
   /** Route from `settings.models.reply`; an empty route uses the deployment default. */
   readonly model?: ModelRoute
   readonly homeDir?: string
@@ -196,6 +219,7 @@ export class SessionModel implements ModelPort {
   private readonly logger: ExecutorLogger | undefined
   private readonly workspace: string
   private readonly workspaceFor: SessionModelOptions['workspaceFor']
+  private readonly prepareSession: SessionModelOptions['prepareSession']
   private readonly timeoutMs: number
   private readonly maxTurns: number
   private readonly idleResetMs: number
@@ -214,6 +238,7 @@ export class SessionModel implements ModelPort {
     const stateDir = options.stateDir ?? '~/.dsh-whale-chan'
     this.workspace = options.workspace ?? join(expandStateDir(stateDir, home), REPLY_WORKSPACE)
     this.workspaceFor = options.workspaceFor
+    this.prepareSession = options.prepareSession
     this.timeoutMs = options.timeoutMs ?? REPLY_TIMEOUT_MS
     this.maxTurns = options.maxTurns ?? MAX_TURNS
     this.idleResetMs = options.idleResetMs ?? IDLE_RESET_MS
@@ -298,18 +323,21 @@ export class SessionModel implements ModelPort {
   private async runTurn(state: ThreadState, request: ModelRequest, signal: AbortSignal): Promise<string> {
     if (state.disposed) throw new ExecutorError('disposed')
     if (signal.aborted) throw new ModelAbortedError('the model call was aborted before its turn')
-    const session = await this.sessionFor(state, signal)
+    let session = await this.sessionFor(state, signal)
     const prompt = assemblePrompt(request.system, request.messages, this.maxChars)
     const requestId = `${replySessionId(threadDigest(state.key))}:${this.now()}:${state.sequence}`
     state.sequence += 1
 
-    await this.host.deliver(session, { requestId, text: prompt.text })
-    // The log records the prefixed id; waiting on the bare one never matches.
-    const end = await this.host.awaitTurnEnd(session, {
-      requestId: deliveryId(requestId),
-      timeoutMs: this.timeoutMs,
-      signal,
-    })
+    let end = await this.deliverAndWait(session, requestId, prompt.text, signal)
+    if (end.status === 'failed' && isBlockedEnd(end.detail)) {
+      // DSH's archive gate refused the delivery: the owner archived this
+      // session between the preflight and the delivery, and the message never
+      // entered a turn. Rotate (the preflight now sees the archive set) and
+      // retry exactly once with a fresh idempotency key; a second block is a
+      // real failure and follows the normal error path.
+      session = await this.sessionFor(state, signal)
+      end = await this.deliverAndWait(session, `${requestId}:r1`, prompt.text, signal)
+    }
     if (end.status === 'timeout') throw new ModelTimeoutError(`replier turn exceeded ${this.timeoutMs}ms`)
     if (end.status === 'aborted') throw new ModelAbortedError('the replier turn was aborted')
     if (end.status === 'failed') throw new ModelFailedError(end.detail ?? 'the replier turn failed')
@@ -323,8 +351,38 @@ export class SessionModel implements ModelPort {
     return final.text
   }
 
-  /** Return the reusable session, or rebuild it once it is stale. */
+  /** Deliver one prompt and wait for its turn; shared by the one retry. */
+  private async deliverAndWait(
+    session: SessionRef,
+    requestId: string,
+    text: string,
+    signal: AbortSignal,
+  ): Promise<TurnEndOutcome> {
+    await this.host.deliver(session, { requestId, text })
+    // The log records the prefixed id; waiting on the bare one never matches.
+    return await this.host.awaitTurnEnd(session, {
+      requestId: deliveryId(requestId),
+      timeoutMs: this.timeoutMs,
+      signal,
+    })
+  }
+
+  /** Return the reusable session, or rebuild it once it is stale or rotated. */
   private async sessionFor(state: ThreadState, signal: AbortSignal): Promise<SessionRef> {
+    // The preflight runs on every turn, not only on a rebuild: the owner can
+    // archive this conversation's sessions between two messages, and the turn
+    // after that must not be delivered into a session the host now blocks.
+    const prepared = await this.prepareSession?.(state.key, state.title, state.session?.sessionId)
+    let rotated = false
+    if (prepared !== undefined && state.session !== undefined && prepared.sessionId !== state.session.sessionId) {
+      // The cached session is no longer the one this conversation owns (it was
+      // archived, or its workspace record was recreated). Close it before the
+      // next prompt goes to the new generation.
+      await this.host.cancel(state.session, 'replier session rotated')
+      state.session = undefined
+      state.turns = 0
+      rotated = true
+    }
     const stale = state.session !== undefined && this.isStale(state)
     if (state.session !== undefined && !stale) return state.session
     if (state.session !== undefined) {
@@ -333,20 +391,24 @@ export class SessionModel implements ModelPort {
       await this.host.cancel(state.session, 'replier session rotated')
       state.session = undefined
     }
-    const workspace = this.workspaceFor?.(state.key, state.title)
+    // The preflight owns the workspace when it supplied one: a workspace record
+    // that was removed in DSH is recreated there, and the new session must land
+    // in the recreated record instead of the path-only fallback.
+    const workspace = prepared?.workspace ?? this.workspaceFor?.(state.key, state.title)
     const session = await this.host.ensureSession({
-      // The layout version is part of the digest so this build starts a new
-      // session in the per-conversation workspace; earlier sessions stay as
-      // history instead of being renamed or deleted.
-      sessionId: replySessionId(threadDigest(`${state.key}\u0000${WORKSPACE_LAYOUT_VERSION}`)),
+      // Generation 0 is the historical id (layout version included); a rotation
+      // generation appends its own field, so the archived session is never
+      // resumed while its history stays untouched.
+      sessionId: prepared?.sessionId ?? replySessionIdForGeneration(state.key, 0),
       workspace: workspace?.path ?? this.workspace,
       ...(workspace === undefined ? {} : { workspaceTitle: workspace.title }),
       title: `钉钉 · ${state.title}`,
       preset: REPLIER_PRESET,
       permission: 'workspace-write',
       ...(this.model === undefined ? {} : { model: this.model }),
-      // A rebuild must not resume the conversation that just went stale.
-      fresh: state.turns > 0,
+      // A rebuild must not resume the conversation that just went stale, and a
+      // rotated generation must be built fresh even when the old one was idle.
+      fresh: rotated || state.turns > 0,
       signal,
     })
     state.session = session
@@ -370,8 +432,17 @@ function expandStateDir(path: string, home: string): string {
 }
 
 /** Short stable id of a conversation, used in the DSH session id. */
-export function threadDigest(threadKey: string): string {
-  return createHash('sha1').update(threadKey, 'utf8').digest('hex').slice(0, 12)
+export { threadDigest }
+
+/**
+ * Whether a failed turn reports DSH's archive gate.
+ *
+ * The host reports the refusal as the turn's end detail; its wording is the
+ * host's own, so the check is case-insensitive and limited to the word the gate
+ * uses. A detail that does not name the gate keeps the normal failure path.
+ */
+function isBlockedEnd(detail: string | undefined): boolean {
+  return typeof detail === 'string' && /blocked/i.test(detail)
 }
 
 function describe(error: unknown): string {

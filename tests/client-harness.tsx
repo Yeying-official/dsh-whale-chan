@@ -30,7 +30,15 @@ import type {
 } from '../src/shared/models.ts'
 
 export const NOW = '2026-11-03T04:00:00.000Z'
-export const LATER = '2026-11-04T04:00:00.000Z'
+/**
+ * A pending approval's expiry.
+ *
+ * It must stay in the future relative to the wall clock the panel reads
+ * (`Date.now()`), because the page disables approval once the approval expired.
+ * A date close to `NOW` made the suite fail as soon as that instant passed; the
+ * far-future value keeps the fixture a *pending, actionable* approval.
+ */
+export const LATER = '2099-12-31T00:00:00.000Z'
 
 export interface Reply {
   readonly status: number

@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { API_REQUEST_HEADER, API_REQUEST_HEADER_VALUE, apiUrl } from '../shared/api.ts'
 import type { ApiResponse, ApiRoute } from '../shared/api.ts'
-import type { Health, StateView } from '../shared/models.ts'
+import type { ArchiveTargetSessionsRequest, ArchiveTargetSessionsResult, Health, StateView } from '../shared/models.ts'
 
 /** Wire issues returned by `400 invalid_settings`. */
 export interface ApiIssue {
@@ -222,6 +222,25 @@ export function call<K extends ApiRoute>(route: K, options: CallOptions = {}): P
 /** Read `GET health`; the shell badge polls this. */
 export function fetchHealth(signal: AbortSignal): Promise<Health> {
   return call('GET health', { signal })
+}
+
+/**
+ * Archive every DSH session of one target's conversation workspace.
+ *
+ * The target id is a path parameter (encoded by `buildUrl`), never part of the
+ * body. `stopActivity` is sent explicitly so the host archives exactly what the
+ * confirmation dialog showed; the route treats a missing flag as `false`.
+ */
+export function archiveTargetSessions(
+  targetId: string,
+  request: ArchiveTargetSessionsRequest = {},
+  signal?: AbortSignal,
+): Promise<ArchiveTargetSessionsResult> {
+  return call('POST targets/:id/archive-sessions', {
+    params: { id: targetId },
+    body: request,
+    signal,
+  })
 }
 
 export interface ApiQueryState<T> {

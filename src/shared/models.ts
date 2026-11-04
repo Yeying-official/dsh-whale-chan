@@ -255,6 +255,69 @@ export interface ValidateTargetsResult {
   readonly results: readonly TargetValidation[]
 }
 
+/** Body of `POST targets/:id/archive-sessions`; omitting it archives inactive sessions only. */
+export interface ArchiveTargetSessionsRequest {
+  readonly stopActivity?: boolean
+}
+
+/**
+ * One reason a session counts as active, normalized for the wire.
+ *
+ * The host's activity families are provider-declared, so only the stable shape
+ * crosses the API: a family name and its optional per-item identities. Unknown
+ * fields are dropped rather than forwarded.
+ */
+export interface ArchivedSessionActivity {
+  readonly kind: string
+  readonly items?: readonly { readonly id: string; readonly label?: string }[]
+}
+
+/** One session the host refused to archive because it is still active. */
+export interface RefusedArchivedSession {
+  readonly sessionId: string
+  readonly activity: readonly ArchivedSessionActivity[]
+}
+
+/** One session whose archive attempt failed for a reason other than activity or absence. */
+export interface FailedArchivedSession {
+  readonly sessionId: string
+  readonly error: string
+}
+
+/**
+ * What one target-wide archive pass did.
+ *
+ * Every candidate appears in exactly one of `archived`, `alreadyArchived`,
+ * `refused`, `missing` or `failed`, so a caller can report the outcome without
+ * guessing. `replySessionRotated` is derived from the host's archive set after
+ * the pass, never from whether this call *tried* to archive the current
+ * replier: the next message uses `nextReplySessionId`.
+ */
+export interface ArchiveTargetSessionsResult {
+  readonly targetId: string
+  readonly threadKey: string
+  readonly workspace: { readonly path: string; readonly title: string }
+  readonly archived: readonly string[]
+  readonly alreadyArchived: readonly string[]
+  readonly refused: readonly RefusedArchivedSession[]
+  readonly missing: readonly string[]
+  readonly failed: readonly FailedArchivedSession[]
+  readonly replySessionRotated: boolean
+  readonly nextReplySessionId: string
+  readonly stopActivity: boolean
+  /**
+   * Whether the candidate cap cut the set.
+   *
+   * A conversation with a pathological number of sessions is processed only up
+   * to a bounded prefix of the sorted candidate set; the panel must say that
+   * only that prefix was handled, and `candidateCount` reports how many distinct
+   * sessions the enumeration actually found.
+   */
+  readonly truncated: boolean
+  /** Distinct sessions the enumeration found, before the cap. */
+  readonly candidateCount: number
+}
+
 export interface SettingsUpdateResult {
   readonly block: SettingsBlock
   readonly value: unknown

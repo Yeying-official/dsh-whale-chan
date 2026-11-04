@@ -222,6 +222,24 @@ export interface DshTaskExecutorOptions {
    * directory still wins: that is the human escape hatch for one-off work.
    */
   readonly workspaceFor?: (task: Task) => { readonly path: string; readonly title: string }
+  /**
+   * Make sure the workspace record exists before the session is created.
+   *
+   * The app layer uses this to recreate a conversation workspace record the
+   * owner removed in DSH, so a retry or a restart still starts a worker in a
+   * registered workspace. A rejection follows the normal failure path: the run
+   * never starts, and the caller sees the error instead of a fake success.
+   */
+  readonly ensureWorkspace?: (task: Task, workspace: { readonly path: string; readonly title: string }) => Promise<void>
+  /**
+   * Resolve the worker session id of this run from its deterministic base id.
+   *
+   * A task whose worker session was archived must not resume it: the host's
+   * archive gate would block the assignment turn. The app layer maps the base id
+   * to a durable rotation generation here; a rejection follows the normal
+   * not-started failure path.
+   */
+  readonly prepareSessionId?: (task: Task, baseSessionId: string) => Promise<string>
   /** Creates a directory recursively; replaced by tests. */
   readonly mkdir?: (path: string) => Promise<void>
 }
@@ -230,7 +248,7 @@ export interface DshTaskExecutorOptions {
 interface Run {
   readonly controller: AbortController
   /** Session this run addresses, known before `ensureSession` resolves so a cancel can find it. */
-  readonly sessionId: string
+  sessionId: string
   session: SessionRef | undefined
   cancelled: boolean
   reason: string | undefined
@@ -245,6 +263,8 @@ export class DshTaskExecutor implements TaskExecutor {
   private readonly stateDir: string
   private readonly personaTemplate: string | undefined
   private readonly workspaceFor: DshTaskExecutorOptions['workspaceFor']
+  private readonly ensureWorkspaceRecord: DshTaskExecutorOptions['ensureWorkspace']
+  private readonly prepareSessionId: DshTaskExecutorOptions['prepareSessionId']
   private readonly makeDirectory: (path: string) => Promise<void>
   private readonly runs = new Map<string, Run>()
 
@@ -259,6 +279,8 @@ export class DshTaskExecutor implements TaskExecutor {
     this.stateDir = options.stateDir ?? DEFAULT_STATE_DIR
     this.personaTemplate = options.personaTemplate
     this.workspaceFor = options.workspaceFor
+    this.ensureWorkspaceRecord = options.ensureWorkspace
+    this.prepareSessionId = options.prepareSessionId
     this.makeDirectory =
       options.mkdir ??
       (async (path: string): Promise<void> => {
@@ -288,10 +310,22 @@ export class DshTaskExecutor implements TaskExecutor {
     let started = false
     let result: ExecutorResult | undefined
     try {
+      // The base id is deterministic, but an archived worker session must not
+      // be resumed: resolve the rotation before any workspace work so a cancel
+      // issued meanwhile already addresses the session this run will use.
+      const preparedSessionId = await this.prepareSessionId?.(task, sessionId)
+      if (preparedSessionId !== undefined) run.sessionId = preparedSessionId
       const lifetime = AbortSignal.any([signal, run.controller.signal])
       const workspace = await this.prepareWorkspace(task, settings, request.workspace)
+      // Before the session exists: a workspace record the owner removed in DSH
+      // is recreated here, so the worker does not start in an unregistered
+      // directory. A failure propagates through the normal not-started path.
+      await this.ensureWorkspaceRecord?.(task, {
+        path: workspace.path,
+        title: workspace.title ?? `任务 · ${task.title}`,
+      })
       const session = await this.host.ensureSession({
-        sessionId,
+        sessionId: run.sessionId,
         workspace: workspace.path,
         ...(workspace.title === undefined ? {} : { workspaceTitle: workspace.title }),
         title: `任务 · ${task.title}`,

@@ -24,6 +24,7 @@ import type { TargetCandidate, TargetDraft, TargetValidation } from '../shared/m
 import type { ChannelPort } from './channel-port.ts'
 import type { Effects } from './effects.ts'
 import type { Runtime } from './runtime.ts'
+import { SessionArchiveTargetError, SessionArchiveUnavailableError } from './session-archive.ts'
 import { SettingsConflictError, SettingsService, SettingsValueError } from './settings.ts'
 import type { Store } from './store.ts'
 import {
@@ -165,6 +166,14 @@ function optionalString(body: Record<string, unknown> | undefined, key: string):
   const value = body?.[key]
   if (value === undefined || value === null) return undefined
   if (typeof value !== 'string') throw new HttpError(400, 'invalid_body', `The ${key} field must be a string`)
+  return value
+}
+
+/** One optional boolean body field; a present non-boolean is a 400. */
+function optionalBoolean(body: Record<string, unknown> | undefined, key: string): boolean | undefined {
+  const value = body?.[key]
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'boolean') throw new HttpError(400, 'invalid_body', `The ${key} field must be a boolean`)
   return value
 }
 
@@ -342,6 +351,20 @@ async function validateTargets(deps: HttpDeps, request: IncomingMessage, respons
   sendJson(response, 200, { results })
 }
 
+/**
+ * Archive every session of one target's conversation workspace.
+ *
+ * The body is optional; `stopActivity` is the only recognized field and must be
+ * a boolean when present. Unknown keys are ignored, matching every other route
+ * in this router (the body readers project known fields only).
+ */
+async function archiveTargetSessions(deps: HttpDeps, request: IncomingMessage, response: ServerResponse, id: string) {
+  const body = await optionalBody(request)
+  const stopActivity = optionalBoolean(body, 'stopActivity')
+  const result = await deps.runtime.archiveTargetSessions(id, stopActivity === undefined ? {} : { stopActivity })
+  sendJson(response, 200, result)
+}
+
 async function writeSettings(deps: HttpDeps, request: IncomingMessage, response: ServerResponse, blockText: string) {
   const block = SettingsBlockSchema.safeParse(decodeParam(blockText))
   if (!block.success) throw new HttpError(404, 'unknown_block', 'Unknown settings block')
@@ -463,6 +486,12 @@ async function route(
     }
   }
 
+  if (segments[0] === 'targets' && segments.length === 3 && segments[2] === 'archive-sessions') {
+    if (!methodAllowed(request, response, 'POST')) return
+    await archiveTargetSessions(deps, request, response, decodeParam(segments[1] as string))
+    return
+  }
+
   if (segments[0] === 'threads' && segments.length === 2) {
     if (!methodAllowed(request, response, 'GET')) return
     const before = url.searchParams.get('before') ?? undefined
@@ -546,6 +575,15 @@ export function createHttpHandler(deps: HttpDeps) {
       }
       if (error instanceof SettingsValueError) {
         sendJson(response, 400, failure(400, error.code, error.message, { issues: error.issues }))
+        return
+      }
+      if (error instanceof SessionArchiveUnavailableError) {
+        sendJson(response, 503, failure(503, 'state_unavailable', 'The assistant runtime is not ready'))
+        return
+      }
+      if (error instanceof SessionArchiveTargetError) {
+        const status = error.code === 'unknown_target' ? 404 : 400
+        sendJson(response, status, failure(status, error.code, error.message))
         return
       }
       if (error instanceof UserError) {

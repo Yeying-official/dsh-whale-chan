@@ -9,6 +9,8 @@
  */
 import type {
   ApproveTaskRequest,
+  ArchiveTargetSessionsRequest,
+  ArchiveTargetSessionsResult,
   AuditPage,
   DiscoverTargetsRequest,
   DiscoverTargetsResult,
@@ -100,6 +102,12 @@ export interface ApiContract {
     path: 'targets/validate'
     request: { body: ValidateTargetsRequest }
     response: ValidateTargetsResult
+  }
+  'POST targets/:id/archive-sessions': {
+    method: 'POST'
+    path: 'targets/:id/archive-sessions'
+    request: TargetedRequest & { body?: ArchiveTargetSessionsRequest }
+    response: ArchiveTargetSessionsResult
   }
   'GET threads': {
     method: 'GET'
@@ -212,6 +220,7 @@ export const API_ROUTES = [
   { key: 'GET targets', method: 'GET', path: 'targets' },
   { key: 'POST targets/discover', method: 'POST', path: 'targets/discover' },
   { key: 'POST targets/validate', method: 'POST', path: 'targets/validate' },
+  { key: 'POST targets/:id/archive-sessions', method: 'POST', path: 'targets/:id/archive-sessions' },
   { key: 'GET threads', method: 'GET', path: 'threads' },
   { key: 'GET threads/:key', method: 'GET', path: 'threads/:key' },
   { key: 'GET tasks', method: 'GET', path: 'tasks' },

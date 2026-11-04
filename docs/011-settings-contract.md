@@ -1,6 +1,6 @@
 # 011 设置合约
 
-> 状态：WS0 冻结字段，WS5a 起持久化（schema v2）。生成来源：`src/shared/fields.ts`；默认值来源：`src/shared/settings.ts`（persona 的默认值与预设定义在 `src/shared/persona-defaults.ts`）；持久化实现：`src/app/settings.ts`。
+> 状态：WS0 冻结字段，WS5a 起持久化（schema v2）；WS14（v0.4.0）把管理 API 增至 20 条，但**设置字段与 block 数不变**（仍 57 / 9），schema 仍为 2，没有新增设置字段或迁移。生成来源：`src/shared/fields.ts`；默认值来源：`src/shared/settings.ts`（persona 的默认值与预设定义在 `src/shared/persona-defaults.ts`）；持久化实现：`src/app/settings.ts`。
 
 本文件是设置字段的唯一人读表格，由 `scripts/generate-settings-docs.mjs` 生成。机器可读的唯一真源是：
 
@@ -92,6 +92,7 @@ pnpm docs:settings
 - 块内 patch 采用递归深合并（仅当两侧都是普通对象）；数组、标量和 `null` 整体替换；未知键仍由 strict 拒绝。
 - 人设唯一写入口是 `PUT settings/persona`；`GET persona` 只读；原 `PUT persona` 已删除。
 - `GET persona` 还返回只读的 `defaults`（空人设）与 `presets`（当前含 `whale-maid` 蓝白鲸鱼女仆）；两者都是深拷贝，不参与持久化，详见 `docs/014-persona-defaults.md`。
+- `POST targets/:id/archive-sessions`（WS14，第 20 条路由）：body 可选 `{ stopActivity?: boolean }`，非布尔为 400 `invalid_body`；返回 `ArchiveTargetSessionsResult`（`targetId`、`threadKey`、`workspace`、`archived`/`alreadyArchived`/`refused`/`missing`/`failed`、`replySessionRotated`、`nextReplySessionId`、`stopActivity`、`truncated`、`candidateCount`）。它**不读写设置**，只按 `targets.rows` 解析目标工作区；目标不存在为 `404 unknown_target`，`@我`/`open:` 目标为 `400 per_conversation_workspace`，registry 未装配为 `503 state_unavailable`。
 - 所有管理请求要求 `x-whale-chan-request: 1`，缺失为 403 且不回传 `stateDir`。
 
 ## 持久化、revision 与 history（WS5a）
@@ -126,8 +127,11 @@ pnpm docs:settings
 | 404  | `unknown_task` / `unknown_thread` | 记录不存在                                                              |
 | 404  | `missing` 类（如 `unknownTask`） | 记录不存在；响应带 `code` / `values`                                      |
 | 400  | `invalid` 类（如 `invalidWorkspace`、`missingWorkspace`、`invalidTime`） | 调用方可纠正的输入；响应带 `code` / `values` |
+| 400  | `per_conversation_workspace`  | 归档目标没有单一工作区（`@我` 或 `open:` 单聊）                          |
+| 400  | `invalid_body`                | `archive-sessions` 的 `stopActivity` 出现但不是布尔值                      |
 | 409  | `refused` 类（如 `notFailed`、`notAwaitingApproval`、`alreadyDecided`） | 记录存在但当前状态不允许；响应带 `code` / `values` |
 | 400  | `channel_error`               | 通道一次性调用失败（消息已脱敏）                                          |
+| 404  | `unknown_target`              | 归档目标在 `targets.rows` 中不存在（按首行匹配）                          |
 | 503  | `channel_unavailable`         | WS5a 未接入通道时的 `targets/discover` / `targets/validate`               |
 | 503  | `state_unavailable`           | 运行时尚未就绪或启动失败                                                  |
 | 403  | `forbidden`                   | 缺少 `x-whale-chan-request: 1`                                          |
@@ -141,7 +145,7 @@ pnpm docs:settings
 1. schema 的全部叶子路径与 field registry 一一对应，没有遗漏或多余字段；
 2. 每个字段声明的默认值与 `SettingsSchema.parse({})` 的结果一致；
 3. 每个 block 至少有一个字段，且不存在未知 block；
-4. 19 个管理 API 端点唯一，方法/路径符合冻结前缀，URL 编码和必填路径参数正确；
+4. 20 个管理 API 端点唯一，方法/路径符合冻结前缀，URL 编码和必填路径参数正确；
 5. 所有 labelKey/hintKey 在中文和英文字典中都存在且非空，两个字典 key 集合一致；
 6. package 版本、engines、manifest、files 白名单与共享常量一致；
 7. 本文档包含每一个字段路径；
@@ -157,7 +161,7 @@ pnpm docs:settings
 
 `tests/settings-service.spec.ts` 证明持久化语义：默认值、重开数据库后不丢、block/全局 revision、409 冲突、深合并与数组替换、损坏行降级、v1→v2 迁移幂等、history 与变更通知。
 
-`tests/api-routes.spec.ts` 与 `tests/task-actions.spec.ts` 证明 19 条路由、分页边界、错误码、审批/拒绝/取消/重试与 launch effect。
+`tests/api-routes.spec.ts` 与 `tests/task-actions.spec.ts` 证明 20 条路由、分页边界、错误码、审批/拒绝/取消/重试与 launch effect；其中归档路由的 200/400/404/405/403/503、`stopActivity` 透传、分区与轮换由同一 spec 的归档用例覆盖。
 
 ## 相关文档
 

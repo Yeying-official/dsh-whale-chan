@@ -1,23 +1,23 @@
 # 兼容矩阵
 
-> 适用范围：`dsh-whale-chan-assistant` `0.3.0`（WS0–WS12 完成，Windows 真机 T0–T4 通过，v0.2.0 工作区改造做 T3/T4 复验，v0.3.0 人设默认/预设做重载核对）。
-> 最后核对：2026-11-03（Asia/Shanghai）。
+> 适用范围：`dsh-whale-chan-assistant` `0.4.0`（WS0–WS14 完成；Windows 真机 T0–T4 由 v0.1.0 完成，v0.2.0 工作区做 T3/T4 复验，v0.3.0 人设默认/预设做重载核对；**v0.4.0 归档/恢复未跑真机**）。
+> 最后核对：2026-11-04（Asia/Shanghai）。
 >
 > **权威顺序**：`package.json` 的 `dsh.compatibility` 与 WS8 的 T0–T4 记录 > 本文 > 其它说明。本文中的“已验证”只表示在本机 Windows 环境实际跑过，不表示在所有同版本环境都成立。
 
 ## 1. 结论
 
-| 组件          | 已验证                                                                                                 | 状态                                                                                                                                                  |
-| ------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| DSH Desktop   | `0.2.1-rc.5`（Windows x64）                                                                            | **compatible**，`dsh.compatibility` 正式声明                                                                                                          |
-| DSH 其它版本  | 无                                                                                                     | 未验证；不要假设向前/向后兼容                                                                                                                         |
-| `dws`         | `1.0.66`（`f215043e`，2026-10-28）                                                                     | 群事件/发送回执已真机确认；单聊与其它版本仍 provisional                                                                                               |
-| Windows       | 10/11                                                                                                  | 已实测（开发机与桌面端）                                                                                                                              |
-| 真机验收      | T0–T4（Windows 10/11、DSH `0.2.1-rc.5`、`dws` `1.0.66`）+ v0.2.0 工作区复验 + v0.3.0 人设默认/预设核对 | 通过；测试群目标已停用，见 [WS8 报告](test-reports/WS8-live.md)、[WS9/WS10 报告](test-reports/WS9-10.md) 与 [WS12 报告](test-reports/WS12-persona.md) |
-| macOS / Linux | 无                                                                                                     | **未验证**，不作为支持承诺                                                                                                                            |
-| Node.js       | 24.15.0（开发）、24.21.0（DSH Desktop 自带）                                                           | 已实测；`engines` 允许 `^22.19.0 \|\| >=24.0.0`                                                                                                       |
-| 单实例        | 同一 `stateDir` 一个进程                                                                               | 已实现并由测试覆盖；崩溃后锁 stale 10 秒                                                                                                              |
-| 模型路由      | 宿主默认；或按回复器/执行器分别指定 provider + model + effort                                          | 代码路径已测；未逐一验证所有 provider                                                                                                                 |
+| 组件          | 已验证                                                                                                                             | 状态                                                                                                                                                                                                                        |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| DSH Desktop   | `0.2.1-rc.5`（Windows x64）                                                                                                        | **compatible**，`dsh.compatibility` 正式声明                                                                                                                                                                                |
+| DSH 其它版本  | 无                                                                                                                                 | 未验证；不要假设向前/向后兼容                                                                                                                                                                                               |
+| `dws`         | `1.0.66`（`f215043e`，2026-10-28）                                                                                                 | 群事件/发送回执已真机确认；单聊与其它版本仍 provisional                                                                                                                                                                     |
+| Windows       | 10/11                                                                                                                              | 已实测（开发机与桌面端）                                                                                                                                                                                                    |
+| 真机验收      | T0–T4（Windows 10/11、DSH `0.2.1-rc.5`、`dws` `1.0.66`）+ v0.2.0 工作区复验 + v0.3.0 人设默认/预设核对；v0.4.0 归档/恢复**未真机** | 历史级别通过；v0.4.0 只由单测/集成/组件测试与独立探针覆盖，见 [WS8 报告](test-reports/WS8-live.md)、[WS9/WS10 报告](test-reports/WS9-10.md)、[WS12 报告](test-reports/WS12-persona.md) 与 [WS14 报告](test-reports/WS14.md) |
+| macOS / Linux | 无                                                                                                                                 | **未验证**，不作为支持承诺                                                                                                                                                                                                  |
+| Node.js       | 24.15.0（开发）、24.21.0（DSH Desktop 自带）                                                                                       | 已实测；`engines` 允许 `^22.19.0 \|\| >=24.0.0`                                                                                                                                                                             |
+| 单实例        | 同一 `stateDir` 一个进程                                                                                                           | 已实现并由测试覆盖；崩溃后锁 stale 10 秒                                                                                                                                                                                    |
+| 模型路由      | 宿主默认；或按回复器/执行器分别指定 provider + model + effort                                                                      | 代码路径已测；未逐一验证所有 provider                                                                                                                                                                                       |
 
 ## 2. DSH 版本
 
@@ -41,7 +41,7 @@
 3. 按 [012 发布](012-release.md) 的 T0–T4 重新验收；
 4. 确认 `state.db` schema 没有被新宿主改写；降级时不要用新库打开旧插件。
 
-`0.3.0` 只改人设默认值与只读预设投影，**不改变 DSH 兼容声明**：`engines.dsh` 仍是 `^0.2.1-rc.5`，`dsh.compatibility` 仍只标记 `0.2.1-rc.5`，`state.db` schema 仍是 2。因此本节的 DSH 版本结论与 v0.2.0 相同，没有“必须升级宿主”的要求。
+`0.3.0` 只改人设默认值与只读预设投影，`0.4.0` 只增加会话归档与会话/工作区恢复，**都不改变 DSH 兼容声明**：`engines.dsh` 仍是 `^0.2.1-rc.5`，`dsh.compatibility` 仍只标记 `0.2.1-rc.5`，`state.db` schema 仍是 2。因此本节的 DSH 版本结论与 v0.2.0 相同，没有“必须升级宿主”的要求。0.4.0 依赖 DSH 已有的归档闸门与 workspace registry 行为（`archivedSessionIds`、`archiveSession`、`list`、`attachSession`），这些在 `0.2.1-rc.5` 上存在；其它 rc 版本需要重新核对后再声明。
 
 ## 3. `dws` 版本
 
@@ -93,16 +93,24 @@ WS8 已在 Windows + `1.0.66` 上确认：群事件键与 snake_case 扁平字�
 - **旧 persona 行保留**：升级不迁移、不覆盖已保存的人设；从未保存过人设（块缺失）的安装才采用空默认。想清空旧的自定义内容，需要手动「恢复默认（空人设）」并保存。
 - **不改变存储与协议**：persona 仍是 `settings.persona` 单一来源，`state.db` schema 仍是 2；新增的两个字段只是接口投影，旧 host/旧 panel 忽略即可。预设正文与来源见 [014 人设默认值与预设](014-persona-defaults.md)。
 
+### 5.3 会话归档与恢复（v0.4.0）
+
+- **归档集合由 DSH 持有**：插件只读 `workspaceRegistry.archivedSessionIds`、调用 `archiveSession` 并枚举 registry/sessionPersistence；没有自己的归档表，`state.db` schema 仍为 2。
+- **generation 存 KV，不是 schema**：`session.reply-generation:<threadKey>` 与 `session.worker-generation:<base>` 两行只增不减。`g0` 与 v0.3.0 的会话 id 逐字节一致，所以**升级不换会话**；只有归档（或被闸门拒绝）才前进到 `g<n>` / `<base>-g<n>`。
+- **回退到 v0.3.0 兼容但会失去自愈**：旧版本忽略 generation 行，按 `g0` 解析会话；如果这些 `g0` 会话已被归档，旧版本的回复会被归档闸门挡住。回退前先读 [012 发布](012-release.md) §8 第 5 条。
+- **归档不删数据**：目录、文件与会话日志保留，不提供 unarchive；在 DSH 手动 unarchive 旧会话不会回退 generation，旧上下文不会自动恢复。
+- **未真机**：归档后的 `ArchivedSessionGate` 行为、`stopActivity` 的真实取消、Windows symlink/realpath 规范化都只有 fake/单测证据；macOS/Linux 未验证，见 [WS14 报告](test-reports/WS14.md) §7。
+
 ## 6. 兼容性判定流程
 
 任何“支持某版本”的声明都必须留下证据：
 
 1. **静态门禁**：`pnpm check`、`pnpm format:check`、`node scripts/check-pack.mjs` 全绿；
-2. **安装**：在干净 profile 或干净机器上安装本地 bundle，重启后侧栏出现「DSH助理」，`GET /whale-chan/api/state` 200；「目标」页工作区块显示启用目标的目录（或「按会话创建」）；
+2. **安装**：在干净 profile 或干净机器上安装本地 bundle，重启后侧栏出现「DSH助理」，`GET /whale-chan/api/state` 200；「目标」页工作区块显示启用目标的目录（或「按会话创建」）；v0.4.0 起 `ready` 行还应有「归档会话」按钮，`per-conversation` 行没有；
 3. **T0 只读**：`dws --version`、`dws auth status --format json` 的布尔字段；不订阅、不发送；
 4. **T1 观察**：测试群订阅 + `dryRun`，确认事件解码、去重、断线重连、`unknown` 不重发；
 5. **T2 单条**：面板确认后向测试群发一条，确认 AI 角标、幂等键、回执；
 6. **T3 全链路**：@我 → 分类 → 回复/任务 → 面板批准 → worker 会话 → 结果回帖；
-7. 把版本、命令、输出摘要与截图写入对应的 `docs/test-reports/WSxx.md`（真机链路见 [WS8](test-reports/WS8-live.md)、工作区见 [WS9/WS10](test-reports/WS9-10.md)），再更新本文与 `dsh.compatibility`。
+7. 把版本、命令、输出摘要与截图写入对应的 `docs/test-reports/WSxx.md`（真机链路见 [WS8](test-reports/WS8-live.md)、工作区见 [WS9/WS10](test-reports/WS9-10.md)、归档/恢复见 [WS14](test-reports/WS14.md)），再更新本文与 `dsh.compatibility`。
 
 未走完上述流程的版本，一律写“未验证”，不要写“应该可以”。

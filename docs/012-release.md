@@ -1,6 +1,6 @@
 # 012 发布
 
-> 当前状态：**v0.4.0 待合并、待打 tag**（实现分支 `feat/ws14-archive-sessions`，基线 `main` `eda003f`）。WS0–WS14 已完成；v0.4.0 增加会话归档与工作区自愈，管理 API 20 条，schema 仍为 2，设置字段仍 57 / 9 个 block。
+> 当前状态：**v0.4.0 已合并到 `main` `d0ed2e6`**（`--no-ff` 合并提交 `chore(merge): ws14 archive workspace sessions`）；tag `v0.4.0` 由协调者打在本 docs 提交上（本地、未 push）。WS0–WS14 已完成；v0.4.0 增加会话归档与工作区自愈，管理 API 20 条，schema 仍为 2，设置字段仍 57 / 9 个 block。
 >
 > 版本 `0.4.0`，日期 `2026-11-04`。`private: true`，不发布到 npm。
 >
@@ -50,15 +50,16 @@ git status --porcelain
 - [x] `scripts/check-pack.mjs` → 版本断言 `0.4.0`
 - [x] `CHANGELOG.md` → `## [0.4.0] - 2026-11-04`，含 Added / Changed / Fixed / Migration / Known limitations；`0.3.0`、`0.2.0`、`0.1.0` 段落保留
 - [x] `docs/compatibility.md` → 适用版本 `0.4.0`、归档行为、schema 仍 2、DSH 兼容声明不变、本版未真机
-- [x] `docs/PROGRESS.md` → WS14 完成、849 tests / 62 files、合并坐标占位、归档相关限制、冻结决策补充
+- [x] `docs/PROGRESS.md` → WS14 完成并合并、849 tests / 62 files、合并提交 `d0ed2e6` 与 tag 回填、归档相关限制、冻结决策补充
 - [x] `README.md` → v0.4.0 状态、功能表「会话归档与自愈」、20 条路由、工作区段新增归档/自愈要点、安装验证版本 `0.4.0`、排障入口
 - [x] `docs/005-panel.md` → 20 条路由、§3.4 归档按钮/确认弹窗/结果摘要/错误码、§4 错误表、§5 i18n 计数
 - [x] `docs/007-architecture.md` → 20 条路由、纯命名例外、§6.8 会话归档与恢复、测试索引
 - [x] `docs/011-settings-contract.md` → 20 条契约、归档路由请求/响应/错误、明确无新增字段
 - [x] `docs/013-security.md` → 追加“会话归档与恢复（v0.4.0）”小节（只追加）
 - [x] `docs/pr/WS14-archive-sessions.md` → 需求、设计、契约、破坏性边界、测试证据、5 项评审修复、风险与合并坐标
-- [x] `docs/test-reports/WS14.md` → 归档会话与恢复的验收报告（脱敏，由 QA 提供；其中“文档未完成”一行由 QA 在合并窗口回填）
-- [ ] 发布 tag：`v0.4.0` 由协调者在合并后打在本 docs 提交上（本地，未 push；实现代理不执行 tag/push）
+- [x] `docs/test-reports/WS14.md` → 归档会话与恢复的验收报告（脱敏，由 QA 提供；『文档未完成』已由 QA 在 `77810e7` 回填为“已完成”）
+- [x] 合并坐标：`--no-ff` 合并提交 `d0ed2e6`（`chore(merge): ws14 archive workspace sessions`），合并前工作区干净
+- [x] 发布 tag：`v0.4.0` 由协调者打在本 docs 提交上（本地，未 push；实现代理未执行 tag/push）
 - [ ] 发布复核人确认“本版未真机”的表述与 [WS14 报告](test-reports/WS14.md)、CHANGELOG 一致
 
 ## 4. 安装与卸载

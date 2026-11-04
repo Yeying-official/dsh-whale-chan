@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { userErrorStatus } from '../src/app/http.ts'
 import { fakeChannel, jsonBody, request, startTestServer, type TestServer } from './fixtures/http.ts'
 import type { ChannelPort } from '../src/app/channel-port.ts'
+import type { RuntimeOverrides } from '../src/app/runtime.ts'
+import { FakeChannel } from './fixtures/pipeline.ts'
 import { conversationWorkspace, conversationWorkspaceTitle } from '../src/executor/workspace.ts'
 import { replySessionIdForGeneration } from '../src/executor/reply-session.ts'
 import { inboundMessage } from './fixtures/domain.ts'
@@ -25,7 +27,7 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true })
 })
 
-async function start(options: { channel?: ChannelPort } = {}): Promise<TestServer> {
+async function start(options: { channel?: ChannelPort; overrides?: RuntimeOverrides } = {}): Promise<TestServer> {
   server = await startTestServer({ stateDir: join(root, 'state'), ...options })
   return server
 }
@@ -245,6 +247,47 @@ describe('read routes', () => {
     expect(body.checks.find((check) => check.id === 'channel')?.detail).toContain('unknown')
     expect(body.dws).toEqual({ binaryPath: 'dws', available: false, authenticated: null })
     expect(JSON.stringify(body)).not.toContain(runtime.stateDir)
+  })
+
+  it('reports a stopped channel when none is attached', async () => {
+    const { baseUrl } = await start()
+    const response = await request(baseUrl, '/whale-chan/api/channel')
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ state: 'stopped', running: false, targets: [] })
+  })
+
+  it('reports per-target subscription health from the attached channel', async () => {
+    const channel = new FakeChannel()
+    channel.running = true
+    channel.healthTargets = [
+      { targetId: 'at-me', kind: 'at-me', state: 'ready', restarts: 0, readyAt: '2026-11-02T09:00:00.000Z' },
+      {
+        targetId: 'cid-1',
+        kind: 'group',
+        label: '测试群',
+        state: 'failed',
+        restarts: 2,
+        lastError: 'subscribeUser failed',
+      },
+    ]
+    const { baseUrl } = await start({ overrides: { channel } })
+    const response = await request(baseUrl, '/whale-chan/api/channel')
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      state: 'ready',
+      running: true,
+      targets: [
+        { targetId: 'at-me', kind: 'at-me', state: 'ready', restarts: 0, readyAt: '2026-11-02T09:00:00.000Z' },
+        {
+          targetId: 'cid-1',
+          kind: 'group',
+          label: '测试群',
+          state: 'failed',
+          restarts: 2,
+          lastError: 'subscribeUser failed',
+        },
+      ],
+    })
   })
 
   it('pages the audit log from committed domain events, newest first', async () => {

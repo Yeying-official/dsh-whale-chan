@@ -57,6 +57,19 @@ const atMe: DwsTarget = { kind: 'at-me', id: 'at-me', mentionOnly: true, enabled
 const group: DwsTarget = { kind: 'group', id: 'cid-1', label: '测试群', mentionOnly: true, enabled: true }
 const ownerUserId = 'u-owner'
 
+/** The structured rejection `dws` prints on stdout when a subscription is refused. */
+const serverError = (retryAfterSeconds?: number) => ({
+  error: {
+    category: 'api',
+    cause: 'SYSTEM_ERROR: subscribeUser failed: registerToEventCenter failed',
+    code: 1,
+    message: 'event consume --as user: SYSTEM_ERROR: subscribeUser failed: registerToEventCenter failed',
+    reason: 'personal_subscription_unknown',
+    server_error_code: 'SYSTEM_ERROR',
+    ...(retryAfterSeconds === undefined ? {} : { retry_after_seconds: retryAfterSeconds }),
+  },
+})
+
 // The real T3 shape: snake_case, no conversationType, no atUsers.
 const atEvent = {
   type: 'user_im_message_receive_at',
@@ -88,7 +101,7 @@ function createSupervisor(
   targets: readonly DwsTarget[],
   sink: (message: InboundMessage) => void | Promise<void>,
   extraEnv: Record<string, string>,
-  options: { backoff?: { baseMs?: number; maxMs?: number } } = {},
+  options: { backoff?: { baseMs?: number; maxMs?: number }; spawn?: SpawnFn } = {},
 ) {
   const directory = tempDir()
   const traceFile = join(directory, 'trace.jsonl')
@@ -237,7 +250,108 @@ function readyStubSpawn(spawns: string[][]): SpawnFn {
   }
 }
 
+/**
+ * A child that rejects every consume attempt before it can report ready.
+ *
+ * Real `dws` prints no ready line when the server refuses the subscription, so
+ * every restart starts from a fresh process with no successful ready.
+ */
+function rejectingSpawn(spawns: string[][]): SpawnFn {
+  return (_command, args) => {
+    spawns.push([...args])
+    const stdout = Object.assign(new EventEmitter(), { setEncoding: () => undefined })
+    const stderr = Object.assign(new EventEmitter(), { setEncoding: () => undefined })
+    const stdin = Object.assign(new EventEmitter(), { end: () => undefined, write: () => undefined })
+    const child = Object.assign(new EventEmitter(), {
+      pid: 778,
+      stdout,
+      stderr,
+      stdin,
+      kill: () => true,
+    }) as unknown as ChildProcess
+    if (args.includes('stop')) {
+      setImmediate(() => (child as unknown as EventEmitter).emit('close', 0, null))
+    } else {
+      setImmediate(() => {
+        stdout.emit('data', `${JSON.stringify(serverError())}${String.fromCharCode(10)}`)
+        setImmediate(() => (child as unknown as EventEmitter).emit('close', 1, null))
+      })
+    }
+    return child
+  }
+}
+
 describe('ChannelSupervisor recovery', () => {
+  it('surfaces a server rejection and postpones the restart by its retry hint', async () => {
+    const directory = tempDir()
+    const eventsFile = writeJson(directory, 'events.json', [serverError(2)])
+    const received: InboundMessage[] = []
+    const { supervisor, lines } = createSupervisor(
+      [atMe],
+      (message) => {
+        received.push(message)
+      },
+      { FAKE_DWS_EVENTS: eventsFile, FAKE_DWS_EXIT: '1' },
+    )
+    await waitFor(() => lines.some((line) => line.startsWith('info:') && /restarting .* in \d+ms/.test(line)), 3_000)
+    expect(received).toEqual([])
+    const target = supervisor.health().targets[0]
+    expect(target?.lastError).toContain('subscribeUser failed')
+    // A server verdict is not a malformed event.
+    expect(target?.malformed).toBe(0)
+    expect(lines.some((line) => line.startsWith('warn:') && line.includes('subscribeUser failed'))).toBe(true)
+    const restart = lines.find((line) => line.startsWith('info:') && /restarting .* in \d+ms/.test(line)) ?? ''
+    expect(Number(/in (\d+)ms/.exec(restart)?.[1])).toBeGreaterThanOrEqual(2_000)
+    await supervisor.stop()
+  })
+
+  it('stops restarting after three server rejections without a retry hint', async () => {
+    const directory = tempDir()
+    const eventsFile = writeJson(directory, 'events.json', [serverError(), serverError(), serverError()])
+    const { supervisor, traceFile, lines } = createSupervisor(
+      [atMe],
+      () => undefined,
+      { FAKE_DWS_EVENTS: eventsFile, FAKE_DWS_EXIT: '1' },
+      { backoff: { baseMs: 20, maxMs: 60 } },
+    )
+    await waitFor(() => readTrace(traceFile).filter((entry) => entry.phase === 'exit').length >= 1, 6_000)
+    // The third rejection is terminal: no later start may appear.
+    await new Promise<void>((resolve) => setTimeout(resolve, 300))
+    expect(readTrace(traceFile).filter((entry) => entry.phase === 'start')).toHaveLength(1)
+    const target = supervisor.health().targets[0]
+    expect(target?.state).toBe('failed')
+    expect(target?.lastError).toContain('subscribeUser failed')
+    expect(target?.restarts).toBe(0)
+    expect(lines.some((line) => line.startsWith('error:') && line.includes('not restarting'))).toBe(true)
+    await supervisor.stop()
+  })
+
+  it('counts rejections across restarts and stops after the third attempt', async () => {
+    const spawns: string[][] = []
+    const { supervisor, lines } = createSupervisor(
+      [atMe],
+      () => undefined,
+      {},
+      {
+        spawn: rejectingSpawn(spawns),
+        backoff: { baseMs: 20, maxMs: 60 },
+      },
+    )
+    const consumes = (): string[][] => spawns.filter((args) => !args.includes('stop'))
+    await waitFor(() => consumes().length >= 3, 5_000)
+    // Give a fourth restart the chance to appear before asserting the stop.
+    await new Promise<void>((resolve) => setTimeout(resolve, 200))
+    expect(consumes()).toHaveLength(3)
+    const target = supervisor.health().targets[0]
+    expect(target?.state).toBe('failed')
+    expect(target?.lastError).toContain('subscribeUser failed')
+    // Two restarts were scheduled; the terminal third rejection adds none.
+    expect(target?.restarts).toBe(2)
+    expect(supervisor.health().state).toBe('degraded')
+    expect(lines.some((line) => line.startsWith('error:') && line.includes('not restarting'))).toBe(true)
+    await supervisor.stop()
+  })
+
   it('restarts a crashing subscription with bounded exponential backoff and never overlaps', async () => {
     const { supervisor, traceFile, lines } = createSupervisor(
       [atMe],

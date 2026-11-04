@@ -184,6 +184,25 @@ export interface Health {
   }
 }
 
+/** One subscription target's live state, as `GET channel` reports it. */
+export interface ChannelTargetHealthView {
+  readonly targetId: string
+  readonly kind: TargetKind
+  readonly label?: string
+  readonly state: 'starting' | 'ready' | 'stopped' | 'failed' | 'orphaned'
+  readonly restarts: number
+  readonly readyAt?: string
+  /** Redacted, single-line reason of the last failure or server rejection. */
+  readonly lastError?: string
+}
+
+/** Per-target subscription health for the channel panel. */
+export interface ChannelHealthView {
+  readonly state: 'stopped' | 'starting' | 'ready' | 'degraded'
+  readonly running: boolean
+  readonly targets: readonly ChannelTargetHealthView[]
+}
+
 export interface Overview {
   readonly generatedAt: string
   readonly monitor: {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, fetchState, isStateView } from '../src/client/api.ts'
+import { ApiError, archiveTargetSessions, fetchState, isStateView } from '../src/client/api.ts'
 import { API_REQUEST_HEADER, API_REQUEST_HEADER_VALUE, apiUrl } from '../src/shared/api.ts'
 
 const valid = {
@@ -64,5 +64,98 @@ describe('client state API', () => {
       vi.fn(async () => new Response('not json', { status: 200 })),
     )
     await expect(fetchState(new AbortController().signal)).rejects.toMatchObject({ status: 200 })
+  })
+})
+
+describe('target session archive API', () => {
+  const result = {
+    targetId: 'group 1',
+    threadKey: 'group:group 1',
+    workspace: { path: 'E:/state/workspaces/group-1', title: '钉钉 · 项目群' },
+    archived: ['session-1'],
+    alreadyArchived: ['session-2'],
+    refused: [],
+    missing: [],
+    failed: [],
+    replySessionRotated: true,
+    nextReplySessionId: 'session-3',
+    stopActivity: true,
+    truncated: false,
+    candidateCount: 2,
+  }
+
+  it('posts the stop flag to the encoded archive route and returns the result', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(result), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(archiveTargetSessions('group 1', { stopActivity: true })).resolves.toEqual(result)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/whale-chan/api/targets/group%201/archive-sessions')
+    expect(init).toMatchObject({
+      method: 'POST',
+      headers: expect.objectContaining({
+        accept: 'application/json',
+        [API_REQUEST_HEADER]: API_REQUEST_HEADER_VALUE,
+        'content-type': 'application/json',
+      }),
+      body: JSON.stringify({ stopActivity: true }),
+    })
+  })
+
+  it('sends an empty confirmation body when no options are given', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(result), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await archiveTargetSessions('group-1')
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(init.body).toBe('{}')
+  })
+
+  it('exposes the per-conversation refusal code on ApiError', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              ok: false,
+              error: { code: 'per_conversation_workspace', message: 'no single workspace' },
+            }),
+            { status: 400 },
+          ),
+      ),
+    )
+    const failure = await archiveTargetSessions('at-me').catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(ApiError)
+    expect(failure).toMatchObject({ status: 400, code: 'per_conversation_workspace' })
+  })
+
+  it('exposes unknown_target and state_unavailable failures', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ ok: false, error: { code: 'unknown_target', message: 'gone' } }), {
+            status: 404,
+          }),
+      ),
+    )
+    await expect(archiveTargetSessions('missing')).rejects.toMatchObject({
+      status: 404,
+      code: 'unknown_target',
+    })
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ ok: false, error: { code: 'state_unavailable', message: 'starting' } }), {
+            status: 503,
+          }),
+      ),
+    )
+    await expect(archiveTargetSessions('group-1')).rejects.toMatchObject({
+      status: 503,
+      code: 'state_unavailable',
+    })
   })
 })

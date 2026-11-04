@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import { userEvent } from '@testing-library/user-event'
 import { zh } from '../src/client/locale.ts'
 import {
@@ -9,11 +9,13 @@ import {
   reply,
   renderPanel,
   requestBodies,
+  requestCount,
   resetPanelTest,
   settingsFixture,
   targetFixture,
   targetsFixture,
 } from './client-harness.tsx'
+import type { ArchiveTargetSessionsResult } from '../src/shared/models.ts'
 
 afterEach(() => {
   Reflect.deleteProperty(navigator, 'clipboard')
@@ -29,6 +31,44 @@ const row = {
   enabled: true,
 }
 
+const workspacePath = 'E:/state/workspaces/group-1'
+
+/** One ready-workspace target; the archive action keys off `workspace.mode`. */
+function readyTargets(
+  overrides: { readonly id?: string; readonly label?: string; readonly path?: string } = {},
+): ReturnType<typeof targetsFixture> {
+  const id = overrides.id ?? 'group-1'
+  const label = overrides.label ?? '项目群'
+  return targetsFixture([
+    targetFixture({
+      id,
+      label,
+      workspace: { path: overrides.path ?? workspacePath, title: `钉钉 · ${label}`, mode: 'ready' },
+    }),
+  ])
+}
+
+const archiveRoute = (id: string): string => `targets/${encodeURIComponent(id)}/archive-sessions`
+
+function archiveResult(overrides: Partial<ArchiveTargetSessionsResult> = {}): ArchiveTargetSessionsResult {
+  return {
+    targetId: 'group-1',
+    threadKey: 'group:group-1',
+    workspace: { path: workspacePath, title: '钉钉 · 项目群' },
+    archived: ['session-1'],
+    alreadyArchived: [],
+    refused: [],
+    missing: [],
+    failed: [],
+    replySessionRotated: false,
+    nextReplySessionId: 'session-2',
+    stopActivity: false,
+    truncated: false,
+    candidateCount: 1,
+    ...overrides,
+  }
+}
+
 function renderTargets(handler: Parameters<typeof renderPanel>[0]) {
   window.location.hash = '#targets'
   return renderPanel(handler)
@@ -42,6 +82,7 @@ function handler(
     readonly put?: (body: { value: { rows: readonly unknown[] }; revision: number }) => ReturnType<typeof reply>
     readonly discover?: ReturnType<typeof reply>
     readonly validate?: ReturnType<typeof reply>
+    readonly archive?: (request: { url: URL; method: string; body: unknown }) => ReturnType<typeof reply>
   } = {},
 ) {
   const targets = options.targets ?? targetsFixture([targetFixture()])
@@ -69,6 +110,9 @@ function handler(
           ],
         })
       )
+    }
+    if (path.startsWith('targets/') && path.endsWith('/archive-sessions') && request.method === 'POST') {
+      return options.archive?.(request) ?? reply(200, archiveResult())
     }
     return undefined
   }
@@ -210,5 +254,196 @@ describe('targets page', () => {
   it('shows the empty state when no target is configured', async () => {
     renderTargets(handler({ targets: targetsFixture([]), rows: [] }))
     expect(await screen.findByText(zh['targets.empty'])).toBeTruthy()
+  })
+
+  async function openArchiveDialog(user: ReturnType<typeof userEvent.setup>, label = '项目群'): Promise<HTMLElement> {
+    await user.click(screen.getByRole('button', { name: zh['targets.archive.openAria'].replace('{label}', label) }))
+    return await screen.findByRole('dialog')
+  }
+
+  it('offers the archive action only for a ready workspace', async () => {
+    const perConversation = targetFixture({
+      kind: 'at-me',
+      id: 'at-me',
+      label: '@我',
+      workspace: { path: null, title: '钉钉 · @我', mode: 'per-conversation' },
+    })
+    renderTargets(handler({ targets: targetsFixture([...readyTargets().targets, perConversation]) }))
+    const button = await screen.findByRole('button', {
+      name: zh['targets.archive.openAria'].replace('{label}', '项目群'),
+    })
+    expect(button.textContent).toBe(zh['targets.archive.open'])
+    expect(screen.queryByRole('button', { name: zh['targets.archive.openAria'].replace('{label}', '@我') })).toBeNull()
+    expect(screen.getByText(zh['targets.workspace.perConversation'])).toBeTruthy()
+  })
+
+  it('opens the confirmation dialog with the stop switch off and sends nothing on cancel', async () => {
+    const user = userEvent.setup()
+    const view = renderTargets(handler({ targets: readyTargets() }))
+    expect(await screen.findByText(workspacePath)).toBeTruthy()
+    const dialog = await openArchiveDialog(user)
+    expect(within(dialog).getByText(zh['targets.archive.title'])).toBeTruthy()
+    expect(within(dialog).getByText(zh['targets.archive.body'])).toBeTruthy()
+    expect(within(dialog).getByText(zh['targets.archive.warning'])).toBeTruthy()
+    const toggle = within(dialog).getByRole('switch', { name: zh['targets.archive.stopActivity'] })
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    await user.click(within(dialog).getByRole('button', { name: zh['targets.archive.cancel'] }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(requestCount(view.fetchMock, 'POST', archiveRoute('group-1'))).toBe(0)
+  })
+
+  it('posts the encoded target id and the flag chosen in the dialog', async () => {
+    const user = userEvent.setup()
+    const id = 'group 1'
+    const view = renderTargets(handler({ targets: readyTargets({ id }) }))
+    expect(await screen.findByText(workspacePath)).toBeTruthy()
+    let dialog = await openArchiveDialog(user)
+    await user.click(within(dialog).getByRole('button', { name: zh['targets.archive.confirm'] }))
+    await waitFor(() => expect(requestBodies(view.fetchMock, 'POST', archiveRoute(id))).toHaveLength(1))
+    expect(requestBodies(view.fetchMock, 'POST', archiveRoute(id))[0]).toEqual({ stopActivity: false })
+    const posted = view.fetchMock.mock.calls.find(([input, init]) => {
+      const url = new URL(String(input), 'http://127.0.0.1')
+      return (init?.method ?? 'GET') === 'POST' && pathOf(url) === archiveRoute(id)
+    })
+    expect(String(posted?.[0])).toContain('/targets/group%201/archive-sessions')
+
+    await user.click(within(dialog).getByRole('button', { name: zh['targets.archive.close'] }))
+    dialog = await openArchiveDialog(user)
+    const toggle = within(dialog).getByRole('switch', { name: zh['targets.archive.stopActivity'] })
+    await user.click(toggle)
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
+    await user.click(within(dialog).getByRole('button', { name: zh['targets.archive.confirm'] }))
+    await waitFor(() => expect(requestBodies(view.fetchMock, 'POST', archiveRoute(id))).toHaveLength(2))
+    expect(requestBodies(view.fetchMock, 'POST', archiveRoute(id))[1]).toEqual({ stopActivity: true })
+  })
+
+  it('keeps the dialog open and reports counts, truncation and rotation', async () => {
+    const user = userEvent.setup()
+    const result = archiveResult({
+      archived: ['s1', 's2'],
+      alreadyArchived: ['s3'],
+      refused: [{ sessionId: 's4', activity: [{ kind: 'reply', items: [{ id: 'item-1', label: '当前回复' }] }] }],
+      missing: ['s5'],
+      failed: [{ sessionId: 's6', error: 'archive_failed' }],
+      replySessionRotated: true,
+      truncated: true,
+      candidateCount: 42,
+    })
+    const view = renderTargets(handler({ targets: readyTargets(), archive: () => reply(200, result) }))
+    expect(await screen.findByText(workspacePath)).toBeTruthy()
+    const dialog = await openArchiveDialog(user)
+    const targetsLoads = requestCount(view.fetchMock, 'GET', 'targets')
+    await user.click(within(dialog).getByRole('button', { name: zh['targets.archive.confirm'] }))
+    expect(await within(dialog).findByText(zh['targets.archive.resultTitle'])).toBeTruthy()
+    expect(within(dialog).getByText(zh['targets.archive.archived'].replace('{count}', '2'))).toBeTruthy()
+    expect(within(dialog).getByText(zh['targets.archive.alreadyArchived'].replace('{count}', '1'))).toBeTruthy()
+    expect(within(dialog).getByText(zh['targets.archive.refused'].replace('{count}', '1'))).toBeTruthy()
+    expect(within(dialog).getByText(zh['targets.archive.missing'].replace('{count}', '1'))).toBeTruthy()
+    expect(within(dialog).getByText(zh['targets.archive.failed'].replace('{count}', '1'))).toBeTruthy()
+    expect(within(dialog).getByText(/reply/)).toBeTruthy()
+    expect(within(dialog).getByText(/当前回复/)).toBeTruthy()
+    expect(
+      within(dialog).getByText(zh['targets.archive.truncated'].replace('{count}', '42').replace('{processed}', '6')),
+    ).toBeTruthy()
+    expect(within(dialog).getByText(zh['targets.archive.rotated'])).toBeTruthy()
+    expect(within(dialog).getByRole('button', { name: zh['targets.archive.close'] })).toBeTruthy()
+    await waitFor(() => expect(requestCount(view.fetchMock, 'GET', 'targets')).toBe(targetsLoads + 1))
+  })
+
+  it('reports the unchanged reply session when no rotation happened', async () => {
+    const user = userEvent.setup()
+    renderTargets(handler({ targets: readyTargets(), archive: () => reply(200, archiveResult()) }))
+    expect(await screen.findByText(workspacePath)).toBeTruthy()
+    const dialog = await openArchiveDialog(user)
+    await user.click(within(dialog).getByRole('button', { name: zh['targets.archive.confirm'] }))
+    expect(await within(dialog).findByText(zh['targets.archive.notRotated'])).toBeTruthy()
+  })
+
+  const archiveFailures = [
+    [400, 'per_conversation_workspace', zh['errors.archivePerConversation']],
+    [404, 'unknown_target', zh['errors.archiveUnknownTarget']],
+    [503, 'state_unavailable', zh['errors.archiveUnavailable']],
+    [409, 'conflict', zh['errors.refused'].replace('{code}', 'conflict')],
+  ] as const
+
+  it.each(archiveFailures)('maps the %i %s failure onto localized copy', async (status, code, message) => {
+    const user = userEvent.setup()
+    renderTargets(handler({ targets: readyTargets(), archive: () => failure(status, code) }))
+    expect(await screen.findByText(workspacePath)).toBeTruthy()
+    const dialog = await openArchiveDialog(user)
+    await user.click(within(dialog).getByRole('button', { name: zh['targets.archive.confirm'] }))
+    expect(await within(dialog).findByText(zh['targets.archive.error'].replace('{message}', message))).toBeTruthy()
+    expect(within(dialog).getByRole('button', { name: zh['targets.archive.confirm'] })).toBeTruthy()
+  })
+
+  it('keeps the dialog open and succeeds on a retry after a failure', async () => {
+    const user = userEvent.setup()
+    let attempts = 0
+    const view = renderTargets(
+      handler({
+        targets: readyTargets(),
+        archive: () => {
+          attempts += 1
+          return attempts === 1 ? failure(503, 'state_unavailable') : reply(200, archiveResult())
+        },
+      }),
+    )
+    expect(await screen.findByText(workspacePath)).toBeTruthy()
+    const dialog = await openArchiveDialog(user)
+    await user.click(within(dialog).getByRole('button', { name: zh['targets.archive.confirm'] }))
+    expect(
+      await within(dialog).findByText(
+        zh['targets.archive.error'].replace('{message}', zh['errors.archiveUnavailable']),
+      ),
+    ).toBeTruthy()
+    await user.click(within(dialog).getByRole('button', { name: zh['targets.archive.confirm'] }))
+    expect(await within(dialog).findByText(zh['targets.archive.resultTitle'])).toBeTruthy()
+    expect(requestBodies(view.fetchMock, 'POST', archiveRoute('group-1'))).toHaveLength(2)
+  })
+
+  it('closes with Escape and clears the stop switch and previous result', async () => {
+    const user = userEvent.setup()
+    renderTargets(handler({ targets: readyTargets() }))
+    expect(await screen.findByText(workspacePath)).toBeTruthy()
+    let dialog = await openArchiveDialog(user)
+    await user.click(within(dialog).getByRole('switch', { name: zh['targets.archive.stopActivity'] }))
+    expect(
+      within(dialog).getByRole('switch', { name: zh['targets.archive.stopActivity'] }).getAttribute('aria-checked'),
+    ).toBe('true')
+    await user.click(within(dialog).getByRole('button', { name: zh['targets.archive.confirm'] }))
+    expect(await within(dialog).findByText(zh['targets.archive.resultTitle'])).toBeTruthy()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    dialog = await openArchiveDialog(user)
+    expect(within(dialog).queryByText(zh['targets.archive.resultTitle'])).toBeNull()
+    expect(
+      within(dialog).getByRole('switch', { name: zh['targets.archive.stopActivity'] }).getAttribute('aria-checked'),
+    ).toBe('false')
+  })
+
+  it('disables both dialog buttons and shows pending copy while the request is in flight', async () => {
+    const user = userEvent.setup()
+    const view = renderTargets(handler({ targets: readyTargets() }))
+    expect(await screen.findByText(workspacePath)).toBeTruthy()
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const original = view.fetchMock.getMockImplementation()
+    expect(original).toBeDefined()
+    view.fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(String(input), 'http://127.0.0.1')
+      if ((init?.method ?? 'GET') === 'POST' && pathOf(url).endsWith('/archive-sessions')) await gate
+      return original!(input, init)
+    })
+    const dialog = await openArchiveDialog(user)
+    await user.click(within(dialog).getByRole('button', { name: zh['targets.archive.confirm'] }))
+    const pending = await within(dialog).findByRole('button', { name: zh['targets.archive.pending'] })
+    expect((pending as HTMLButtonElement).disabled).toBe(true)
+    expect(
+      (within(dialog).getByRole('button', { name: zh['targets.archive.cancel'] }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    release()
+    expect(await within(dialog).findByText(zh['targets.archive.resultTitle'])).toBeTruthy()
   })
 })

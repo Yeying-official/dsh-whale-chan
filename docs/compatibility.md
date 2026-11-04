@@ -1,23 +1,23 @@
 # 兼容矩阵
 
-> 适用范围：`dsh-whale-chan-assistant` `0.4.0`（WS0–WS14 完成；Windows 真机 T0–T4 由 v0.1.0 完成，v0.2.0 工作区做 T3/T4 复验，v0.3.0 人设默认/预设做重载核对，**v0.4.0 做发布后定向真机验活（归档 → 下一条消息）通过，完整 T3/T4 未重跑**）。
+> 适用范围：`dsh-whale-chan-assistant` `0.5.0`（WS0–WS15 完成；Windows 真机 T0–T4 由 v0.1.0 完成，v0.2.0 工作区做 T3/T4 复验，v0.3.0 人设默认/预设做重载核对，v0.4.0 做发布后定向真机验活（归档 → 下一条消息），**v0.5.0 的订阅/收发链路尚未真机验收**）。
 > 最后核对：2026-11-04（Asia/Shanghai）。
 >
 > **权威顺序**：`package.json` 的 `dsh.compatibility` 与 WS8 的 T0–T4 记录 > 本文 > 其它说明。本文中的“已验证”只表示在本机 Windows 环境实际跑过，不表示在所有同版本环境都成立。
 
 ## 1. 结论
 
-| 组件          | 已验证                                                                                                                                                                     | 状态                                                                                                                                                                                                                                                                                                                                                             |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| DSH Desktop   | `0.2.1-rc.5`（Windows x64）                                                                                                                                                | **compatible**，`dsh.compatibility` 正式声明                                                                                                                                                                                                                                                                                                                     |
-| DSH 其它版本  | 无                                                                                                                                                                         | 未验证；不要假设向前/向后兼容                                                                                                                                                                                                                                                                                                                                    |
-| `dws`         | `1.0.66`（`f215043e`，2026-10-28）                                                                                                                                         | 群事件/发送回执已真机确认；单聊与其它版本仍 provisional                                                                                                                                                                                                                                                                                                          |
-| Windows       | 10/11                                                                                                                                                                      | 已实测（开发机与桌面端）                                                                                                                                                                                                                                                                                                                                         |
-| 真机验收      | T0–T4（Windows 10/11、DSH `0.2.1-rc.5`、`dws` `1.0.66`）+ v0.2.0 工作区复验 + v0.3.0 人设默认/预设核对 + **v0.4.0 发布后定向验活（归档 → 下一条消息）**；完整 T3/T4 未重跑 | 归档链路定向通过：面板归档 3 / 原本已归档 2 / 0 拒绝 / 0 失败、generation 1→2、下一条群消息新建 g2 并回复；`stopActivity`、worker 归档、手动移除工作区、单聊、多目标未真机。见 [WS8](test-reports/WS8-live.md)、[WS9/WS10](test-reports/WS9-10.md)、[WS12](test-reports/WS12-persona.md)、[WS14](test-reports/WS14.md) 与 [WS14-live](test-reports/WS14-live.md) |
-| macOS / Linux | 无                                                                                                                                                                         | **未验证**，不作为支持承诺                                                                                                                                                                                                                                                                                                                                       |
-| Node.js       | 24.15.0（开发）、24.21.0（DSH Desktop 自带）                                                                                                                               | 已实测；`engines` 允许 `^22.19.0 \|\| >=24.0.0`                                                                                                                                                                                                                                                                                                                  |
-| 单实例        | 同一 `stateDir` 一个进程                                                                                                                                                   | 已实现并由测试覆盖；崩溃后锁 stale 10 秒                                                                                                                                                                                                                                                                                                                         |
-| 模型路由      | 宿主默认；或按回复器/执行器分别指定 provider + model + effort                                                                                                              | 代码路径已测；未逐一验证所有 provider                                                                                                                                                                                                                                                                                                                            |
+| 组件          | 已验证                                                                                                                                                                 | 状态                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| DSH Desktop   | `0.2.1-rc.5`（Windows x64）                                                                                                                                            | **compatible**，`dsh.compatibility` 正式声明                                                                                                                                                                                                                                                                                                                                                |
+| DSH 其它版本  | 无                                                                                                                                                                     | 未验证；不要假设向前/向后兼容                                                                                                                                                                                                                                                                                                                                                               |
+| `dws`         | `1.0.66`（`f215043e`，2026-10-28）                                                                                                                                     | 群事件/发送回执已真机确认；**单聊链路（联系人发现、`open:` 出站、服务端拒绝）v0.5.0 已修复但未真机验收**；其它版本仍 provisional                                                                                                                                                                                                                                                            |
+| Windows       | 10/11                                                                                                                                                                  | 已实测（开发机与桌面端）                                                                                                                                                                                                                                                                                                                                                                    |
+| 真机验收      | T0–T4（Windows 10/11、DSH `0.2.1-rc.5`、`dws` `1.0.66`）+ v0.2.0 工作区复验 + v0.3.0 人设默认/预设核对 + **v0.4.0 发布后定向验活（归档 → 下一条消息）**；v0.5.0 未验收 | v0.4.0 归档链路定向通过：面板归档 3 / 原本已归档 2 / 0 拒绝 / 0 失败、generation 1→2、下一条群消息新建 g2 并回复。**v0.5.0 的订阅/单聊修复只有单测与假 `dws` 夹具证据**。见 [WS8](test-reports/WS8-live.md)、[WS9/WS10](test-reports/WS9-10.md)、[WS12](test-reports/WS12-persona.md)、[WS14](test-reports/WS14.md)、[WS14-live](test-reports/WS14-live.md) 与 [WS15](test-reports/WS15.md) |
+| macOS / Linux | 无                                                                                                                                                                     | **未验证**，不作为支持承诺                                                                                                                                                                                                                                                                                                                                                                  |
+| Node.js       | 24.15.0（开发）、24.21.0（DSH Desktop 自带）                                                                                                                           | 已实测；`engines` 允许 `^22.19.0 \|\| >=24.0.0`                                                                                                                                                                                                                                                                                                                                             |
+| 单实例        | 同一 `stateDir` 一个进程                                                                                                                                               | 已实现并由测试覆盖；崩溃后锁 stale 10 秒                                                                                                                                                                                                                                                                                                                                                    |
+| 模型路由      | 宿主默认；或按回复器/执行器分别指定 provider + model + effort                                                                                                          | 代码路径已测；未逐一验证所有 provider                                                                                                                                                                                                                                                                                                                                                       |
 
 ## 2. DSH 版本
 
@@ -41,7 +41,7 @@
 3. 按 [012 发布](012-release.md) 的 T0–T4 重新验收；
 4. 确认 `state.db` schema 没有被新宿主改写；降级时不要用新库打开旧插件。
 
-`0.3.0` 只改人设默认值与只读预设投影，`0.4.0` 只增加会话归档与会话/工作区恢复，**都不改变 DSH 兼容声明**：`engines.dsh` 仍是 `^0.2.1-rc.5`，`dsh.compatibility` 仍只标记 `0.2.1-rc.5`，`state.db` schema 仍是 2。因此本节的 DSH 版本结论与 v0.2.0 相同，没有“必须升级宿主”的要求。0.4.0 依赖 DSH 已有的归档闸门与 workspace registry 行为（`archivedSessionIds`、`archiveSession`、`list`、`attachSession`），这些在 `0.2.1-rc.5` 上存在；其它 rc 版本需要重新核对后再声明。
+`0.3.0` 只改人设默认值与只读预设投影，`0.4.0` 只增加会话归档与会话/工作区恢复，`0.5.0` 只修目标订阅与增加只读的订阅健康接口，**都不改变 DSH 兼容声明**：`engines.dsh` 仍是 `^0.2.1-rc.5`，`dsh.compatibility` 仍只标记 `0.2.1-rc.5`，`state.db` schema 仍是 2。因此本节的 DSH 版本结论与 v0.2.0 相同，没有“必须升级宿主”的要求。0.4.0 依赖 DSH 已有的归档闸门与 workspace registry 行为（`archivedSessionIds`、`archiveSession`、`list`、`attachSession`），这些在 `0.2.1-rc.5` 上存在；0.5.0 只用到已有的 HTTP 路由与 `session/event` 之外的通道能力，不新增宿主依赖。其它 rc 版本需要重新核对后再声明。
 
 ## 3. `dws` 版本
 
@@ -53,7 +53,8 @@
 
 WS8 已在 Windows + `1.0.66` 上确认：群事件键与 snake_case 扁平字段（`message_id`、`conversation_id`、`sender_open_dingtalk_id`、`content`、`event_time`、`create_time`）、`@ownerNick` 文本判定、`+chat-search`、`--ttl` 需 Go duration、非交互发送需 `--yes`、`openMessageId`/`deliveryStatus` 回执，以及重复幂等键返回 `CONFLICT_ERROR` 时按 `unknown` 处理。以下内容仍 provisional，真机 T1/T2 必须逐项核对（详见 [009 DWS 协议](009-dws-protocol.md) §9）：
 
-- 单聊（o2o）事件链路，以及 `+chat-list --types p2p` 的响应结构与分页；
+- 单聊（o2o）订阅与出站链路：v0.5.0 已按“事件只带 `sender_open_dingtalk_id` → 发送走 `--open-dingtalk-id`”修好，并用 `contact user search` 代替 `+chat-list --types p2p` 发现联系人；**尚未在真实账号上跑通**，`o2o` 事件键的 ready 也未实测；
+- `contact user search --format json` 的字段形状只在一次排查中实测（含 `userId`/`openDingTalkId`），同名/重名与分页未验证；
 - `auth status --format json` 的账号 id 字段别名与过期时间格式（T0 只用 `user_name` 做 ownerNick）；
 - Windows 上关闭 stdin 能否优雅结束订阅，以及 `event stop <id> --yes` 的实际语法；
 - `--profile` 在 `event consume` / `auth status` / `send` 上的位置；
@@ -101,16 +102,25 @@ WS8 已在 Windows + `1.0.66` 上确认：群事件键与 snake_case 扁平字�
 - **归档不删数据**：目录、文件与会话日志保留，不提供 unarchive；在 DSH 手动 unarchive 旧会话不会回退 generation，旧上下文不会自动恢复。
 - **定向真机验活（2026-11-04）**：归档后的 `ArchivedSessionGate` 行为已真机确认——归档当前回复器后，下一条群消息创建新会话并正常回复，旧会话目录保留；证据见 [WS14-live](test-reports/WS14-live.md)。仍未真机覆盖：`stopActivity=true` 的真实取消、任务 worker 归档、DSH 手动移除工作区后的重建/attach、单聊、多目标并发、Windows symlink/realpath（仅 fake 覆盖）；完整 T3/T4 未重跑；macOS/Linux 未验证。自动化限制见 [WS14 报告](test-reports/WS14.md) §7。
 
+### 5.4 目标订阅与单聊修复（v0.5.0）
+
+- **不改变存储**：`state.db` schema 仍为 2，设置仍 9 个 block / 57 个字段，没有新表、新列或迁移；`GET channel` 是只读投影，不落库。
+- **`dm` 目标 id 的形态变了**：只接受对端 `userId` 或 `open:<openDingtalkId>`；`cid…=`（会话 ID）在本地即判 `invalid-target`。v0.4.0 及更早通过「单聊」发现写入的会话 ID 行，升级后订阅不会建立，必须改填——这是行为变更，不是数据迁移。
+- **`mentionOnly` 从“存了但没用”变成生效**：群消息在目标行或全局 `reply.requireMentionInGroups` 任一为真时要求 @。原本靠“全局关闭 + 行内 true”回复全部群消息的配置，升级后只回 @ 消息；把行内开关关掉即可恢复。
+- **订阅失败不再静默**：服务端拒绝被记进 `lastError`（脱敏、单行），`GET channel` 与目标页「订阅」列可见；连续 3 次无 `retry_after_seconds` 的拒绝会停止自动重启（`state=failed`），不再无限重试。
+- **未真机验收（诚实标注）**：以上行为都由单元测试与假 `dws` 夹具覆盖（63 files / 880 tests），**没有**在真实账号上验收。`at-me` 订阅本身曾在修复前以 `--ephemeral` 探测到 ready；`at-me`+`group` 同群去重、单聊订阅与单聊出站回复仍未真机确认。真机清单见 [012 发布](012-release.md) §6 与 [WS15 报告](test-reports/WS15.md)。
+- **回退**：回到 v0.4.0 可打开同一个库；`GET channel` 消失、`mentionOnly` 重新失效、单聊发现重新产出会话 ID 候选，但已改正的 `userId`/`open:<id>` 目标仍然可用。
+
 ## 6. 兼容性判定流程
 
 任何“支持某版本”的声明都必须留下证据：
 
 1. **静态门禁**：`pnpm check`、`pnpm format:check`、`node scripts/check-pack.mjs` 全绿；
-2. **安装**：在干净 profile 或干净机器上安装本地 bundle，重启后侧栏出现「DSH助理」，`GET /whale-chan/api/state` 200；「目标」页工作区块显示启用目标的目录（或「按会话创建」）；v0.4.0 起 `ready` 行还应有「归档会话」按钮，`per-conversation` 行没有；
+2. **安装**：在干净 profile 或干净机器上安装本地 bundle，重启后侧栏出现「DSH助理」，`GET /whale-chan/api/state` 200 且版本 `0.5.0`；「目标」页工作区块显示启用目标的目录（或「按会话创建」），`ready` 行还应有「归档会话」按钮、`per-conversation` 行没有；目标表右侧应有只读「订阅」列（`GET channel` 不可用时退化为提示条）；
 3. **T0 只读**：`dws --version`、`dws auth status --format json` 的布尔字段；不订阅、不发送；
-4. **T1 观察**：测试群订阅 + `dryRun`，确认事件解码、去重、断线重连、`unknown` 不重发；
-5. **T2 单条**：面板确认后向测试群发一条，确认 AI 角标、幂等键、回执；
-6. **T3 全链路**：@我 → 分类 → 回复/任务 → 面板批准 → worker 会话 → 结果回帖；
-7. 把版本、命令、输出摘要与截图写入对应的 `docs/test-reports/WSxx.md`（真机链路见 [WS8](test-reports/WS8-live.md)、工作区见 [WS9/WS10](test-reports/WS9-10.md)、归档/恢复见 [WS14](test-reports/WS14.md)），再更新本文与 `dsh.compatibility`。
+4. **T1 观察**：测试群订阅 + `dryRun`，确认事件解码、去重、断线重连、`unknown` 不重发；v0.5.0 起还要确认单聊订阅（`contact user search` 发现 → 保存 → `GET channel` 显示 `ready`）；
+5. **T2 单条**：面板确认后向测试群发一条，确认 AI 角标、幂等键、回执；单聊回复要额外确认它走的是 `--open-dingtalk-id`（`lastError` 不应出现“用户无法解析”）；
+6. **T3 全链路**：@我 → 分类 → 回复/任务 → 面板批准 → worker 会话 → 结果回帖；`at-me` 与群目标同订一群时确认普通消息按群行、@ 消息按 at-me 行；
+7. 把版本、命令、输出摘要与截图写入对应的 `docs/test-reports/WSxx.md`（真机链路见 [WS8](test-reports/WS8-live.md)、工作区见 [WS9/WS10](test-reports/WS9-10.md)、归档/恢复见 [WS14](test-reports/WS14.md)、订阅/单聊见 [WS15](test-reports/WS15.md)），再更新本文与 `dsh.compatibility`。
 
 未走完上述流程的版本，一律写“未验证”，不要写“应该可以”。

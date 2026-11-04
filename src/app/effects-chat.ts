@@ -129,7 +129,12 @@ function degraded(query: string, includeCitations: boolean, reason: ResearchResu
 
 /** Map the channel's normalized thread key from an outbound target. */
 export function threadKeyOf(target: OutboundTarget): string {
-  if (target.kind === 'dm') return `dm:${target.peerUserId ?? target.conversationId}`
+  if (target.kind === 'dm') {
+    // `open:` is the send-only spelling of the peer; the thread key uses the
+    // bare id, so counters and the loop guard see one conversation.
+    const peer = target.peerUserId?.replace(/^open:/u, '')
+    return `dm:${peer === undefined || peer === '' ? target.conversationId : peer}`
+  }
   return `group:${target.conversationId}`
 }
 

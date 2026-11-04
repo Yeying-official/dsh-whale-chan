@@ -10,7 +10,7 @@
  * - `auth status --format json`
  * - `event consume <key> --flatten -f ndjson --ttl <hours>h [--group|--user|--open-dingtalk-id]`
  * - `chat +chat-search --query <q> --limit <n>`
- * - `chat +chat-list --types p2p --page-size <n>`
+ * - `contact user search --query <q> --format json`
  * - `chat +messages-send ... --markdown <text>`
  *
  * Env knobs:
@@ -23,8 +23,11 @@
  * - FAKE_DWS_EXIT             exit code after events (simulated crash)
  * - FAKE_DWS_SIGTERM_DELAY_MS delay before exiting after SIGTERM (orphan test)
  * - FAKE_DWS_TRACE            JSONL trace file: start/ready/signal/exit phases
- * - FAKE_DWS_CHATS            JSON file {groups: [], peers: []}
+ * - FAKE_DWS_CHATS            JSON file {groups: []}
  * - FAKE_DWS_CHATS_MODE       "text" to print a non-JSON banner instead of JSON
+ * - FAKE_DWS_CONTACTS         JSON file {result: []} (or a bare array); defaults to a stable fixture
+ * - FAKE_DWS_CONTACTS_MODE    "text" to print a non-JSON banner instead of JSON
+ * - FAKE_DWS_CONTACT_EXIT     exit code for `contact user search`
  * - FAKE_DWS_LEDGER           JSONL file receiving every +messages-send argv
  * - FAKE_DWS_SEND_RESULT      sent | unknown | failed | gone (default sent)
  * - FAKE_DWS_SEND_SLEEP_MS    hang time for "unknown" (default 60000)
@@ -261,7 +264,6 @@ function chatData() {
   const payload = readJsonEnv('FAKE_DWS_CHATS') ?? {}
   return {
     groups: Array.isArray(payload.groups) ? payload.groups : Array.isArray(payload.chats) ? payload.chats : [],
-    peers: Array.isArray(payload.peers) ? payload.peers : [],
   }
 }
 
@@ -289,17 +291,46 @@ function runSearch(args) {
   process.exit(0)
 }
 
-function runList(args) {
-  chatFailure()
-  if (process.env.FAKE_DWS_CHATS_MODE === 'text') {
+/**
+ * Stable contact fixture used when a test does not supply FAKE_DWS_CONTACTS.
+ *
+ * Mirrors the observed `{result: [...]}` shape: some contacts expose both ids,
+ * one exposes only the open id. `title` is present but unrelated to discovery.
+ */
+const DEFAULT_CONTACTS = [
+  { name: 'Alice', nick: 'Alice W.', openDingTalkId: 'DO2-fake-1', userId: '260111', title: '' },
+  { name: 'Bob', nick: 'Bob', openDingTalkId: 'DO2-fake-2', userId: '260112', title: '' },
+  { name: 'Carol', nick: 'Carol', openDingTalkId: 'DO2-fake-3', title: '' },
+]
+
+function contactData() {
+  const payload = readJsonEnv('FAKE_DWS_CONTACTS')
+  if (Array.isArray(payload)) return payload
+  if (Array.isArray(payload?.result)) return payload.result
+  return DEFAULT_CONTACTS
+}
+
+function contactFailure() {
+  const exitCode = Number(process.env.FAKE_DWS_CONTACT_EXIT ?? 0)
+  if (Number.isFinite(exitCode) && exitCode !== 0) {
+    console.error('fake-dws: contact command failed')
+    process.exit(exitCode)
+  }
+}
+
+function runContactSearch(args) {
+  contactFailure()
+  if (process.env.FAKE_DWS_CONTACTS_MODE === 'text') {
     print('not a json document')
     process.exit(0)
   }
-  const size = Number(flagValue(args, '--page-size') ?? 50)
-  const { peers } = chatData()
-  const types = flagValue(args, '--types')
-  const chats = types && !types.includes('p2p') ? [] : peers.slice(0, Number.isFinite(size) && size > 0 ? size : 50)
-  print({ chats, hasMore: false })
+  const query = (flagValue(args, '--query') ?? '').toLowerCase()
+  const result = contactData().filter((item) => {
+    const name = typeof item?.name === 'string' ? item.name.toLowerCase() : ''
+    const nick = typeof item?.nick === 'string' ? item.nick.toLowerCase() : ''
+    return name.includes(query) || nick.includes(query)
+  })
+  print({ result })
   process.exit(0)
 }
 
@@ -334,10 +365,10 @@ async function main() {
   }
   if (first === 'auth' && args[1] === 'status') return runAuthStatus()
   if (first === 'event' && args[1] === 'consume') return runConsume(args)
+  if (first === 'contact' && args[1] === 'user' && args[2] === 'search') return runContactSearch(args)
   if (first === 'chat') {
     const command = args[1]
     if (command === '+chat-search') return runSearch(args)
-    if (command === '+chat-list') return runList(args)
     if (command === '+messages-send') return runSend(args)
   }
 

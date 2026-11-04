@@ -56,11 +56,25 @@ export interface PeerAddress {
 }
 
 /**
+ * A conversation id (`cid...=`) addresses a chat, not a person.
+ *
+ * `event consume ... --open-dingtalk-id <conversation id>` is rejected by the
+ * server (`subscribeUser failed`), so a dm target carrying one is refused here
+ * with an actionable message instead of failing at subscribe time. A
+ * one-to-one target must use the peer's `userId` or `openDingTalkId` instead.
+ */
+const CONVERSATION_ID = /^cid[^:]*=*$/i
+
+const CONVERSATION_ID_ERROR =
+  'a conversation id cannot address a one-to-one target; use the peer userId or open:<openDingtalkId>'
+
+/**
  * Interpret a dm target id.
  *
  * A plain id is a `userId` (the contract's `--user`); the `open:` prefix marks an
  * `openDingTalkId` for `--open-dingtalk-id`, because a bare open id and a bare
  * user id cannot be told apart and guessing would send to the wrong person.
+ * Conversation ids are refused up front: they name a chat, not a person.
  */
 export function parsePeerAddress(id: string): PeerAddress {
   const trimmed = id.trim()
@@ -68,8 +82,10 @@ export function parsePeerAddress(id: string): PeerAddress {
   if (trimmed.startsWith('open:')) {
     const value = trimmed.slice('open:'.length).trim()
     if (value === '') throw new ChannelError('invalid-target', 'open target id is empty')
+    if (CONVERSATION_ID.test(value)) throw new ChannelError('invalid-target', CONVERSATION_ID_ERROR)
     return { flag: '--open-dingtalk-id', value }
   }
+  if (CONVERSATION_ID.test(trimmed)) throw new ChannelError('invalid-target', CONVERSATION_ID_ERROR)
   return { flag: '--user', value: trimmed }
 }
 

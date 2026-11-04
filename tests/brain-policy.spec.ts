@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { gateReply, isQuietHour } from '../src/brain/policy.ts'
-import { makeGateInput, makeTarget, localTime, settingsWithTarget } from './fixtures/brain.ts'
+import type { GateInput } from '../src/brain/types.ts'
+import type { Settings } from '../src/shared/settings.ts'
+import { makeGateInput, makeSettings, makeTarget, localTime, settingsWithTarget } from './fixtures/brain.ts'
 
 describe('gateReply', () => {
   it('allows an automatic reply to an ordinary direct message', () => {
@@ -73,14 +75,19 @@ describe('gateReply', () => {
 
   it('requires a mention in groups unless the owner turned that off', () => {
     const settings = settingsWithTarget()
-    const unaddressed = makeGateInput({ settings, message: { conversationType: 'group' } })
+    const unaddressed = makeGateInput({ settings, message: { kind: 'group', conversationType: 'group' } })
     expect(gateReply(unaddressed)).toEqual({ act: false, reason: 'not_addressed' })
 
-    const addressed = makeGateInput({ settings, message: { conversationType: 'group', addressed: true } })
+    const addressed = makeGateInput({
+      settings,
+      message: { kind: 'group', conversationType: 'group', addressed: true },
+    })
     expect(gateReply(addressed)).toEqual({ act: true, mode: 'auto', reason: 'allowed' })
 
-    const lenient = settingsWithTarget({ reply: { requireMentionInGroups: false } })
-    expect(gateReply(makeGateInput({ settings: lenient, message: { conversationType: 'group' } }))).toEqual({
+    const lenient = settingsWithTarget({ reply: { requireMentionInGroups: false } }, { mentionOnly: false })
+    expect(
+      gateReply(makeGateInput({ settings: lenient, message: { kind: 'group', conversationType: 'group' } })),
+    ).toEqual({
       act: true,
       mode: 'auto',
       reason: 'allowed',
@@ -248,5 +255,147 @@ describe('target rows', () => {
       reason: 'allowed',
     })
     expect(makeTarget({ id: 'group-42' }).id).toBe('group-42')
+  })
+})
+
+describe('group addressing and target selection', () => {
+  function groupInput(settings: Settings, addressed = false): GateInput {
+    return makeGateInput({
+      settings,
+      thread: { key: 'group:cid-1', targetId: 'target-1', kind: 'group' },
+      message: { kind: 'group', conversationType: 'group', addressed },
+    })
+  }
+
+  it('uses the conversation row instead of the at-me row for a group thread', () => {
+    const settings = makeSettings({
+      targets: {
+        rows: [
+          makeTarget({ kind: 'group', id: 'cid-1' }),
+          makeTarget({ kind: 'at-me', id: 'at-me-1', enabled: false }),
+        ],
+      },
+    })
+    // The at-me subscription created the thread; the group message that follows
+    // must be governed by the conversation's own row, not by that at-me row.
+    const input = makeGateInput({
+      settings,
+      thread: { key: 'group:cid-1', targetId: 'at-me-1', kind: 'at-me' },
+      message: { kind: 'group', conversationType: 'group' },
+    })
+    // The at-me row would answer `target_disabled`; the group row is what
+    // governs the conversation, so its mention requirement fires first.
+    expect(gateReply(input)).toEqual({ act: false, reason: 'not_addressed' })
+    expect(gateReply({ ...input, message: { ...input.message, addressed: true } })).toEqual({
+      act: true,
+      mode: 'auto',
+      reason: 'allowed',
+    })
+  })
+
+  it('keeps an at-me message on the at-me row when the group row is disabled', () => {
+    const settings = makeSettings({
+      targets: {
+        rows: [
+          makeTarget({ kind: 'at-me', id: 'at-me-1', enabled: true }),
+          makeTarget({ kind: 'group', id: 'cid-1', enabled: false }),
+        ],
+      },
+    })
+    // The owner enabled the at-me subscription and disabled the group one: a
+    // mention must still be answered.
+    expect(
+      gateReply(
+        makeGateInput({
+          settings,
+          thread: { key: 'group:cid-1', targetId: 'at-me-1', kind: 'at-me' },
+          message: { kind: 'at-me', conversationType: 'group', addressed: true },
+        }),
+      ),
+    ).toEqual({ act: true, mode: 'auto', reason: 'allowed' })
+  })
+
+  it('lets a disabled at-me row refuse a mention even when the group row is enabled', () => {
+    const settings = makeSettings({
+      targets: {
+        rows: [
+          makeTarget({ kind: 'at-me', id: 'at-me-1', enabled: false }),
+          makeTarget({ kind: 'group', id: 'cid-1' }),
+        ],
+      },
+    })
+    expect(
+      gateReply(
+        makeGateInput({
+          settings,
+          thread: { key: 'group:cid-1', targetId: 'at-me-1', kind: 'at-me' },
+          message: { kind: 'at-me', conversationType: 'group', addressed: true },
+        }),
+      ),
+    ).toEqual({ act: false, reason: 'target_disabled' })
+  })
+
+  it('falls back to the conversation row for a mention when no at-me row exists', () => {
+    const settings = makeSettings({
+      targets: { rows: [makeTarget({ kind: 'group', id: 'cid-1', enabled: false })] },
+    })
+    expect(
+      gateReply(
+        makeGateInput({
+          settings,
+          thread: { key: 'group:cid-1', targetId: 'at-me-1', kind: 'at-me' },
+          message: { kind: 'at-me', conversationType: 'group', addressed: true },
+        }),
+      ),
+    ).toEqual({ act: false, reason: 'target_disabled' })
+  })
+
+  it('falls back to the row that created the thread when no group row matches', () => {
+    const settings = makeSettings({
+      targets: { rows: [makeTarget({ kind: 'at-me', id: 'at-me-1', enabled: false })] },
+    })
+    expect(
+      gateReply(
+        makeGateInput({
+          settings,
+          thread: { key: 'group:cid-1', targetId: 'at-me-1', kind: 'at-me' },
+          message: { kind: 'group', conversationType: 'group', addressed: true },
+        }),
+      ),
+    ).toEqual({ act: false, reason: 'target_disabled' })
+  })
+
+  it('requires a mention when either the target or the global switch asks for one', () => {
+    const groupRow = makeTarget({ kind: 'group', id: 'cid-1', mentionOnly: false })
+    const globalOn = makeSettings({
+      targets: { rows: [groupRow] },
+      reply: { requireMentionInGroups: true },
+    })
+    expect(gateReply(groupInput(globalOn))).toEqual({ act: false, reason: 'not_addressed' })
+
+    const bothOff = makeSettings({
+      targets: { rows: [groupRow] },
+      reply: { requireMentionInGroups: false },
+    })
+    expect(gateReply(groupInput(bothOff))).toEqual({ act: true, mode: 'auto', reason: 'allowed' })
+
+    // A target that turns its own switch on still requires the mention even
+    // when the global default is off.
+    const targetOn = makeSettings({
+      targets: { rows: [makeTarget({ kind: 'group', id: 'cid-1', mentionOnly: true })] },
+      reply: { requireMentionInGroups: false },
+    })
+    expect(gateReply(groupInput(targetOn))).toEqual({ act: false, reason: 'not_addressed' })
+  })
+
+  it('does not apply group addressing to a direct message', () => {
+    const settings = makeSettings({
+      targets: { rows: [makeTarget({ kind: 'dm', id: 'target-1', mentionOnly: true })] },
+    })
+    expect(gateReply(makeGateInput({ settings, message: { conversationType: 'direct', addressed: false } }))).toEqual({
+      act: true,
+      mode: 'auto',
+      reason: 'allowed',
+    })
   })
 })

@@ -1,6 +1,6 @@
 # 002 授权与回复策略
 
-> 当前状态：WS3 已实现回复策略（`src/brain/policy.ts`、`rate-limit.ts`、`loop-guard.ts`）。
+> 当前状态：WS3 已实现回复策略（`src/brain/policy.ts`、`rate-limit.ts`、`loop-guard.ts`）；WS15 让目标行的 `mentionOnly` 真正参与判定，并按消息来源解析目标行（见 §6.1）。
 > 本文说明“一条消息什么时候可以被回复、以什么方式回复”，以及为什么它**不授予**任何
 > 任务执行权。任务批准见 [003 执行](003-execution.md)，发送与 AI 角标见
 > [010 设计摘要](010-design.md) §2。
@@ -22,24 +22,24 @@
 
 ## 2. 判定顺序（先硬后软，后者不能放宽前者）
 
-| 序号 | 条件                                                  | 结果     | reason               |
-| ---- | ----------------------------------------------------- | -------- | -------------------- |
-| 1    | `monitor.enabled = false`                             | `off`    | `monitor_disabled`   |
-| 2    | `monitor.paused = true`                               | `off`    | `monitor_paused`     |
-| 3    | 目标不在 `targets.rows` 中                            | `off`    | `target_missing`     |
-| 4    | 目标 `enabled = false`                                | `off`    | `target_disabled`    |
-| 5    | 目标 `replyMode = 'off'`                              | `off`    | `target_off`         |
-| 6    | 发送者 userId 在 `reply.blockedSenders`               | `off`    | `sender_blocked`     |
-| 7    | `allowedSenders` 非空且发送者 userId 不在其中         | `off`    | `sender_not_allowed` |
-| 8    | 群聊、`requireMentionInGroups`、且未 @ 助理           | `off`    | `not_addressed`      |
-| 9    | `ignoreBroadcast` 且消息是广播                        | `off`    | `broadcast`          |
-| 10   | 连续 AI 回复达到 3 条                                 | `off`    | `loop_guard`         |
-| 11   | 静默时段且 `replyDuringQuiet = false`                 | `review` | `quiet_hours`        |
-| 12   | `reply.autoReply = false`                             | `review` | `auto_reply_off`     |
-| 13   | 本会话最近 1 小时回复数 ≥ `maxPerConversationPerHour` | `review` | `rate_limited`       |
-| 14   | 距上一条回复 < `minGapSeconds`                        | `review` | `min_gap`            |
-| 15   | 目标 `replyMode = 'review'`                           | `review` | `target_review`      |
-| 16   | 其余                                                  | `auto`   | `allowed`            |
+| 序号 | 条件                                                                        | 结果     | reason               |
+| ---- | --------------------------------------------------------------------------- | -------- | -------------------- |
+| 1    | `monitor.enabled = false`                                                   | `off`    | `monitor_disabled`   |
+| 2    | `monitor.paused = true`                                                     | `off`    | `monitor_paused`     |
+| 3    | 目标不在 `targets.rows` 中                                                  | `off`    | `target_missing`     |
+| 4    | 目标 `enabled = false`                                                      | `off`    | `target_disabled`    |
+| 5    | 目标 `replyMode = 'off'`                                                    | `off`    | `target_off`         |
+| 6    | 发送者 userId 在 `reply.blockedSenders`                                     | `off`    | `sender_blocked`     |
+| 7    | `allowedSenders` 非空且发送者 userId 不在其中                               | `off`    | `sender_not_allowed` |
+| 8    | 群聊、且（目标 `mentionOnly` **或** `requireMentionInGroups`）、且未 @ 助理 | `off`    | `not_addressed`      |
+| 9    | `ignoreBroadcast` 且消息是广播                                              | `off`    | `broadcast`          |
+| 10   | 连续 AI 回复达到 3 条                                                       | `off`    | `loop_guard`         |
+| 11   | 静默时段且 `replyDuringQuiet = false`                                       | `review` | `quiet_hours`        |
+| 12   | `reply.autoReply = false`                                                   | `review` | `auto_reply_off`     |
+| 13   | 本会话最近 1 小时回复数 ≥ `maxPerConversationPerHour`                       | `review` | `rate_limited`       |
+| 14   | 距上一条回复 < `minGapSeconds`                                              | `review` | `min_gap`            |
+| 15   | 目标 `replyMode = 'review'`                                                 | `review` | `target_review`      |
+| 16   | 其余                                                                        | `auto`   | `allowed`            |
 
 顺序的理由：前 10 条是“根本不值得起草”的硬边界（起草也是浪费，还会在面板里制造噪声）；
 第 11–15 条只是“现在不适合自动发”，草稿仍然有价值；第 15 条是目标的局部收紧，
@@ -103,7 +103,22 @@
 - 面板负责把“选人”解析成 userId 再保存；名字只用于展示。名单里误存的昵称不会匹配任何人
   （既不会放行，也不会拦截）。
 - 群聊默认必须 @（`requireMentionInGroups`）；`at-me` 目标由通道保证 `addressed`。
+- **目标行「仅 @」（`mentionOnly`）从 WS15 起真正生效**，与全局 `reply.requireMentionInGroups` 是**或**关系：`target.mentionOnly || settings.reply.requireMentionInGroups` 任一为真，群消息就必须 `addressed`，否则第 8 条判 `not_addressed`。两个开关都只能收紧、不能放宽对方——关掉全局开关不会让某个 `mentionOnly=true` 的群开始回全部消息。
+- `at-me` 与 `dm` 恒视为已定向，`mentionOnly` 对它们无效：`at-me` 订阅本身就只投 @ 消息，单聊没有“群里@”的概念。面板对非 `group` 行禁用该开关并给出提示，避免留下“开关存在但不生效”的误解。
 - 广播（公告、群发）默认忽略；`ignoreBroadcast = false` 时才处理。
+
+### 6.1 目标行的解析顺序（WS15）
+
+判定表里的“目标”不是 `thread.targetId`，而是 `policy.findTarget` 按**消息来源**选出来的那一行（`src/brain/policy.ts`）：
+
+1. 消息来自 at-me 订阅（事件键 `user_im_message_receive_at`）→ `targets.rows` 中第一条 `kind = 'at-me'` 的行；
+2. 否则若线程键是 `group:<cid>` → `kind = 'group'` 且 `id` 等于该会话 id 的行；
+3. 都不命中 → 回退到 `id === thread.targetId` 的行（创建这条线程的目标）；
+4. 仍没有 → `target_missing`（`off`）。
+
+为什么需要这个顺序：同一个群可以被 `at-me` 与 `group` 同时订阅，两条事件流最终都落成同一个 `group:<cid>` 线程。只按 `thread.targetId` 取行，结果取决于“哪条流最后写了线程”，于是普通群消息可能拿到 at-me 行的策略（例如 `mentionOnly` 与回复模式），@ 消息反过来又可能拿到群行的策略——这正是 WS15 修掉的 D6。按来源分派后，**普通消息按 `group` 行、@ 消息按 `at-me` 行**，两条流各自稳定。
+
+代价是 `at-me` 行必须存在且 `enabled`：删掉它，@ 消息会落到第 2 步的群行（或第 3 步的回退行），策略随之改变——这是可解释的行为，不是隐式兜底。
 
 ## 7. 为什么任务永远走批准
 
@@ -123,16 +138,16 @@
 
 ## 8. 与设置的映射
 
-| 设置                                                | 影响的规则    |
-| --------------------------------------------------- | ------------- |
-| `monitor.enabled` / `monitor.paused`                | 第 1、2 条    |
-| `monitor.quietHours` / `replyDuringQuiet`           | 第 11 条      |
-| `targets.rows[].enabled` / `replyMode`              | 第 3–5、15 条 |
-| `reply.blockedSenders` / `allowedSenders`           | 第 6、7 条    |
-| `reply.requireMentionInGroups`                      | 第 8 条       |
-| `reply.ignoreBroadcast`                             | 第 9 条       |
-| `reply.autoReply`                                   | 第 12 条      |
-| `reply.maxPerConversationPerHour` / `minGapSeconds` | 第 13、14 条  |
+| 设置                                                   | 影响的规则                           |
+| ------------------------------------------------------ | ------------------------------------ |
+| `monitor.enabled` / `monitor.paused`                   | 第 1、2 条                           |
+| `monitor.quietHours` / `replyDuringQuiet`              | 第 11 条                             |
+| `targets.rows[].enabled` / `replyMode` / `mentionOnly` | 第 3–5、8、15 条                     |
+| `reply.blockedSenders` / `allowedSenders`              | 第 6、7 条                           |
+| `reply.requireMentionInGroups`                         | 第 8 条（与目标 `mentionOnly` 取或） |
+| `reply.ignoreBroadcast`                                | 第 9 条                              |
+| `reply.autoReply`                                      | 第 12 条                             |
+| `reply.maxPerConversationPerHour` / `minGapSeconds`    | 第 13、14 条                         |
 
 数值边界来自 `src/shared/limits.ts`，字段表与默认值见 [011 设置合约](011-settings-contract.md)。
 

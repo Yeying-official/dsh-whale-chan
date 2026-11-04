@@ -2,7 +2,7 @@
 
 > **DSH Assistant · DingTalk Assistant** — a DeepSeek Harness desktop plugin that replies as you, in your own DingTalk account, within a persona you define.
 > It watches @-mentions, selected groups and DMs, answers with web research when needed, and turns actionable requests into tasks that only you can approve in the DSH panel.
-> Status: v0.4.0 (2026-11-04), WS0–WS14 complete including Windows real-device acceptance (v0.3.0 and earlier) plus a post-release targeted live check of v0.4.0 session archiving, per-conversation workspaces, an empty default persona with an opt-in whale-maid preset, and target-wide session archiving that heals the conversation afterwards. The release tag is local and not pushed.
+> Status: v0.5.0 (2026-11-04), WS0–WS15 complete including Windows real-device acceptance (v0.3.0 and earlier), a post-release targeted live check of v0.4.0 session archiving, and v0.5.0 target-subscription fixes that are covered by unit tests and a fake `dws` fixture only — the repaired subscription/sending path has not been accepted on a real account yet. The release tag is local and not pushed.
 
 DSH助理是运行在 DSH 桌面端里的**个人钉钉助理**：用主人本人的钉钉账号（`dws` 个人授权，不是机器人），按主人写的人设回复 @我、指定群与指定单聊；需要动手的事先变成任务，只有主人在面板里批准后，才会在 DSH 会话中执行，结果再回到原会话。
 
@@ -12,21 +12,22 @@ DSH助理是运行在 DSH 桌面端里的**个人钉钉助理**：用主人本�
 
 ## 功能
 
-| 能力             | 当前实现                                                                                                                                                                                                                                      |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 个人账号事件订阅 | `dws event consume` 长连接，支持 `@我`、指定群、指定单聊三类目标；目标只用显式 ID，名称不参与订阅                                                                                                                                             |
-| 人设化回复       | 默认空人设（仅保留名字「鲸鱼酱」）；可选「蓝白鲸鱼女仆」预设，一键载入后保存；名字、身份、语气、语言、签名、行为规则、背景知识与示例均可编辑；回复长度 1–800 字，人设总长 6000 字符                                                           |
-| 消息分类         | `chat` / `question` / `task` / `ignore` 四类；JSON 严格校验，低置信、超时、非法输出一律降级，不发送                                                                                                                                           |
-| 联网检索         | 只对问题类消息检索，结果数、超时、缓存与引用可配；检索失败按“没有资料”处理，不阻塞回复                                                                                                                                                        |
-| 静默时段 / 限速  | 默认 22:00–08:00 不自动回复；每会话每小时上限、最小间隔、连续 AI 回复 3 条防环；触发限制落草稿而不是硬拒                                                                                                                                      |
-| 任务捕获与批准   | 消息里的待办先进入 `awaiting-approval`；只有面板批准才创建 DSH worker 会话，迟到批准、重复批准、取消后复活都会被拒绝                                                                                                                          |
-| 任务执行与回帖   | 每任务一个 `dsh-whale-chan-worker` 会话；默认落在该会话的共享工作区（`<stateDir>/workspaces/conversation-<digest>`）；成功才把摘要回原会话，失败只写审计                                                                                      |
-| 会话归档与自愈   | 目标页一键归档该目标工作区的全部会话（确认弹窗、可选停止运行中会话）；当前回复会话被归档后下一条消息换新回复器会话，任务会话被归档或工作区被移除后下一次运行换新 worker 会话并重建记录；v0.4.0 已在 Windows 真机定向验活（归档 → 下一条消息） |
-| 管理 API         | 20 条 `/whale-chan/api/*` 冻结路由；同源头校验、分页、稳定错误码、设置 revision 乐观并发                                                                                                                                                      |
-| 七页签面板       | 概览、会话、任务、目标、人设、设置、审计；中英双语、深色主题、键盘与读屏可用、移动端单列                                                                                                                                                      |
-| 持久化           | SQLite `state.db`（schema v2，13 张表，WAL）；设置历史、审计事件、effect 队列与 outbox 都在本地                                                                                                                                               |
-| 单实例与健康检查 | `stateDir/.lock` 锁；第二个实例启动失败；健康检查覆盖目录、数据库、锁、设置、模板、授权、通道、effect、执行器                                                                                                                                 |
-| Windows 命令解析 | 自动解析 npm 全局 `dws.cmd`（PATH、`%APPDATA%\npm`、Node 安装目录），也可用 `dws.binaryPath` 显式覆盖                                                                                                                                         |
+| 能力               | 当前实现                                                                                                                                                                                                                                                                                                 |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 个人账号事件订阅   | `dws event consume` 长连接，支持 `@我`、指定群、指定单聊三类目标；目标只用显式 ID，名称不参与订阅                                                                                                                                                                                                        |
+| 人设化回复         | 默认空人设（仅保留名字「鲸鱼酱」）；可选「蓝白鲸鱼女仆」预设，一键载入后保存；名字、身份、语气、语言、签名、行为规则、背景知识与示例均可编辑；回复长度 1–800 字，人设总长 6000 字符                                                                                                                      |
+| 消息分类           | `chat` / `question` / `task` / `ignore` 四类；JSON 严格校验，低置信、超时、非法输出一律降级，不发送                                                                                                                                                                                                      |
+| 联网检索           | 只对问题类消息检索，结果数、超时、缓存与引用可配；检索失败按“没有资料”处理，不阻塞回复                                                                                                                                                                                                                   |
+| 静默时段 / 限速    | 默认 22:00–08:00 不自动回复；每会话每小时上限、最小间隔、连续 AI 回复 3 条防环；触发限制落草稿而不是硬拒                                                                                                                                                                                                 |
+| 任务捕获与批准     | 消息里的待办先进入 `awaiting-approval`；只有面板批准才创建 DSH worker 会话，迟到批准、重复批准、取消后复活都会被拒绝                                                                                                                                                                                     |
+| 任务执行与回帖     | 每任务一个 `dsh-whale-chan-worker` 会话；默认落在该会话的共享工作区（`<stateDir>/workspaces/conversation-<digest>`）；成功才把摘要回原会话，失败只写审计                                                                                                                                                 |
+| 会话归档与自愈     | 目标页一键归档该目标工作区的全部会话（确认弹窗、可选停止运行中会话）；当前回复会话被归档后下一条消息换新回复器会话，任务会话被归档或工作区被移除后下一次运行换新 worker 会话并重建记录；v0.4.0 已在 Windows 真机定向验活（归档 → 下一条消息）                                                            |
+| 订阅健康与单聊修复 | 每个目标一条 `dws event consume` 子进程，`GET channel` 与目标页「订阅」列显示 `state`/`restarts`/`lastError`；服务端拒绝按 `retry_after_seconds` 退避、连续 3 次无重试提示即停止重启；单聊改由通讯录按姓名发现，只接受 `userId` 或 `open:<openDingtalkId>`，出站保留 `open:` 前缀走 `--open-dingtalk-id` |
+| 管理 API           | 21 条 `/whale-chan/api/*` 冻结路由；同源头校验、分页、稳定错误码、设置 revision 乐观并发                                                                                                                                                                                                                 |
+| 七页签面板         | 概览、会话、任务、目标、人设、设置、审计；中英双语、深色主题、键盘与读屏可用、移动端单列                                                                                                                                                                                                                 |
+| 持久化             | SQLite `state.db`（schema v2，13 张表，WAL）；设置历史、审计事件、effect 队列与 outbox 都在本地                                                                                                                                                                                                          |
+| 单实例与健康检查   | `stateDir/.lock` 锁；第二个实例启动失败；健康检查覆盖目录、数据库、锁、设置、模板、授权、通道、effect、执行器                                                                                                                                                                                            |
+| Windows 命令解析   | 自动解析 npm 全局 `dws.cmd`（PATH、`%APPDATA%\npm`、Node 安装目录），也可用 `dws.binaryPath` 显式覆盖                                                                                                                                                                                                    |
 
 ## 面板
 
@@ -64,7 +65,7 @@ flowchart TB
     UI["七页签 UI"] --> API["HTTP 客户端"]
   end
 
-  API -->|"20 条 /whale-chan/api 路由"| HTTP["app · HTTP handler"]
+  API -->|"21 条 /whale-chan/api 路由"| HTTP["app · HTTP handler"]
   HTTP --> RT["app · Runtime 组合根"]
   RT --> EFF["Effects 持久队列"]
   RT --> PASS["Passes<br/>批准过期 / 授权探测"]
@@ -118,7 +119,7 @@ pnpm build          # 生成 lib/index.js 与 lib/client.js
 2. 打开「插件」→「添加插件」；选择「安装第三方插件」（不同版本可能直接打开输入框）。
 3. 在「包名或地址」中填入**本仓库的绝对路径**，例如 `E:\DSHWork\dsh-Whale-chan-Assistant`。安装器支持 npm 包、Git 仓库和本地目录；本地目录会以 `link:` 依赖写入 profile。
 4. 点击安装，等待完成。界面提示「请重启 DSH」时重启桌面端。
-5. 重启后侧栏出现「DSH助理」，打开面板应看到「已连接」与版本 `0.4.0`。
+5. 重启后侧栏出现「DSH助理」，打开面板应看到「已连接」与版本 `0.5.0`。
 
 > 桌面端的 `desktop` profile 由桌面端保留，命令行 `dsh plugin --profile desktop ...` 不用于管理它；请使用上面的 GUI 入口。自建 profile 可以用 `dsh plugin --profile <name> add <本地路径>`，该命令由 DSH CLI 转发给 profile 内的 pnpm。
 
@@ -128,10 +129,11 @@ pnpm build          # 生成 lib/index.js 与 lib/client.js
 
 ### 4. 验证
 
-- 侧栏「DSH助理」面板能打开，概览显示版本 `0.4.0` 与状态目录。
-- `GET /whale-chan/api/state` 返回 200；管理请求必须带 `x-whale-chan-request: 1`。
+- 侧栏「DSH助理」面板能打开，概览显示版本 `0.5.0` 与状态目录。
+- `GET /whale-chan/api/state` 返回 200；管理请求必须带 `x-whale-chan-request: 1`。管理 API 现在是 **21 条**（新增 `GET /whale-chan/api/channel`）。
 - 概览的健康检查里 `stateDir`、`database`、`lock`、`settings`、`prompts` 为正常；`channel` 在未配置目标时为 idle，这是正常状态。
 - 「目标」页的「工作区」区块能显示：已启用的群/单聊给出具体目录（「已创建」，可复制路径），`@我`/`open:` 单聊显示「按会话创建」。该区块只读，路径与 `GET /whale-chan/api/targets` 的 `workspace.path` 一致；`ready` 行右侧还有「归档会话」按钮，点开先确认、再归档。
+- 同一页的目标表右侧有只读「订阅」列：每行显示订阅状态（就绪/启动中/已停止/失败/残留）、重启次数与失败原因。它来自 `GET /whale-chan/api/channel`，该路由不可用时只显示「订阅状态不可用」，不影响编辑与保存。
 - 归档验活（可选，确认目标后有测试群时）：对一个 `ready` 目标点「归档会话」→ 确认；结果应显示已归档/原本已归档计数与「下一条钉钉消息将使用新会话」。随后在群里发一条普通聊天消息，确认回复出现在**新**会话里、旧会话仍在 DSH 中可查。完整链路见 [WS14 真机验活报告](docs/test-reports/WS14-live.md)。
 
 ## 首次配置
@@ -150,7 +152,12 @@ pnpm build          # 生成 lib/index.js 与 lib/client.js
 
 2. **发现并保存目标**
 
-   打开「目标」→ 选择类型（群聊 / 单聊 / @我）→ 输入关键词 →「搜索」→ 从候选里加入草稿 → 保存。目标 ID 必须是显式的 `openConversationId` 或 `userId`；名称只用于展示，不参与订阅与发送。首次建议只加一个测试群或自己的单聊。保存后，启用的群/普通单聊会立刻创建会话工作区并显示在下方只读的「工作区」区块；`@我` 与 `open:` 单聊显示「按会话创建」，在收到首条消息时创建。
+   打开「目标」→ 选择类型（群聊 / 单聊 / @我）→ 输入关键词 →「搜索」→ 从候选里加入草稿 → 保存。名称只用于展示，不参与订阅与发送；三类目标的 ID 形态不同：
+   - **群聊（`group`）**：填 `openConversationId`（发现结果直接给出）。
+   - **单聊（`dm`）**：填对端 `userId`，或 `open:<openDingtalkId>`（带 `open:` 前缀才会走 `--open-dingtalk-id`）。会话 ID（`cid…=`）指向聊天而不是人，服务端会拒绝订阅，插件现在直接在本地判 `invalid-target`；单聊请用「搜索」+ **联系人姓名**重新发现，`chat +chat-list --types p2p` 不再是单聊来源。
+   - **@我（`at-me`）**：全局订阅，行里的 `id` 只是消息标记，不参与订阅参数。
+
+   `mentionOnly`（「仅 @」）只在**群聊**行生效：群消息在目标行 `mentionOnly` 或全局「群聊必须 @」任一为真时要求已 @ 助理，否则不回复；`@我` 与单聊本来就算已定向，开关对它们无效（面板会禁用并提示）。首次建议只加一个测试群或自己的单聊。保存后，启用的群/普通单聊会立刻创建会话工作区并显示在下方只读的「工作区」区块；`@我` 与 `open:` 单聊显示「按会话创建」，在收到首条消息时创建。
 
 3. **填写人设**
 
@@ -175,8 +182,9 @@ pnpm build          # 生成 lib/index.js 与 lib/client.js
 ### 自动回复
 
 - **@我**：启用 `@我` 目标后，群里直接 @ 主人会触发；`at-me` 事件键本身保证 `addressed`。
-- **指定群**：订阅群内全部消息，是否回复由「仅 @」、发送者名单、广播过滤与回复模式共同决定。
-- **指定单聊**：按 `userId` 订阅；单聊默认视为已对主人说话。
+- **指定群**：订阅群内全部消息，是否回复由「仅 @」、发送者名单、广播过滤与回复模式共同决定。目标行「仅 @」与全局「群聊必须 @」是**或**关系：任一为真就只回 @ 助理的消息。
+- **指定单聊**：按对端 `userId`（或 `open:<openDingtalkId>`）订阅；单聊默认视为已对主人说话，`mentionOnly` 不参与判断。
+- 同一个群同时被 `@我` 与群目标订阅时，普通消息按群目标行策略、@ 消息按 `@我` 行策略，互不覆盖。
 - 回复是否自动发出由策略决定：`auto` 直接进入 outbox；`review` 只生成草稿；`off` 不生成。静默时段、限速、防环都会把 `auto` 降为 `review`。
 - v1 的 `review` 草稿**没有面板发送入口**：面板只读，不会显示草稿内容；需要回复时请在钉钉里手动处理。这是当前版本已知限制，不是配置错误。
 
@@ -232,21 +240,25 @@ pnpm build          # 生成 lib/index.js 与 lib/client.js
 
 ## 排障
 
-| 现象                                         | 原因 / 处理                                                                                                                                                     |
-| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 健康检查 `dws` 不可用                        | 终端里 `dws --version` 正常但宿主找不到，通常是 Windows npm shim 不在宿主 `PATH`。先 `where.exe dws`，再把设置 `dws.binaryPath` 写成 `...\dws.cmd` 的绝对路径。 |
-| 授权失败 / `token_valid=false`               | 执行 `dws auth login` 续期；健康检查的 `auth` 会变红，插件不会启动订阅。                                                                                        |
-| 启动日志 `state directory is already in use` | 另一个实例持有 `<stateDir>/.lock`。停掉旧实例；崩溃后等 10 秒 stale 再启动，不要在运行时手删 `.lock`。                                                          |
-| 路由返回 503 `state_unavailable`             | 运行时尚未就绪或启动失败（目录不可写、迁移失败、锁冲突）。看插件启动日志与健康检查的 `stateDir`/`database`/`lock`。                                             |
-| `targets/discover` 或 `validate` 返回 503    | 通道尚未装配或授权不可用；健康检查 `channel`/`auth` 会给出原因，面板不伪造候选。                                                                                |
-| 健康检查 `prompts` 为 error                  | 安装包缺少 `prompts/*.md` 或文件为空。重新 `pnpm build` 并安装完整 bundle；不要指望通用提示词兜底。                                                             |
-| 通道一直 `idle`                              | 没有启用的目标、监控被关闭或主人暂停。添加并启用目标，或在概览恢复监控；`idle` 本身不是故障。                                                                   |
-| 任务批准后没有执行                           | 检查任务是否已过期、Approval 是否仍为 `pending`、`tasks.enabled` 是否为真，以及 `launch` effect 是否进入 dead；dead 行会显示在健康检查 `effects`。              |
-| 回复没有发出                                 | 目标回复模式为 `review`/`off`、静默时段、限流、防环或 `dryRun` 都会拦住发送；审计里的 `reason` 是稳定 code，可直接定位。                                        |
-| 「归档会话」按钮不显示                       | 该行的 `workspace.mode` 是 `per-conversation`（`@我` 或 `open:` 单聊），没有单一工作区可归档；这是预期行为，不是权限问题。                                      |
-| 归档后旧会话不再回复                         | 若当前回复会话被成功归档，下一条消息落在新的回复器会话；被拒绝的运行中会话仍会继续使用。旧会话不会自动 unarchive，也不会恢复回复上下文，历史仍可在 DSH 里打开。 |
-| 归档结果出现「运行中未归档」                 | 该会话仍在运行。等它结束后再归档，或重新打开弹窗并勾选「同时停止正在运行的会话」——后者会取消运行中的回复/任务，任务可能失败。                                   |
-| 状态库版本高于插件                           | 用更新版本的插件打开，或换一个新的 `stateDir`；不要手改 `PRAGMA user_version`，插件不会降级。                                                                   |
+| 现象                                         | 原因 / 处理                                                                                                                                                                                     |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 健康检查 `dws` 不可用                        | 终端里 `dws --version` 正常但宿主找不到，通常是 Windows npm shim 不在宿主 `PATH`。先 `where.exe dws`，再把设置 `dws.binaryPath` 写成 `...\dws.cmd` 的绝对路径。                                 |
+| 授权失败 / `token_valid=false`               | 执行 `dws auth login` 续期；健康检查的 `auth` 会变红，插件不会启动订阅。                                                                                                                        |
+| 启动日志 `state directory is already in use` | 另一个实例持有 `<stateDir>/.lock`。停掉旧实例；崩溃后等 10 秒 stale 再启动，不要在运行时手删 `.lock`。                                                                                          |
+| 路由返回 503 `state_unavailable`             | 运行时尚未就绪或启动失败（目录不可写、迁移失败、锁冲突）。看插件启动日志与健康检查的 `stateDir`/`database`/`lock`。                                                                             |
+| `targets/discover` 或 `validate` 返回 503    | 通道尚未装配或授权不可用；健康检查 `channel`/`auth` 会给出原因，面板不伪造候选。                                                                                                                |
+| 健康检查 `prompts` 为 error                  | 安装包缺少 `prompts/*.md` 或文件为空。重新 `pnpm build` 并安装完整 bundle；不要指望通用提示词兜底。                                                                                             |
+| 通道一直 `idle`                              | 没有启用的目标、监控被关闭或主人暂停。添加并启用目标，或在概览恢复监控；`idle` 本身不是故障。                                                                                                   |
+| 目标页「订阅」列显示失败                     | 该目标订阅被服务端拒绝，单元格里的原文（`GET channel` 的 `lastError`）就是原因；`subscribeUser failed` 通常表示单聊 id 不是人。改成对端 `userId`/`open:<openDingtalkId>` 保存后会自动重新订阅。 |
+| 目标页显示「订阅状态不可用」                 | `GET /whale-chan/api/channel` 失败（运行时未就绪、超时，或旧宿主没有这条路由）。它只是只读状态：编辑、发现、校验、保存与归档都不受影响，刷新或等就绪后再看。                                    |
+| 单聊订阅立即失败 / 单聊没有回复              | v0.4.0 及更早可能把会话 ID（`cid…=`）当成 open id 存进单聊行；升级后这类行会被判 `invalid-target`。用「单聊」+ 联系人姓名重新发现，保存 `userId` 或 `open:<openDingtalkId>`。                   |
+| 订阅反复重启                                 | 连续 3 次被服务端拒绝且没有 `retry_after_seconds` 时插件停止自动重启（状态 `failed`），以免退出噪音盖住真实原因；修好 id/权限后保存目标或重启插件即可重试。                                     |
+| 任务批准后没有执行                           | 检查任务是否已过期、Approval 是否仍为 `pending`、`tasks.enabled` 是否为真，以及 `launch` effect 是否进入 dead；dead 行会显示在健康检查 `effects`。                                              |
+| 回复没有发出                                 | 目标回复模式为 `review`/`off`、静默时段、限流、防环或 `dryRun` 都会拦住发送；审计里的 `reason` 是稳定 code，可直接定位。                                                                        |
+| 「归档会话」按钮不显示                       | 该行的 `workspace.mode` 是 `per-conversation`（`@我` 或 `open:` 单聊），没有单一工作区可归档；这是预期行为，不是权限问题。                                                                      |
+| 归档后旧会话不再回复                         | 若当前回复会话被成功归档，下一条消息落在新的回复器会话；被拒绝的运行中会话仍会继续使用。旧会话不会自动 unarchive，也不会恢复回复上下文，历史仍可在 DSH 里打开。                                 |
+| 归档结果出现「运行中未归档」                 | 该会话仍在运行。等它结束后再归档，或重新打开弹窗并勾选「同时停止正在运行的会话」——后者会取消运行中的回复/任务，任务可能失败。                                                                   |
+| 状态库版本高于插件                           | 用更新版本的插件打开，或换一个新的 `stateDir`；不要手改 `PRAGMA user_version`，插件不会降级。                                                                                                   |
 
 ## 开发
 
@@ -269,36 +281,38 @@ pnpm build          # 生成 lib/index.js 与 lib/client.js
 
 ## 文档
 
-| 文档                                                 | 内容                                              |
-| ---------------------------------------------------- | ------------------------------------------------- |
-| [000 理念](docs/000-philosophy.md)                   | 低打扰、人的批准、可解释与可停止的产品原则        |
-| [001 领域模型](docs/001-domain.md)                   | 消息、决策、任务、批准、派工、Outbound 与状态机   |
-| [002 授权与回复策略](docs/002-authorization.md)      | 三种回复模式、判定顺序、静默/限速/防环            |
-| [003 执行](docs/003-execution.md)                    | 批准门、派工、工作区、超时、取消与重试            |
-| [004 提示词](docs/004-prompts.md)                    | 人设渲染、五份模板、分类 JSON、回复后处理         |
-| [005 面板](docs/005-panel.md)                        | 七个页签、交互、错误态、i18n 与无障碍             |
-| [006 部署](docs/006-deployment.md)                   | `dws` 检查、目标发现、Windows shim、日志与健康    |
-| [007 架构](docs/007-architecture.md)                 | 分层、数据流、effect、outbox 与组合根             |
-| [008 开发手册](docs/008-cookbook.md)                 | 命令、分层、扩展字段/API/页签与测试策略           |
-| [009 DWS 协议](docs/009-dws-protocol.md)             | 事件键、NDJSON、发送回执、provisional 字段        |
-| [010 设计摘要](docs/010-design.md)                   | WS0 冻结的产品与架构决策                          |
-| [011 设置合约](docs/011-settings-contract.md)        | 57 个字段、默认值、范围与错误码                   |
-| [012 发布](docs/012-release.md)                      | 发布门禁、干净 profile 安装、T0–T4、tag 与回滚    |
-| [013 安全基线](docs/013-security.md)                 | 威胁模型、控制、明确不防御、数据保留与事件响应    |
-| [014 人设默认值与预设](docs/014-persona-defaults.md) | 空人设默认、蓝白鲸鱼女仆预设、来源与升级行为      |
-| [WS8 真机报告](docs/test-reports/WS8-live.md)        | T0–T4 结果、真机修复、残留与未覆盖                |
-| [WS9/WS10 真机报告](docs/test-reports/WS9-10.md)     | 按会话工作区与目标页工作区的真机复验              |
-| [WS14 验收报告](docs/test-reports/WS14.md)           | 归档会话、轮换与工作区恢复的验收与探针证据        |
-| [WS14 真机验活报告](docs/test-reports/WS14-live.md)  | 发布后定向真机验活：归档 → 下一条消息             |
-| [WS14 设计说明](docs/pr/WS14-archive-sessions.md)    | 需求、generation 设计、契约、破坏性边界与合并坐标 |
-| [兼容矩阵](docs/compatibility.md)                    | DSH / `dws` / OS / Node / 模型路由的验证状态      |
-| [PROGRESS](docs/PROGRESS.md)                         | 工作流进度与恢复快照                              |
+| 文档                                                  | 内容                                              |
+| ----------------------------------------------------- | ------------------------------------------------- |
+| [000 理念](docs/000-philosophy.md)                    | 低打扰、人的批准、可解释与可停止的产品原则        |
+| [001 领域模型](docs/001-domain.md)                    | 消息、决策、任务、批准、派工、Outbound 与状态机   |
+| [002 授权与回复策略](docs/002-authorization.md)       | 三种回复模式、判定顺序、静默/限速/防环            |
+| [003 执行](docs/003-execution.md)                     | 批准门、派工、工作区、超时、取消与重试            |
+| [004 提示词](docs/004-prompts.md)                     | 人设渲染、五份模板、分类 JSON、回复后处理         |
+| [005 面板](docs/005-panel.md)                         | 七个页签、交互、错误态、i18n 与无障碍             |
+| [006 部署](docs/006-deployment.md)                    | `dws` 检查、目标发现、Windows shim、日志与健康    |
+| [007 架构](docs/007-architecture.md)                  | 分层、数据流、effect、outbox 与组合根             |
+| [008 开发手册](docs/008-cookbook.md)                  | 命令、分层、扩展字段/API/页签与测试策略           |
+| [009 DWS 协议](docs/009-dws-protocol.md)              | 事件键、NDJSON、发送回执、provisional 字段        |
+| [010 设计摘要](docs/010-design.md)                    | WS0 冻结的产品与架构决策                          |
+| [011 设置合约](docs/011-settings-contract.md)         | 57 个字段、默认值、范围与错误码                   |
+| [012 发布](docs/012-release.md)                       | 发布门禁、干净 profile 安装、T0–T4、tag 与回滚    |
+| [013 安全基线](docs/013-security.md)                  | 威胁模型、控制、明确不防御、数据保留与事件响应    |
+| [014 人设默认值与预设](docs/014-persona-defaults.md)  | 空人设默认、蓝白鲸鱼女仆预设、来源与升级行为      |
+| [WS8 真机报告](docs/test-reports/WS8-live.md)         | T0–T4 结果、真机修复、残留与未覆盖                |
+| [WS9/WS10 真机报告](docs/test-reports/WS9-10.md)      | 按会话工作区与目标页工作区的真机复验              |
+| [WS14 验收报告](docs/test-reports/WS14.md)            | 归档会话、轮换与工作区恢复的验收与探针证据        |
+| [WS14 真机验活报告](docs/test-reports/WS14-live.md)   | 发布后定向真机验活：归档 → 下一条消息             |
+| [WS14 设计说明](docs/pr/WS14-archive-sessions.md)     | 需求、generation 设计、契约、破坏性边界与合并坐标 |
+| [WS15 验收报告](docs/test-reports/WS15.md)            | 目标订阅修复的单测证据、复现命令与真机未覆盖项    |
+| [WS15 设计说明](docs/pr/WS15-target-subscriptions.md) | 缺陷清单、修复设计、契约变更与审核返工记录        |
+| [兼容矩阵](docs/compatibility.md)                     | DSH / `dws` / OS / Node / 模型路由的验证状态      |
+| [PROGRESS](docs/PROGRESS.md)                          | 工作流进度与恢复快照                              |
 
 ## 状态
 
-- WS0 骨架与冻结合约、WS1 领域与持久化、WS2 `dws` 通道、WS3 人设与策略、WS4 执行器、WS5a 设置/API、WS5b 组合根、WS6 面板、WS7 文档与安全基线、WS8 真机验收、WS9 按会话工作区、WS10 目标页工作区与显示名、WS11 发布收口、WS12 空默认人设与可选预设、WS13 v0.3.0 收口、WS14 会话归档与工作区自愈：**全部完成**。
-- 当前版本 `0.4.0`（2026-11-04），管理 API 20 条；v0.2.0 工作区、v0.3.0 人设默认/预设与 v0.4.0 归档会话均在 Windows 上开发并由自动化测试覆盖。tag `v0.4.0`（指向 `c82027a`）已本地打、**未 push**；其后的发布后真机补验提交为 `ee6bb97`。
-- 真机范围：Windows 10/11、DSH Desktop `0.2.1-rc.5`、`dws` `1.0.66`；单聊 o2o、`@我`/`open:` 惰性工作区、macOS/Linux 未真机覆盖，见 [WS8 真机报告](docs/test-reports/WS8-live.md)、[WS9/WS10 报告](docs/test-reports/WS9-10.md)、[WS12 人设报告](docs/test-reports/WS12-persona.md) 与 [兼容矩阵](docs/compatibility.md)。**v0.4.0 已做发布后定向真机验活**（2026-11-04，Windows，归档 → 下一条消息）：归档 3 / 原本已归档 2、0 拒绝/0 失败，generation 1→2，下一条群消息新建 g2 并正常回复；`stopActivity`、worker 归档、DSH 手动移除工作区、单聊与多目标未真机覆盖，完整 T3/T4 未重跑，见 [WS14 真机验活报告](docs/test-reports/WS14-live.md)。
+- WS0 骨架与冻结合约、WS1 领域与持久化、WS2 `dws` 通道、WS3 人设与策略、WS4 执行器、WS5a 设置/API、WS5b 组合根、WS6 面板、WS7 文档与安全基线、WS8 真机验收、WS9 按会话工作区、WS10 目标页工作区与显示名、WS11 发布收口、WS12 空默认人设与可选预设、WS13 v0.3.0 收口、WS14 会话归档与工作区自愈、WS15 目标订阅修复与订阅健康：**全部完成**。
+- 当前版本 `0.5.0`（2026-11-04），管理 API 21 条；v0.2.0 工作区、v0.3.0 人设默认/预设、v0.4.0 归档会话与 v0.5.0 订阅修复均在 Windows 上开发并由自动化测试覆盖。**v0.5.0 的订阅/收发链路没有真机验收**（只有单测与假 `dws` 夹具）；`v0.4.0` 已本地打 tag、**未 push**。
+- 真机范围：Windows 10/11、DSH Desktop `0.2.1-rc.5`、`dws` `1.0.66`；单聊 o2o、`@我`/`open:` 惰性工作区、macOS/Linux 未真机覆盖，见 [WS8 真机报告](docs/test-reports/WS8-live.md)、[WS9/WS10 报告](docs/test-reports/WS9-10.md)、[WS12 人设报告](docs/test-reports/WS12-persona.md) 与 [兼容矩阵](docs/compatibility.md)。**v0.4.0 已做发布后定向真机验活**（2026-11-04，Windows，归档 → 下一条消息）：归档 3 / 原本已归档 2、0 拒绝/0 失败，generation 1→2，下一条群消息新建 g2 并正常回复；`stopActivity`、worker 归档、DSH 手动移除工作区、单聊与多目标未真机覆盖，完整 T3/T4 未重跑，见 [WS14 真机验活报告](docs/test-reports/WS14-live.md)。**v0.5.0 的 `at-me` 订阅在真实 `dws` 上曾以 `--ephemeral` 探测到 ready，但 `at-me`+`group` 同群去重、单聊订阅与单聊出站回复仍未真机确认**，见 [WS15 验收报告](docs/test-reports/WS15.md)。
 - 历史验收后测试群目标为 `enabled=false`（保留该行与工作区）；2026-11-04 的 v0.4.0 真机补验后测试目标已清空（`targets=[]`），通道为 `idle: no enabled targets`。重新启用前请先核对目标、`dryRun` 与回复模式。
 
 ## 许可证

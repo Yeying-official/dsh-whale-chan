@@ -22,6 +22,8 @@ import type {
   Approval as ApprovalView,
   AuditEntry,
   AuditPage,
+  ChannelHealthView,
+  ChannelTargetHealthView,
   Health,
   HealthCheck,
   HealthStatus,
@@ -434,6 +436,31 @@ function finishHealth(
 ): Health {
   const status = rollup(owned)
   return { ok: status === 'ok', status, checks, dws: { binaryPath, available, authenticated } }
+}
+
+/**
+ * Per-target subscription health.
+ *
+ * `running` is derived from the aggregate state because the runtime exposes a
+ * supervisor that is only ever `starting`, `ready` or `degraded` while it is
+ * live; `stopped` is the one state it reports when nothing subscribes.
+ */
+export function channelView(status: RuntimeServiceStatus): ChannelHealthView {
+  return {
+    state: status.channelState,
+    running: status.channelState !== 'stopped',
+    targets: status.channelTargets.map(
+      (target): ChannelTargetHealthView => ({
+        targetId: target.targetId,
+        kind: target.kind,
+        ...(target.label ? { label: target.label } : {}),
+        state: target.state,
+        restarts: target.restarts,
+        ...(target.readyAt ? { readyAt: target.readyAt } : {}),
+        ...(target.lastError ? { lastError: target.lastError } : {}),
+      }),
+    ),
+  }
 }
 
 /** Aggregate counters for the overview page. */

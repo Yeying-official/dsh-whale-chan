@@ -336,7 +336,7 @@ Windows 上 `auth` 为 `error` 但终端里 `dws --version` 正常时，先看�
 - 同一 `stateDir` 只能有一个实例；第二个实例启动失败（`already in use`），不会排队重试。这是有意的：两个进程同时消费同一账号的事件会重复回复。
 - v1 **没有历史补拉**：只处理启动后 `dws` 能消费到的消息，不补拉过去对话。
 - v1 的本地通知只写 `notice` 审计事件，**不创建 DSH 收件箱会话**；投递 unknown/failed 需在审计里核对后人工处理，插件不会自动重发。
-- **review 草稿没有发送路由**：v1 只 `draft`，WS6 面板只读展示并允许复制，由主人自行在钉钉发送。补 `POST decisions/:id/send` 需要扩 20 条冻结合约，列入 v0.2 backlog。
+- **review 草稿没有发送路由**：v1 只 `draft`，WS6 面板只读展示并允许复制，由主人自行在钉钉发送。补 `POST decisions/:id/send` 需要扩 21 条冻结合约，列入 v0.2 backlog。
 - **归档会话不删数据，也不可回滚**：目标页「归档会话」只把工作区里的会话从可见面隐藏，不删目录/文件/日志，不提供 unarchive；当前回复会话被归档后，下一条消息换新回复器会话（被拒绝的运行中会话继续使用），在 DSH 手动移除工作区后下一次回复/任务会重建记录。勾选 `stopActivity` 会取消运行中的回复与任务（任务可能失败）。详见 [013 安全基线](013-security.md) §10 与 [005 面板](005-panel.md) §3.4。
 - **模板缺失 = 插件不可用**：这是包完整性问题，不是运行时配置；health 的 `prompts` 为 error，通道与任务都不工作。修复方式是重新安装完整 bundle，而不是改设置。
 - 通道健康把「禁用监控 / 主人暂停 / 没有 enabled target」都视为正常 idle（`ok`）；只有「应有订阅却 stopped」才是 `degraded`。启用 targets 为 0 时 `monitor.running` 仍为 `false`，这是事实而非故障。

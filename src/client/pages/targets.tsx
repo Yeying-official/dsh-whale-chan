@@ -157,6 +157,7 @@ export function TargetsPage() {
   const { t, refreshToken, notify } = usePanel()
   const targetsApi = useApi((signal) => call('GET targets', { signal }), { deps: [refreshToken] })
   const settingsApi = useApi((signal) => call('GET settings', { signal }), { deps: [refreshToken] })
+  const channelApi = useApi((signal) => call('GET channel', { signal }), { deps: [refreshToken] })
   const [rows, setRows] = useState<TargetRowValue[]>([])
   const [revision, setRevision] = useState<number>()
   const [dirty, setDirty] = useState(false)
@@ -389,6 +390,11 @@ export function TargetsPage() {
   }
 
   const loadError = targetsApi.error ?? settingsApi.error
+  // Subscription health is additive: when `GET channel` fails the rows keep
+  // working and only the read-only status column goes away.
+  const health = channelApi.data
+    ? new Map(channelApi.data.targets.map((target) => [target.targetId, target] as const))
+    : undefined
   const validCount = validation.filter((item) => item.valid).length
   const invalidCount = validation.length - validCount
   // `workspace` is a derived, read-only projection; older hosts omit it, in
@@ -449,11 +455,19 @@ export function TargetsPage() {
           {!targetsApi.loading && targetsApi.data && rows.length === 0 ? (
             <EmptyState title={t('targets.empty')} />
           ) : null}
+          {channelApi.error ? (
+            <div style={{ marginBottom: 10 }}>
+              <Alert tone="info" role="status">
+                {t('targets.health.unavailable')}
+              </Alert>
+            </div>
+          ) : null}
           <RowsField
             rows={rows}
             onChange={updateRows}
             disabled={saving || revision === undefined}
             rowErrors={rowErrors}
+            health={health}
           />
           <FormActions
             dirty={dirty}
@@ -554,7 +568,15 @@ export function TargetsPage() {
               />
             </FieldRow>
             <FieldRow label={t('targets.discover.query')}>
-              <TextField value={query} placeholder={t('targets.discover.queryPlaceholder')} onChange={setQuery} />
+              <TextField
+                value={query}
+                placeholder={
+                  discoverKind === 'dm'
+                    ? t('targets.discover.queryPlaceholderDm')
+                    : t('targets.discover.queryPlaceholder')
+                }
+                onChange={setQuery}
+              />
             </FieldRow>
           </div>
           {discover.error ? (

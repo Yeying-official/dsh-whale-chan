@@ -155,14 +155,22 @@ describe('DingTalkChannel lifecycle and operations', () => {
   it('exposes discovery, validation and auth through the facade', async () => {
     const chats = writeJson(tempDir(), 'chats.json', {
       groups: [{ name: 'AI工程师孵化中心', openConversationId: 'cid-1' }],
-      peers: [{ userId: 'u-1', name: '张三' }],
     })
-    const instance = channel(() => settings(), { FAKE_DWS_CHATS: chats })
+    const contacts = writeJson(tempDir(), 'contacts.json', {
+      result: [{ name: '张三', nick: '张三', userId: 'u-1', openDingTalkId: 'DO2-1', title: '' }],
+    })
+    const instance = channel(() => settings(), { FAKE_DWS_CHATS: chats, FAKE_DWS_CONTACTS: contacts })
     await expect(instance.discoverGroups('AI')).resolves.toEqual([
       { kind: 'group', id: 'cid-1', label: 'AI工程师孵化中心', source: 'chat-search' },
     ])
     await expect(instance.discoverPeers('张')).resolves.toEqual([
-      { kind: 'dm', id: 'u-1', label: '张三', source: 'chat-list' },
+      {
+        kind: 'dm',
+        id: 'u-1',
+        label: '张三',
+        description: 'userId: u-1 · openDingTalkId: DO2-1',
+        source: 'contact-search',
+      },
     ])
     await expect(instance.validateTarget(atMe)).resolves.toEqual({ valid: true })
     await expect(instance.probeAuth()).resolves.toMatchObject({ available: true, authenticated: true })

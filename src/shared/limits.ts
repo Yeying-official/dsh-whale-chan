@@ -8,7 +8,7 @@
 
 export const PLUGIN_NAME = 'dsh-whale-chan-assistant' as const
 export const PLUGIN_DISPLAY_NAME = 'DSH助理 · 钉钉助理' as const
-export const PLUGIN_VERSION = '0.4.0' as const
+export const PLUGIN_VERSION = '0.5.0' as const
 export const PANEL_ID = 'whale-chan' as const
 export const DEFAULT_STATE_DIR = '~/.dsh-whale-chan' as const
 export const DEFAULT_LOCALE = 'zh' as const

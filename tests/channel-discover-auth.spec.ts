@@ -98,36 +98,86 @@ describe('discoverGroups', () => {
 })
 
 describe('discoverPeers', () => {
-  it('prefers a user id and prefixes peers known only by open id', async () => {
-    const chats = writeJson(tempDir(), 'chats.json', {
-      peers: [
-        { userId: 'u-1', name: '张三', openDingTalkId: 'od-1' },
-        { openDingTalkId: 'od-2', name: '李四' },
-        { openConversationId: 'oc-1', name: '王五', userId: 'u-3' },
-        { name: '没有 id' },
+  it('reads the contact directory, prefers userId and prefixes open-only contacts', async () => {
+    const contacts = writeJson(tempDir(), 'contacts.json', {
+      result: [
+        { name: '张三', nick: '张三测试', userId: '260111', openDingTalkId: 'DO2-1', title: '' },
+        { name: '李四', nick: '李四测试', openDingTalkId: 'DO2-2', title: '' },
+        { name: '王五', nick: '王五测试', userId: '260113', openDingTalkId: 'DO2-3', title: '' },
+        { name: '赵六', nick: '赵六测试', title: '' },
       ],
     })
-    const { runner, calls } = captureRunner({ FAKE_DWS_CHATS: chats })
-    const candidates = await discoverPeers(undefined, settings(), { runner })
+    const { runner, calls } = captureRunner({ FAKE_DWS_CONTACTS: contacts })
+    const candidates = await discoverPeers('测试', settings(), { runner })
     expect(candidates).toEqual([
-      { kind: 'dm', id: 'u-1', label: '张三', source: 'chat-list' },
-      { kind: 'dm', id: 'open:od-2', label: '李四', source: 'chat-list' },
-      { kind: 'dm', id: 'u-3', label: '王五', source: 'chat-list' },
+      {
+        kind: 'dm',
+        id: '260111',
+        label: '张三测试',
+        description: 'userId: 260111 · openDingTalkId: DO2-1',
+        source: 'contact-search',
+      },
+      { kind: 'dm', id: 'open:DO2-2', label: '李四测试', source: 'contact-search' },
+      {
+        kind: 'dm',
+        id: '260113',
+        label: '王五测试',
+        description: 'userId: 260113 · openDingTalkId: DO2-3',
+        source: 'contact-search',
+      },
     ])
-    expect(calls[0]).toEqual(['chat', '+chat-list', '--types', 'p2p', '--page-size', '50', '--format', 'json'])
+    expect(calls[0]).toEqual(['contact', 'user', 'search', '--query', '测试', '--format', 'json'])
   })
 
-  it('filters peers locally because the command has no confirmed query flag', async () => {
-    const chats = writeJson(tempDir(), 'chats.json', {
-      peers: [
-        { userId: 'u-1', name: '张三' },
-        { userId: 'u-2', name: '李四' },
-      ],
+  it('keeps a contact dws matched by name even when the nick does not contain the query', async () => {
+    const contacts = writeJson(tempDir(), 'contacts.json', {
+      result: [{ name: 'Alice', nick: 'YY', userId: '260111', openDingTalkId: 'DO2-name-match' }],
     })
-    const candidates = await discoverPeers('李', settings(), {
-      runner: captureRunner({ FAKE_DWS_CHATS: chats }).runner,
+    const candidates = await discoverPeers('Alice', settings(), {
+      runner: captureRunner({ FAKE_DWS_CONTACTS: contacts }).runner,
     })
-    expect(candidates.map((candidate) => candidate.id)).toEqual(['u-2'])
+    expect(candidates).toEqual([
+      {
+        kind: 'dm',
+        id: '260111',
+        label: 'YY',
+        description: 'userId: 260111 · openDingTalkId: DO2-name-match',
+        source: 'contact-search',
+      },
+    ])
+  })
+
+  it('requires a contact name before spawning dws', async () => {
+    const { runner, calls } = captureRunner()
+    await expect(discoverPeers(undefined, settings(), { runner })).rejects.toMatchObject({ code: 'invalid-target' })
+    await expect(discoverPeers('  ', settings(), { runner })).rejects.toThrow(/contact name/)
+    expect(calls).toEqual([])
+  })
+
+  it('reports non-JSON contact output as a typed channel error', async () => {
+    const { runner } = captureRunner({ FAKE_DWS_CONTACTS_MODE: 'text' })
+    await expect(discoverPeers('张', settings(), { runner })).rejects.toMatchObject({ code: 'dws-output' })
+  })
+
+  it('reports a failed contact search as dws-failed', async () => {
+    const { runner } = captureRunner({ FAKE_DWS_CONTACT_EXIT: '3' })
+    await expect(discoverPeers('张', settings(), { runner })).rejects.toMatchObject({ code: 'dws-failed' })
+  })
+
+  it('caps the contact result set and removes duplicate identities', async () => {
+    const result = Array.from({ length: 60 }, (_value, index) => ({
+      name: `person-${index}`,
+      nick: `person-${index}`,
+      userId: `u-${index}`,
+      openDingTalkId: `DO2-${index}`,
+    }))
+    result.push({ name: 'person-dup', nick: 'person-dup', userId: 'u-1', openDingTalkId: 'DO2-dup' })
+    const contacts = writeJson(tempDir(), 'contacts.json', { result })
+    const candidates = await discoverPeers('person', settings(), {
+      runner: captureRunner({ FAKE_DWS_CONTACTS: contacts }).runner,
+    })
+    expect(candidates).toHaveLength(50)
+    expect(new Set(candidates.map((candidate) => candidate.id)).size).toBe(50)
   })
 })
 
@@ -153,6 +203,15 @@ describe('validateTarget', () => {
     const result = await validateTarget(group, settings(), { runner })
     expect(result.valid).toBe(false)
     expect(result.error).toContain('3')
+  })
+
+  it('reports a conversation id in a dm target as invalid without spawning dws', async () => {
+    const { runner, calls } = captureRunner()
+    const dm = { kind: 'dm', id: 'cid-abc=', mentionOnly: true, enabled: true } as const
+    const result = await validateTarget(dm, settings(), { runner })
+    expect(result.valid).toBe(false)
+    expect(result.error).toContain('conversation id')
+    expect(calls).toEqual([])
   })
 
   it('rejects an empty target id without spawning dws', async () => {

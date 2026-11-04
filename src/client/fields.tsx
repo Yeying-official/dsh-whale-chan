@@ -1,10 +1,12 @@
 /** Reusable form primitives driven by the shared field registry. */
 import { cloneElement, useId, type ReactElement } from 'react'
-import { Button, Switch, cx } from './controls.tsx'
+import { Badge, Button, Switch, cx } from './controls.tsx'
+import type { BadgeTone } from './controls.tsx'
 import { usePanel } from './provider.tsx'
 import { FIELDS, fieldsOf } from '../shared/fields.ts'
 import type { ApiIssue } from './api.ts'
 import type { FieldSpec } from '../shared/fields.ts'
+import type { ChannelTargetHealthView } from '../shared/models.ts'
 import type { SettingsBlock } from '../shared/settings.ts'
 import type { ReplyMode, TargetKind } from '../shared/limits.ts'
 
@@ -344,10 +346,66 @@ export interface RowsFieldProps {
   readonly onChange: (next: readonly TargetRowValue[]) => void
   readonly disabled?: boolean
   readonly rowErrors?: Readonly<Record<number, string>>
+  /** Live subscription state per target id; omitted when the host cannot report it. */
+  readonly health?: ReadonlyMap<string, ChannelTargetHealthView>
+}
+
+/** Tone of one subscription-state badge; the labels themselves live in the dictionary. */
+const HEALTH_TONES: Record<ChannelTargetHealthView['state'] | 'unknown', BadgeTone> = {
+  starting: 'info',
+  ready: 'success',
+  stopped: 'neutral',
+  failed: 'error',
+  orphaned: 'warning',
+  unknown: 'neutral',
+}
+
+/** The mention-only rule that actually applies to each target kind. */
+const MENTION_ONLY_HINTS = {
+  'at-me': 'settings.rows.mentionOnly.atMe',
+  group: 'settings.rows.mentionOnly.group',
+  dm: 'settings.rows.mentionOnly.dm',
+} as const
+
+/** Stack a control and its inline hint inside one table cell. */
+const CELL_STACK = { display: 'flex', flexDirection: 'column', gap: 4 } as const
+
+interface TargetHealthCellProps {
+  readonly entry: ChannelTargetHealthView | undefined
+}
+
+/**
+ * Read-only subscription state of one target row.
+ *
+ * Only the state label is localized. `lastError` is host data and is rendered
+ * verbatim, truncated visually with the complete text kept in `title`.
+ */
+function TargetHealthCell({ entry }: TargetHealthCellProps) {
+  const { t } = usePanel()
+  const state = entry?.state ?? 'unknown'
+  return (
+    <div style={CELL_STACK}>
+      <span>
+        <Badge tone={HEALTH_TONES[state]}>{t(`targets.health.${state}` as 'targets.health.ready')}</Badge>
+      </span>
+      {entry !== undefined && entry.restarts > 0 ? (
+        <span className="wc-cell-meta">{t('targets.health.restarts', { count: entry.restarts })}</span>
+      ) : null}
+      {entry?.lastError ? (
+        <span
+          className="wc-cell-meta"
+          style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          title={entry.lastError}
+        >
+          {entry.lastError}
+        </span>
+      ) : null}
+    </div>
+  )
 }
 
 /** Target-row editor: kind, id, label, mention-only, reply mode and enabled. */
-export function RowsField({ rows, onChange, disabled, rowErrors = {} }: RowsFieldProps) {
+export function RowsField({ rows, onChange, disabled, rowErrors = {}, health }: RowsFieldProps) {
   const { t } = usePanel()
   const update = (index: number, patch: Partial<TargetRowValue>) =>
     onChange(rows.map((row, position) => (position === index ? { ...row, ...patch } : row)))
@@ -369,6 +427,7 @@ export function RowsField({ rows, onChange, disabled, rowErrors = {} }: RowsFiel
                 <th scope="col">{t('settings.rows.mentionOnly')}</th>
                 <th scope="col">{t('settings.rows.replyMode')}</th>
                 <th scope="col">{t('settings.rows.enabled')}</th>
+                {health ? <th scope="col">{t('targets.health.column')}</th> : null}
                 <th scope="col">{t('common.actions')}</th>
               </tr>
             </thead>
@@ -391,15 +450,28 @@ export function RowsField({ rows, onChange, disabled, rowErrors = {} }: RowsFiel
                     </select>
                   </td>
                   <td>
-                    <input
-                      id={`wc-target-row-${index}`}
-                      className="wc-input wc-mono"
-                      aria-label={`${t('settings.rows.id')} ${index + 1}`}
-                      value={row.id}
-                      disabled={disabled}
-                      aria-invalid={rowErrors[index] ? true : undefined}
-                      onChange={(event) => update(index, { id: event.target.value })}
-                    />
+                    <div style={CELL_STACK}>
+                      <input
+                        id={`wc-target-row-${index}`}
+                        className="wc-input wc-mono"
+                        aria-label={`${t('settings.rows.id')} ${index + 1}`}
+                        value={row.id}
+                        disabled={disabled}
+                        placeholder={
+                          row.kind === 'at-me'
+                            ? t('settings.rows.idPlaceholder.atMe')
+                            : row.kind === 'dm'
+                              ? t('settings.rows.idPlaceholder.dm')
+                              : undefined
+                        }
+                        aria-invalid={rowErrors[index] ? true : undefined}
+                        onChange={(event) => update(index, { id: event.target.value })}
+                      />
+                      {row.kind === 'at-me' ? (
+                        <span className="wc-cell-meta">{t('settings.rows.idHint.atMe')}</span>
+                      ) : null}
+                      {row.kind === 'dm' ? <span className="wc-cell-meta">{t('settings.rows.idHint.dm')}</span> : null}
+                    </div>
                   </td>
                   <td>
                     <input
@@ -411,12 +483,15 @@ export function RowsField({ rows, onChange, disabled, rowErrors = {} }: RowsFiel
                     />
                   </td>
                   <td>
-                    <Switch
-                      checked={row.mentionOnly}
-                      label={`${t('settings.rows.mentionOnly')} ${index + 1}`}
-                      disabled={disabled}
-                      onChange={(next) => update(index, { mentionOnly: next })}
-                    />
+                    <div style={CELL_STACK}>
+                      <Switch
+                        checked={row.mentionOnly}
+                        label={`${t('settings.rows.mentionOnly')} ${index + 1}`}
+                        disabled={disabled || row.kind !== 'group'}
+                        onChange={(next) => update(index, { mentionOnly: next })}
+                      />
+                      <span className="wc-cell-meta">{t(MENTION_ONLY_HINTS[row.kind])}</span>
+                    </div>
                   </td>
                   <td>
                     <select
@@ -441,6 +516,11 @@ export function RowsField({ rows, onChange, disabled, rowErrors = {} }: RowsFiel
                       onChange={(next) => update(index, { enabled: next })}
                     />
                   </td>
+                  {health ? (
+                    <td>
+                      <TargetHealthCell entry={health.get(row.id)} />
+                    </td>
+                  ) : null}
                   <td>
                     <div className="wc-cell-actions">
                       <Button

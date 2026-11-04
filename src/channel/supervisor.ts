@@ -14,7 +14,7 @@ import type { InboundMessage } from '../core/model.ts'
 import type { Settings } from '../shared/settings.ts'
 import { resolveDwsCommand } from './command.ts'
 import { ChannelError } from './errors.ts'
-import { describeError, describeExit, redact } from './log.ts'
+import { describeError, describeExit, redact, truncate } from './log.ts'
 import { normalizeEvent, summarizeRawEvent } from './normalize.ts'
 import { DwsProcess, runOnce, type DwsExitInfo, type ReadyInfo, type SpawnFn } from './process.ts'
 import { consumeSpec, dedupeTargets, resolveOwnerUserId, targetKey, withProfile } from './targets.ts'
@@ -50,6 +50,15 @@ const PENDING_WARN_THRESHOLD = 500
 /** Guard against `2 ** n` overflow when a custom base backoff is huge. */
 const MAX_BACKOFF_EXPONENT = 10
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** One non-empty string field of a server error object. */
+function errorText(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value : undefined
+}
+
 interface TargetRuntime {
   readonly target: DwsTarget
   readonly key: string
@@ -63,6 +72,12 @@ interface TargetRuntime {
   readyAt: string | undefined
   subscribeId: string | undefined
   lastError: string | undefined
+  /** Consecutive server-side rejections since the last ready. */
+  serverFailures: number
+  /** Retry hint the server attached to this attempt's rejection, in milliseconds. */
+  retryAfterMs: number | undefined
+  /** Redacted rejection reason of this attempt; undefined when it ended any other way. */
+  serverReason: string | undefined
   pending: number
   malformed: number
   chain: Promise<void>
@@ -147,6 +162,9 @@ export class ChannelSupervisor {
         readyAt: undefined,
         subscribeId: undefined,
         lastError: undefined,
+        serverFailures: 0,
+        retryAfterMs: undefined,
+        serverReason: undefined,
         pending: 0,
         malformed: 0,
         chain: Promise.resolve(),
@@ -220,6 +238,10 @@ export class ChannelSupervisor {
     }
 
     runtime.state = 'starting'
+    // A rejection belongs to one attempt: a new process starts with no server
+    // verdict and no server-supplied retry hint of its own.
+    runtime.serverReason = undefined
+    runtime.retryAfterMs = undefined
     const process = new DwsProcess({
       command: this.#resolvedCommand,
       baseArgs: this.#baseArgs,
@@ -252,6 +274,9 @@ export class ChannelSupervisor {
     runtime.subscribeId = info.subscribeId
     runtime.failures = 0
     runtime.lastError = undefined
+    runtime.serverFailures = 0
+    runtime.retryAfterMs = undefined
+    runtime.serverReason = undefined
     this.#logger.info(`channel: ${runtime.target.kind} subscription ready`)
   }
 
@@ -268,20 +293,53 @@ export class ChannelSupervisor {
 
   /** Record a failure and schedule one bounded restart. */
   #fail(runtime: TargetRuntime, error: unknown): void {
+    const rejection = runtime.serverReason
     runtime.state = 'failed'
-    runtime.lastError = describeError(error)
+    // A server-side rejection is the reason the operator has to see; the exit
+    // that follows it adds nothing.
+    runtime.lastError = rejection ?? describeError(error)
     this.#logger.warn(`channel: ${runtime.target.kind} subscription failed: ${runtime.lastError}`)
     if (!this.#running || this.#stopping || runtime.timer) return
+    // Repeated rejections with no server-supplied retry hint mean the target
+    // itself is wrong (a malformed id, a refused subscription): retrying would
+    // only replace the real reason with more exit noise.
+    if (rejection !== undefined && runtime.serverFailures >= 3 && runtime.retryAfterMs === undefined) {
+      this.#logger.error(
+        `channel: ${runtime.target.kind} subscription was rejected ${runtime.serverFailures} times; not restarting`,
+      )
+      return
+    }
     runtime.failures += 1
     runtime.restarts += 1
     const exponent = Math.min(runtime.failures - 1, MAX_BACKOFF_EXPONENT)
-    const delay = Math.min(this.#maxBackoffMs, this.#baseBackoffMs * 2 ** exponent)
+    const backoff = this.#baseBackoffMs * 2 ** exponent
+    // Honour the server's retry hint when it asks for longer than the local
+    // backoff, but never exceed the configured cap.
+    const delay = Math.min(this.#maxBackoffMs, Math.max(backoff, runtime.retryAfterMs ?? 0))
     this.#logger.info(`channel: restarting ${runtime.target.kind} subscription in ${delay}ms`)
     runtime.timer = setTimeout(() => {
       runtime.timer = undefined
       this.#launch(runtime)
     }, delay)
     runtime.timer.unref?.()
+  }
+
+  /** Record one structured server rejection without counting it as malformed. */
+  #handleServerError(runtime: TargetRuntime, error: Record<string, unknown>): void {
+    const text =
+      errorText(error.message) ??
+      errorText(error.cause) ??
+      errorText(error.reason) ??
+      'dws rejected the subscription without a reason'
+    const detail = truncate(redact(text).replace(/\s+/g, ' ').trim(), 240)
+    runtime.lastError = detail
+    runtime.serverReason = detail
+    runtime.serverFailures += 1
+    const retryAfter = error.retry_after_seconds
+    if (typeof retryAfter === 'number' && Number.isFinite(retryAfter) && retryAfter > 0) {
+      runtime.retryAfterMs = retryAfter * 1_000
+    }
+    this.#logger.warn(`channel: ${runtime.target.kind} subscription rejected: ${detail}`)
   }
 
   #handleLine(runtime: TargetRuntime, line: string): void {
@@ -291,6 +349,14 @@ export class ChannelSupervisor {
     } catch {
       runtime.malformed += 1
       this.#logger.debug('channel: dropped a line that is not JSON')
+      return
+    }
+
+    // `dws` reports a refused subscription as a structured `error` object on
+    // stdout, not as an event: consuming it as one would label a server verdict
+    // as a malformed payload and hide the only description of what went wrong.
+    if (isRecord(parsed) && isRecord(parsed.error)) {
+      this.#handleServerError(runtime, parsed.error)
       return
     }
 

@@ -1,6 +1,6 @@
 # 007 架构
 
-> 当前状态：WS1 建立 core 领域层、SQLite 存储、持久 effect 队列与 pass 调度器；WS2 实现 dws 通道；WS3 实现人设、提示、分类、检索与回复策略；WS4 实现 DSH 任务执行器、会话式回复模型与两套 agent preset；WS5a 实现持久化设置服务（schema v2）、管理 API、视图与状态目录锁；WS5b 完成组合根：通道订阅、回复流水线、任务执行与结果回帖、暂停/恢复、过期清扫与真实健康；WS6 实现面板；WS14 增加会话归档、回复器/worker generation 与工作区记录重建，管理 API 增至 **20 条**。**本文是各层整合的统一入口**：每层对外提供什么端口、依赖允许指向哪里，以本文为准。
+> 当前状态：WS1 建立 core 领域层、SQLite 存储、持久 effect 队列与 pass 调度器；WS2 实现 dws 通道；WS3 实现人设、提示、分类、检索与回复策略；WS4 实现 DSH 任务执行器、会话式回复模型与两套 agent preset；WS5a 实现持久化设置服务（schema v2）、管理 API、视图与状态目录锁；WS5b 完成组合根：通道订阅、回复流水线、任务执行与结果回帖、暂停/恢复、过期清扫与真实健康；WS6 实现面板；WS14 增加会话归档、回复器/worker generation 与工作区记录重建；WS15 增加按目标的订阅健康（`GET channel`）、服务端拒绝的可观测性与单聊 open id 出站规则，管理 API 增至 **21 条**。**本文是各层整合的统一入口**：每层对外提供什么端口、依赖允许指向哪里，以本文为准。
 
 ## 1. 分层与依赖方向
 
@@ -174,8 +174,8 @@ Effects 不感知领域事务：调用方必须在命令事务提交后入队。
 | `EventSink`                                                    | 接收解码后的 `InboundMessage`；由 app 层提供，负责落库                                               |
 | `ChannelLogger`                                                | 已脱敏的日志接口                                                                                     |
 | `DingTalkChannel`                                              | 门面：`start/stop/send/sendWithReceipt/discoverGroups/discoverPeers/validateTarget/probeAuth/health` |
-| `ChannelSupervisor`                                            | 每个目标一个订阅进程，指数退避重启，`stop()` 不 SIGKILL                                              |
-| `DwsTarget` / `TargetCandidate` / `TargetHealth` / `AuthState` | 对外只读状态                                                                                         |
+| `ChannelSupervisor`                                            | 每个目标一个订阅进程，指数退避重启，服务端拒绝单独计数，`stop()` 不 SIGKILL                          |
+| `DwsTarget` / `TargetCandidate` / `TargetHealth` / `AuthState` | 对外只读状态；`TargetHealth` 带 `state`/`restarts`/`readyAt`/`lastError`（脱敏）                     |
 
 通道不认识领域、不写库、不决定要不要回复；它只把「收到的消息」与「要发的消息」变成 CLI 调用。
 
@@ -235,7 +235,7 @@ Outbound 有两条入口，共用同一个发送处理器：
 
 ### 6.5 app：HTTP（WS5a）
 
-`createHttpHandler(HttpDeps)` 实现 20 条冻结路由；`httpDeps(runtime)` 用 getter 惰性取 `settings`/`store`/`engine`/`effects`/`clock`，因此路由可以在启动完成前挂载，未就绪时统一返回 503。`Runtime` 打开 `<stateDir>/state.db`、`SettingsService`、`Engine`、`Effects`，并持有 `<stateDir>/.lock`（proper-lockfile，stale 10 s）。通道端口 `ChannelPort` 来自组合根；没有通道时 `targets/discover|validate` 返回 503 `channel_unavailable`。任务动作只 `enqueue('launch', …)`，实际执行由 `launch` handler 负责。
+`createHttpHandler(HttpDeps)` 实现 21 条冻结路由；`httpDeps(runtime)` 用 getter 惰性取 `settings`/`store`/`engine`/`effects`/`clock`，因此路由可以在启动完成前挂载，未就绪时统一返回 503。`Runtime` 打开 `<stateDir>/state.db`、`SettingsService`、`Engine`、`Effects`，并持有 `<stateDir>/.lock`（proper-lockfile，stale 10 s）。通道端口 `ChannelPort` 来自组合根；没有通道时 `targets/discover|validate` 返回 503 `channel_unavailable`。任务动作只 `enqueue('launch', …)`，实际执行由 `launch` handler 负责。
 
 视图全部由 `src/app/views.ts` 从领域对象投影到 `src/shared/models.ts`：domain `approved` → 面板 `queued`，审计行来自 `events` 表（引擎事件由 Runtime 的 `emit` 写入）。`targetsView` 额外填充只读的 `workspace` 投影（`ready` 带具体目录，`per-conversation` 的 `path` 为 `null`），字段来自 `WorkspaceService`，不落库、不可写。
 
@@ -254,18 +254,18 @@ Outbound 有两条入口，共用同一个发送处理器：
 
 健康字段（`GET health` 的 `checks`；`dws` 汇总在顶层）：
 
-| check      | 来源                                                      | error 条件                                                                                            |
-| ---------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `state`    | `Runtime.info()`                                          | 无                                                                                                    |
-| `stateDir` | 目录可写                                                  | 不可写                                                                                                |
-| `database` | `state.db` 打开、schema 版本                              | 未打开                                                                                                |
-| `lock`     | 状态目录锁                                                | 锁丢失为 degraded                                                                                     |
-| `settings` | 加载警告                                                  | 有警告为 degraded                                                                                     |
-| `prompts`  | 五份模板预载                                              | 缺失/空白 → error                                                                                     |
-| `effects`  | `pending`/`dead` 计数                                     | 有 dead 行 → degraded                                                                                 |
-| `channel`  | 通道 health（state/running/targets）、启动错误            | 启动失败或授权无效 → error；禁用/暂停/无 enabled target → `ok`（idle）；应有订阅却 stopped → degraded |
-| `auth`     | `probeAuth()` 的 available/authenticated/tokenValid/owner | 未安装、未登录、token 失效、无账号 id → error                                                         |
-| `executor` | 是否装配、运行中的任务数                                  | 未装配 → degraded `unknown`（仅 API-only 模式）                                                       |
+| check      | 来源                                                      | error 条件                                                                                                                                                     |
+| ---------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `state`    | `Runtime.info()`                                          | 无                                                                                                                                                             |
+| `stateDir` | 目录可写                                                  | 不可写                                                                                                                                                         |
+| `database` | `state.db` 打开、schema 版本                              | 未打开                                                                                                                                                         |
+| `lock`     | 状态目录锁                                                | 锁丢失为 degraded                                                                                                                                              |
+| `settings` | 加载警告                                                  | 有警告为 degraded                                                                                                                                              |
+| `prompts`  | 五份模板预载                                              | 缺失/空白 → error                                                                                                                                              |
+| `effects`  | `pending`/`dead` 计数                                     | 有 dead 行 → degraded                                                                                                                                          |
+| `channel`  | 通道 health（state/running/targets）、启动错误            | 启动失败或授权无效 → error；禁用/暂停/无 enabled target → `ok`（idle）；应有订阅却 stopped → degraded；目标 `failed` 的具体原因在 `GET channel` 的 `lastError` |
+| `auth`     | `probeAuth()` 的 available/authenticated/tokenValid/owner | 未安装、未登录、token 失效、无账号 id → error                                                                                                                  |
+| `executor` | 是否装配、运行中的任务数                                  | 未装配 → degraded `unknown`（仅 API-only 模式）                                                                                                                |
 
 `monitor.running` 与 `overview.monitor.running` 取真实通道运行状态，不再写死 `false`。
 
@@ -323,6 +323,29 @@ skipArchived(generation)：命中 archivedSessionIds 就前进，最多 32 步�
 
 **边界**：不删目录、不删文件、不删会话日志、不 unarchive、无回滚；generation 只增，所以在 DSH 手动 unarchive 旧会话不会恢复上下文。候选 >500 时只处理有序前缀，已归档候选仍占名额。审计只记计数，不记 session id 列表。
 
+### 6.9 订阅健康与错误（WS15）
+
+订阅状态不在数据库里，它是一条**只读投影链**：
+
+```text
+DwsProcess / ChannelSupervisor       每个目标一个 child，state ∈ starting|ready|stopped|failed|orphaned
+        │  TargetHealth{state,restarts,readyAt,lastError}
+        ▼
+DingTalkChannel.health()             { state, running, targets[] }（聚合状态由目标状态推导）
+        │
+        ▼
+Runtime.status() → RuntimeServiceStatus.channelState / channelTargets / channelError
+        │
+        ├─▶ GET health 的 channel 检查项（健康徽标、概览）
+        └─▶ channelView() → ChannelHealthView → GET channel → 目标页「订阅」列
+```
+
+- **`running` 是派生的**：`channelState !== 'stopped'`；`stopped` 是“没有任何订阅”的唯一聚合状态，所以面板不需要第二个布尔。
+- **`lastError` 只存最近一次失败/拒绝**，写入前 `redact` + 压成单行 + 截断 240 字符；`GET channel` 原样透出，面板用 `title` 保留全文。它是数据而不是文案，不做翻译。
+- **失败语义**：服务端拒绝（stdout 上的 `{"error":{…}}`）先记原因再进入退避；连续 3 次拒绝且没有 `retry_after_seconds` 时**不再重启**，`state` 停在 `failed`，避免用退出噪音覆盖真实原因。启动错误（`ChannelError`）记在 `RuntimeServiceStatus.channelError`，与目标级 `lastError` 分开。
+- **`GET channel` 不写库、不改状态**：它不触发重启、不清空 `lastError`，也不读写设置；运行时未就绪返回 `503 state_unavailable`。面板把它当纯增量数据源——该路由失败时表格少一列，编辑/保存/发现/校验/归档完全不受影响。
+- **`orphaned` 只是标签**：进程没能在宽限期内退出时保留可见，清理仍靠 `dws event stop`（见 009 §6），`GET channel` 不会代替运维动手。
+
 ## 7. 与其它工作流的边界
 
 | 工作流          | 交界                                                                                                                                                                                                                                                                                       |
@@ -333,6 +356,7 @@ skipArchived(generation)：命中 archivedSessionIds 就前进，最多 32 步�
 | WS5 设置/HTTP   | 通过 `store-read` 提供只读视图，通过 `Engine` 提供命令；组合根用 `DshSessionHost` 同时构建 worker 执行器与 `SessionModel`（回复器会话）；`launch`/`finish`/`send` 由 app 注册，不改领域状态机                                                                                              |
 | WS6 面板        | 只经 WS5 的 HTTP 合约读状态与发命令                                                                                                                                                                                                                                                        |
 | WS14 归档/恢复  | app 层的 `session-recovery.ts` 只读 `workspaceRegistry`（`resolveByPath`/`create`/`archivedSessionIds`）与 KV；`session-archive.ts` 只读 registry `list`/`archivedSessionIds`、`sessionPersistence.list` 并调用 `archiveSession`；executor 只经组合根注入的两个回调参与，不直接写 app 状态 |
+| WS15 订阅健康   | `channel` 只产出 `TargetHealth`（含脱敏 `lastError`），不认识 HTTP 与设置；`views.ts` 的 `channelView` 只做投影；面板只经 `GET channel` 读，不持有订阅状态、不触发重启                                                                                                                     |
 
 ## 8. 测试索引
 
@@ -354,9 +378,10 @@ skipArchived(generation)：命中 archivedSessionIds 就前进，最多 32 步�
 | `tests/executor-session.spec.ts`    | 回合匹配、订阅/扫描竞态、超时、中止、工作区标题保留/显式改名（23 条）                                                                                |
 | `tests/executor-role-model.spec.ts` | 模型路由映射、空配置不注入、已有选择不覆盖、解析失败回退（12 条）                                                                                    |
 | `tests/presets.spec.ts`             | 宿主行仍在、两套 preset 的字段与工具集、中性人设前缀、无重复 id（17 条）                                                                             |
-| `tests/contract.spec.ts`            | 分层依赖规则、共享合约（含 20 条路由与版本一致）、文档数量                                                                                           |
+| `tests/contract.spec.ts`            | 分层依赖规则、共享合约（含 21 条路由与版本一致）、文档数量                                                                                           |
 | `tests/settings-service.spec.ts`    | 默认值、持久化、revision、冲突、深合并、损坏降级、v1→v2、history（16 条）                                                                            |
-| `tests/api-routes.spec.ts`          | 20 条路由、分页、错误码、audit、channel 503/400、归档 200/400/404/405/403/503（30 条）                                                               |
+| `tests/api-routes.spec.ts`          | 21 条路由、分页、错误码、audit、channel 503/400、`GET channel` 200/503、归档 200/400/404/405/403/503（32 条）                                        |
+| `tests/thread-state.spec.ts`        | 单聊出站目标保留 `open:` 前缀、`threadKeyOf` 去前缀、防环 SQL 三种历史写法（7 条）                                                                   |
 | `tests/task-actions.spec.ts`        | 批准/拒绝/取消/重试、会话工作区缺省、launch effect（10 条）                                                                                          |
 | `tests/runtime-lock.spec.ts`        | 打开/持久化/锁冲突/释放/启动失败（6 条）                                                                                                             |
 | `tests/core-outbound.spec.ts`       | `queueFollowup` 幂等/目标匹配/空值；outbound 终态与重复上报（10 条）                                                                                 |
@@ -371,7 +396,7 @@ skipArchived(generation)：命中 archivedSessionIds 就前进，最多 32 步�
 
 - **没有历史补拉（backfill）**：`dws` 事件流只支持按 TTL 的消费窗口，WS2 没有实现「过去消息」补拉；插件只处理启动后收到的消息，不在本期伪造历史。
 - **模板缺失即插件降级**：`prompts/*.md` 属于包完整性；任一模板缺失/空白时通道、流水线与 effect 队列都不装配，health 显示 `prompts: error`。这是有意的 fail-closed，不尝试通用提示词。
-- **review 无发送路由**：闸门降级为 `review` 时只写 Draft；面板（WS6）只读展示并允许复制，由主人自行在钉钉发送。`POST decisions/:id/send` 需要扩 20 条冻结合约，列入 v0.2 backlog。
+- **review 无发送路由**：闸门降级为 `review` 时只写 Draft；面板（WS6）只读展示并允许复制，由主人自行在钉钉发送。`POST decisions/:id/send` 需要扩 21 条冻结合约，列入 v0.2 backlog。
 - **归档只增不减**：`session.*-generation` 只前进；在 DSH 手动 unarchive 旧会话不会回退 generation，旧回复上下文不会自动恢复。归档并集包含主人手建的会话与别目标显式批准到该目录的任务会话，且不删目录/文件/日志、不提供 unarchive。
 - **归档候选有上限**：单次最多枚举 500 个候选（排序后截断、当前回复器不丢）；超过时 `truncated=true`，已归档候选仍占名额，重复调用不会推进尾部。
 - **归档审计只有计数**：`workspace.sessions-archived` 记录 threadKey/targetId 与四类计数，不记录 session id 列表；需要逐条核对时看面板结果摘要或 DSH 的归档列表。

@@ -29,6 +29,7 @@ import { SettingsConflictError, SettingsService, SettingsValueError } from './se
 import type { Store } from './store.ts'
 import {
   auditView,
+  channelView,
   domainTaskStatus,
   healthView,
   isTargetKind,
@@ -457,6 +458,11 @@ async function route(
     if (name === 'health') {
       if (!methodAllowed(request, response, 'GET')) return
       sendJson(response, 200, healthView(deps.runtime.viewContext()))
+      return
+    }
+    if (name === 'channel') {
+      if (!methodAllowed(request, response, 'GET')) return
+      sendJson(response, 200, channelView(deps.runtime.status()))
       return
     }
     if (name === 'audit') {

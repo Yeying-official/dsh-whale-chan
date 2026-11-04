@@ -12,6 +12,7 @@ import type {
   ArchiveTargetSessionsRequest,
   ArchiveTargetSessionsResult,
   AuditPage,
+  ChannelHealthView,
   DiscoverTargetsRequest,
   DiscoverTargetsResult,
   Health,
@@ -189,6 +190,12 @@ export interface ApiContract {
     request: Empty
     response: Health
   }
+  'GET channel': {
+    method: 'GET'
+    path: 'channel'
+    request: Empty
+    response: ChannelHealthView
+  }
   'POST monitor/pause': {
     method: 'POST'
     path: 'monitor/pause'
@@ -233,6 +240,7 @@ export const API_ROUTES = [
   { key: 'PUT settings/:block', method: 'PUT', path: 'settings/:block' },
   { key: 'GET persona', method: 'GET', path: 'persona' },
   { key: 'GET health', method: 'GET', path: 'health' },
+  { key: 'GET channel', method: 'GET', path: 'channel' },
   { key: 'POST monitor/pause', method: 'POST', path: 'monitor/pause' },
   { key: 'GET audit', method: 'GET', path: 'audit' },
 ] as const satisfies readonly ApiRouteDefinition[]

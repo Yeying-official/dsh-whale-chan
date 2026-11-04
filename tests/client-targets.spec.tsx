@@ -15,20 +15,48 @@ import {
   targetFixture,
   targetsFixture,
 } from './client-harness.tsx'
-import type { ArchiveTargetSessionsResult } from '../src/shared/models.ts'
+import type { TargetRowValue } from '../src/client/fields.tsx'
+import type { ArchiveTargetSessionsResult, ChannelHealthView, ChannelTargetHealthView } from '../src/shared/models.ts'
 
 afterEach(() => {
   Reflect.deleteProperty(navigator, 'clipboard')
   resetPanelTest()
 })
 
-const row = {
-  kind: 'group' as const,
+const row: TargetRowValue = {
+  kind: 'group',
   id: 'group-1',
   label: '项目群',
   mentionOnly: true,
-  replyMode: 'auto' as const,
+  replyMode: 'auto',
   enabled: true,
+}
+
+const atMeRow: TargetRowValue = {
+  kind: 'at-me',
+  id: 'at-me',
+  label: '@我',
+  mentionOnly: true,
+  replyMode: 'auto',
+  enabled: true,
+}
+
+const dmRow: TargetRowValue = {
+  kind: 'dm',
+  id: 'open:abc',
+  label: '小明',
+  mentionOnly: false,
+  replyMode: 'auto',
+  enabled: true,
+}
+
+function channelTarget(overrides: Partial<ChannelTargetHealthView> = {}): ChannelTargetHealthView {
+  return { targetId: 'group-1', kind: 'group', state: 'ready', restarts: 0, ...overrides }
+}
+
+function channelHealth(targets: readonly ChannelTargetHealthView[]): ChannelHealthView {
+  const failed = targets.some((target) => target.state === 'failed' || target.state === 'orphaned')
+  return { state: failed ? 'degraded' : 'ready', running: true, targets }
 }
 
 const workspacePath = 'E:/state/workspaces/group-1'
@@ -77,11 +105,12 @@ function renderTargets(handler: Parameters<typeof renderPanel>[0]) {
 function handler(
   options: {
     readonly targets?: ReturnType<typeof targetsFixture>
-    readonly rows?: readonly (typeof row)[]
+    readonly rows?: readonly TargetRowValue[]
     readonly revision?: () => number
     readonly put?: (body: { value: { rows: readonly unknown[] }; revision: number }) => ReturnType<typeof reply>
     readonly discover?: ReturnType<typeof reply>
     readonly validate?: ReturnType<typeof reply>
+    readonly channel?: ReturnType<typeof reply>
     readonly archive?: (request: { url: URL; method: string; body: unknown }) => ReturnType<typeof reply>
   } = {},
 ) {
@@ -96,6 +125,9 @@ function handler(
     if (path === 'settings/targets' && request.method === 'PUT') {
       if (options.put) return options.put(request.body as { value: { rows: readonly unknown[] }; revision: number })
       return reply(200, { block: 'targets', value: { rows }, revision: 2 })
+    }
+    if (path === 'channel' && request.method === 'GET') {
+      return options.channel ?? reply(200, channelHealth([channelTarget()]))
     }
     if (path === 'targets/discover' && request.method === 'POST') {
       return options.discover ?? reply(200, { candidates: [{ kind: 'group', id: 'group-2', label: '新群' }] })
@@ -445,5 +477,106 @@ describe('targets page', () => {
     ).toBe(true)
     release()
     expect(await within(dialog).findByText(zh['targets.archive.resultTitle'])).toBeTruthy()
+  })
+})
+
+describe('target subscription health', () => {
+  it('renders the subscription column with state, restarts and the raw last error', async () => {
+    renderTargets(
+      handler({
+        rows: [row, dmRow],
+        targets: targetsFixture([targetFixture(), targetFixture({ kind: 'dm', id: 'open:abc', label: '小明' })]),
+        channel: reply(
+          200,
+          channelHealth([
+            channelTarget({ targetId: 'group-1', state: 'ready' }),
+            channelTarget({
+              targetId: 'open:abc',
+              kind: 'dm',
+              state: 'failed',
+              restarts: 3,
+              lastError: 'dws exited with code 2',
+            }),
+          ]),
+        ),
+      }),
+    )
+    await screen.findByDisplayValue('项目群')
+    expect(await screen.findByRole('columnheader', { name: zh['targets.health.column'] })).toBeTruthy()
+    expect(await screen.findByText(zh['targets.health.ready'])).toBeTruthy()
+    expect(screen.getByText(zh['targets.health.failed'])).toBeTruthy()
+    expect(screen.getByText(zh['targets.health.restarts'].replace('{count}', '3'))).toBeTruthy()
+    // Host data is displayed verbatim, never translated, with the full text in `title`.
+    const error = screen.getByText('dws exited with code 2')
+    expect(error.getAttribute('title')).toBe('dws exited with code 2')
+  })
+
+  it('disables mentionOnly for at-me and dm rows and keeps it editable for groups', async () => {
+    renderTargets(
+      handler({
+        targets: targetsFixture([
+          targetFixture(),
+          targetFixture({ kind: 'at-me', id: 'at-me', label: '@我' }),
+          targetFixture({ kind: 'dm', id: 'open:abc', label: '小明', mentionOnly: false }),
+        ]),
+        rows: [row, atMeRow, dmRow],
+      }),
+    )
+    await screen.findByDisplayValue('项目群')
+    const name = (index: number) => `${zh['settings.rows.mentionOnly']} ${index}`
+    const groupSwitch = screen.getByRole('switch', { name: name(1) }) as HTMLButtonElement
+    const atMeSwitch = screen.getByRole('switch', { name: name(2) }) as HTMLButtonElement
+    const dmSwitch = screen.getByRole('switch', { name: name(3) }) as HTMLButtonElement
+    expect(groupSwitch.disabled).toBe(false)
+    expect(atMeSwitch.disabled).toBe(true)
+    expect(dmSwitch.disabled).toBe(true)
+    // The rule each kind actually follows is visible, not only a tooltip.
+    expect(screen.getByText(zh['settings.rows.mentionOnly.group'])).toBeTruthy()
+    expect(screen.getByText(zh['settings.rows.mentionOnly.atMe'])).toBeTruthy()
+    expect(screen.getByText(zh['settings.rows.mentionOnly.dm'])).toBeTruthy()
+    expect(atMeSwitch.getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('labels the id field by kind: at-me is a marker, dm takes a user id', async () => {
+    renderTargets(
+      handler({
+        targets: targetsFixture([
+          targetFixture({ kind: 'at-me', id: 'at-me', label: '@我' }),
+          targetFixture({ kind: 'dm', id: 'open:abc', label: '小明' }),
+        ]),
+        rows: [atMeRow, dmRow],
+      }),
+    )
+    await screen.findByDisplayValue('at-me')
+    const atMeInput = screen.getByLabelText(`${zh['settings.rows.id']} 1`) as HTMLInputElement
+    const dmInput = screen.getByLabelText(`${zh['settings.rows.id']} 2`) as HTMLInputElement
+    expect(atMeInput.getAttribute('placeholder')).toBe(zh['settings.rows.idPlaceholder.atMe'])
+    expect(dmInput.getAttribute('placeholder')).toBe(zh['settings.rows.idPlaceholder.dm'])
+    expect(screen.getByText(zh['settings.rows.idHint.atMe'])).toBeTruthy()
+    expect(screen.getByText(zh['settings.rows.idHint.dm'])).toBeTruthy()
+  })
+
+  it('keeps targets editable, saveable and validatable when subscription health fails', async () => {
+    const user = userEvent.setup()
+    const view = renderTargets(handler({ channel: failure(503, 'state_unavailable') }))
+    await screen.findByDisplayValue('项目群')
+    expect(await screen.findByText(zh['targets.health.unavailable'])).toBeTruthy()
+    expect(screen.queryByRole('columnheader', { name: zh['targets.health.column'] })).toBeNull()
+
+    const label = screen.getByLabelText(`${zh['settings.rows.label']} 1`) as HTMLInputElement
+    expect(label.disabled).toBe(false)
+    await user.clear(label)
+    await user.type(label, '新名称')
+    await user.click(screen.getByRole('button', { name: zh['targets.save'] }))
+    await waitFor(() => expect(requestBodies(view.fetchMock, 'PUT', 'settings/targets')).toHaveLength(1))
+    const body = requestBodies(view.fetchMock, 'PUT', 'settings/targets')[0] as {
+      value: { rows: readonly { label: string }[] }
+    }
+    expect(body.value.rows[0]?.label).toBe('新名称')
+
+    await user.click(screen.getByRole('button', { name: zh['targets.validate'] }))
+    expect(
+      await screen.findByText(zh['targets.validate.summary'].replace('{valid}', '1').replace('{invalid}', '1')),
+    ).toBeTruthy()
   })
 })

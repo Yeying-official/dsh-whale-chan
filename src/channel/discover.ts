@@ -6,11 +6,12 @@
  * A name is never turned into an id implicitly anywhere else in the channel, so
  * a wrong search result cannot silently subscribe or send.
  *
- * The `+chat-search` shape (`{ chats: [{ name, openConversationId }] }`) was
- * observed on dws 1.0.66. The `+chat-list --types p2p` peer shape is
- * **provisional**: it is parsed defensively from several plausible key spellings
- * and must be confirmed on a real account before it is trusted (see
- * `docs/009-dws-protocol.md`).
+ * One-to-one targets are discovered through the contact directory
+ * (`contact user search`), the only observed command that returns a peer's
+ * `userId` and `openDingTalkId`. The p2p conversation list is deliberately not
+ * used: it only carries an `openConversationId`, which addresses a conversation
+ * rather than a person, and `event consume ... --open-dingtalk-id
+ * <conversation id>` is rejected by the server. See `docs/009-dws-protocol.md`.
  */
 import type { Settings } from '../shared/settings.ts'
 import { ChannelError } from './errors.ts'
@@ -37,17 +38,10 @@ const GROUP_ID_FIELDS = [
   'id',
 ] as const
 const GROUP_LABEL_FIELDS = ['name', 'title', 'conversationTitle', 'chatName', 'groupName'] as const
-const PEER_USER_FIELDS = ['userId', 'staffId', 'peerUserId', 'user_id', 'staff_id'] as const
-const PEER_OPEN_FIELDS = [
-  'openDingTalkId',
-  'openDingTalkUserId',
-  'openConversationId',
-  'openId',
-  'conversationId',
-  'chatId',
-  'id',
-] as const
-const PEER_LABEL_FIELDS = ['name', 'nick', 'nickname', 'displayName', 'userName', 'title', 'conversationTitle'] as const
+const PEER_USER_FIELDS = ['userId', 'staffId', 'user_id', 'staff_id'] as const
+const PEER_OPEN_FIELDS = ['openDingTalkId', 'openDingTalkUserId', 'openDingtalkId', 'open_id'] as const
+const PEER_NICK_FIELDS = ['nick', 'nickname', 'nickName', 'displayName'] as const
+const PEER_NAME_FIELDS = ['name', 'userName'] as const
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -66,7 +60,7 @@ function pickString(record: Record<string, unknown>, fields: readonly string[]):
 function findItems(value: unknown, depth = 0): unknown[] | undefined {
   if (Array.isArray(value)) return value
   if (!isRecord(value) || depth > 3) return undefined
-  for (const key of ['chats', 'conversations', 'items', 'list', 'results', 'data', 'result', 'p2pChatList']) {
+  for (const key of ['chats', 'result', 'results', 'items', 'list', 'data', 'conversations']) {
     const nested = value[key]
     if (Array.isArray(nested)) return nested
     if (isRecord(nested)) {
@@ -125,13 +119,21 @@ function fromGroup(item: unknown): TargetCandidate | undefined {
 
 function fromPeer(item: unknown): TargetCandidate | undefined {
   if (!isRecord(item)) return undefined
-  const label = pickString(item, PEER_LABEL_FIELDS) ?? ''
   const userId = pickString(item, PEER_USER_FIELDS)
-  if (userId) return { kind: 'dm', id: userId, label, source: 'chat-list' }
-  const openId = pickString(item, PEER_OPEN_FIELDS)
-  // Only the open id is known, so the `open:` prefix keeps the send command
-  // honest about which flag it may use.
-  return openId ? { kind: 'dm', id: `open:${openId}`, label, source: 'chat-list' } : undefined
+  const openDingTalkId = pickString(item, PEER_OPEN_FIELDS)
+  if (!userId && !openDingTalkId) return undefined
+  const label = pickString(item, PEER_NICK_FIELDS) ?? pickString(item, PEER_NAME_FIELDS) ?? ''
+  // A user id is the preferred identity (`--user`); the `open:` prefix is only
+  // for contacts the directory exposes as an open id, and keeps the send and
+  // subscribe commands honest about which flag they may use.
+  const id = userId ?? `open:${openDingTalkId}`
+  return {
+    kind: 'dm',
+    id,
+    label,
+    ...(userId && openDingTalkId ? { description: `userId: ${userId} · openDingTalkId: ${openDingTalkId}` } : {}),
+    source: 'contact-search',
+  }
 }
 
 function matchesQuery(candidate: TargetCandidate, query: string | undefined): boolean {
@@ -177,20 +179,28 @@ export async function discoverGroups(
 }
 
 /**
- * List recent one-to-one conversations.
+ * Search the contact directory by name and return explicit one-to-one
+ * candidates.
  *
- * The p2p list shape is provisional; `query` filters locally because the
- * command's own filtering flags are not part of the observed contract.
+ * A query is required: the command has no "list every contact" contract, and a
+ * candidate is only useful once a person confirms the right contact. Filtering
+ * belongs to dws, which searches by contact name; matching locally on the
+ * display label would drop contacts whose `nick` differs from the searched
+ * `name`. `finalize` only de-duplicates and applies `DISCOVERY_LIMIT`.
  */
 export async function discoverPeers(
   query: string | undefined,
   settings: Settings,
   io: DiscoverIo = {},
 ): Promise<TargetCandidate[]> {
-  const args = withProfile(
-    ['chat', '+chat-list', '--types', 'p2p', '--page-size', String(DISCOVERY_LIMIT), '--format', 'json'],
-    settings,
-  )
-  const payload = await runDiscovery(runnerFor(settings, io), args, io.timeoutMs ?? 20_000, 'chat +chat-list')
-  return finalize((findItems(payload) ?? []).map(fromPeer), query?.trim())
+  const trimmed = query?.trim() ?? ''
+  if (trimmed === '') {
+    throw new ChannelError(
+      'invalid-target',
+      "a one-to-one search needs a contact name; enter the person's name and search again",
+    )
+  }
+  const args = withProfile(['contact', 'user', 'search', '--query', trimmed, '--format', 'json'], settings)
+  const payload = await runDiscovery(runnerFor(settings, io), args, io.timeoutMs ?? 20_000, 'contact user search')
+  return finalize((findItems(payload) ?? []).map(fromPeer))
 }

@@ -20,6 +20,17 @@ const atMe: DwsTarget = { kind: 'at-me', id: 'at-me', mentionOnly: true, enabled
 const group: DwsTarget = { kind: 'group', id: 'cid-1', label: '测试群', mentionOnly: true, enabled: true }
 const dm: DwsTarget = { kind: 'dm', id: 'u-peer', mentionOnly: true, enabled: true }
 
+/** Parse a peer id and return the typed refusal it must raise. */
+function peerRefusal(id: string): ChannelError {
+  try {
+    parsePeerAddress(id)
+  } catch (error) {
+    if (error instanceof ChannelError) return error
+    throw error
+  }
+  throw new Error(`expected ${id} to be refused`)
+}
+
 describe('event keys', () => {
   it('freezes exactly the three observed keys', () => {
     expect(EVENT_KEYS).toEqual({
@@ -66,6 +77,10 @@ describe('consumeSpec', () => {
     expect(spec.args[spec.args.indexOf('--open-dingtalk-id') + 1]).toBe('od-1')
   })
 
+  it('refuses a one-to-one spec addressed by a conversation id', () => {
+    expect(() => consumeSpec({ ...dm, id: 'cid-abc=' }, settings())).toThrow(/conversation id/)
+  })
+
   it('refuses an empty target id with a typed error', () => {
     expect(() => consumeSpec({ ...group, id: '   ' }, settings())).toThrow(ChannelError)
     try {
@@ -79,8 +94,27 @@ describe('consumeSpec', () => {
 describe('peer addressing', () => {
   it('treats a bare id as a userId and the prefix as an open id', () => {
     expect(parsePeerAddress('u-1')).toEqual({ flag: '--user', value: 'u-1' })
+    expect(parsePeerAddress('260111')).toEqual({ flag: '--user', value: '260111' })
     expect(parsePeerAddress('open:od-1')).toEqual({ flag: '--open-dingtalk-id', value: 'od-1' })
+    expect(parsePeerAddress('open:DO2-abc')).toEqual({ flag: '--open-dingtalk-id', value: 'DO2-abc' })
     expect(() => parsePeerAddress('')).toThrow(ChannelError)
+  })
+
+  it('refuses an empty open id', () => {
+    const error = peerRefusal('open:')
+    expect(error.code).toBe('invalid-target')
+    expect(error.message).toBe('open target id is empty')
+  })
+
+  it('refuses a conversation id in bare and open form', () => {
+    const conversationId = 'cidwEVizQpAJURqrHpIantBeLUDlQcm5OxAtCpKuKi6Qc='
+    for (const id of [conversationId, `open:${conversationId}`]) {
+      const error = peerRefusal(id)
+      expect(error.code).toBe('invalid-target')
+      expect(error.message).toContain('conversation id')
+      expect(error.message).toContain('userId')
+      expect(error.message).toContain('open:<openDingtalkId>')
+    }
   })
 })
 

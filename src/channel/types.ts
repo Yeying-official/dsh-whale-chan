@@ -67,7 +67,15 @@ export interface TargetCandidate {
   readonly kind: 'group' | 'dm'
   readonly id: string
   readonly label: string
-  readonly source: 'chat-search' | 'chat-list'
+  /**
+   * Human-readable identity detail for the confirmation panel.
+   *
+   * A one-to-one contact may expose both a `userId` and an `openDingTalkId`;
+   * the description helps a person confirm the right contact. It is never
+   * parsed back into an address.
+   */
+  readonly description?: string
+  readonly source: 'chat-search' | 'contact-search'
 }
 
 /** Result of a non-destructive `--dry-run` validation. */

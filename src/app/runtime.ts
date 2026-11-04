@@ -19,6 +19,7 @@
  * races startup still releases everything already open.
  */
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-workspace'
 import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
@@ -37,11 +38,18 @@ import {
   DshTaskExecutor,
   SessionModel,
   type ExecutorLogger,
+  type PreparedSession,
   type SessionHost,
   type TaskExecutor,
 } from '../executor/index.ts'
 import { PLUGIN_NAME, PLUGIN_VERSION, type LogLevel } from '../shared/limits.ts'
-import type { Health, StateView, TargetWorkspace } from '../shared/models.ts'
+import type {
+  ArchiveTargetSessionsRequest,
+  ArchiveTargetSessionsResult,
+  Health,
+  StateView,
+  TargetWorkspace,
+} from '../shared/models.ts'
 import type { ModelRoute, SettingsBlock } from '../shared/settings.ts'
 import { SETTINGS_BLOCKS } from '../shared/settings.ts'
 import type { BrainModelFactory } from './brain-ports.ts'
@@ -61,6 +69,13 @@ import { Effects } from './effects.ts'
 import { Kv } from './kv.ts'
 import { Passes } from './passes.ts'
 import { Pipeline } from './pipeline.ts'
+import {
+  SessionArchiveService,
+  SessionArchiveUnavailableError,
+  type SessionArchiveRegistryPort,
+  type SessionPersistencePort,
+} from './session-archive.ts'
+import { ConversationSessions, type SessionRecoveryRegistryPort } from './session-recovery.ts'
 import { SettingsService } from './settings.ts'
 import { Store } from './store.ts'
 import { healthView, stateView, type TargetWorkspaceInput, type ViewContext } from './views.ts'
@@ -151,6 +166,13 @@ export interface RuntimeOverrides {
   readonly research?: ResearchPort
   readonly executor?: TaskExecutor
   readonly sessionHost?: SessionHost
+  /**
+   * DSH workspace registry; production reads `ctx.workspaceRegistry`, and a
+   * test injects an in-memory registry so archive/recovery run without a host.
+   */
+  readonly workspaceRegistry?: SessionRecoveryRegistryPort & SessionArchiveRegistryPort
+  /** Stored session headers; production reads `ctx.sessionPersistence`. */
+  readonly sessionPersistence?: SessionPersistencePort
   readonly prompts?: PromptSource & { preload?: () => unknown }
   readonly settings?: Partial<Record<SettingsBlock, Record<string, unknown>>>
   /** Only tests set these; production reads them from settings. */
@@ -227,6 +249,11 @@ class SessionModelPool implements BrainModelFactory {
     route: ModelRoute,
     private readonly logger: ExecutorLogger,
     private readonly workspaceFor: (threadKey: string, title?: string) => { path: string; title: string },
+    private readonly prepareSession?: (
+      threadKey: string,
+      title: string,
+      currentSessionId?: string,
+    ) => Promise<PreparedSession>,
   ) {
     this.route = { ...route }
     this.current = this.build()
@@ -258,6 +285,7 @@ class SessionModelPool implements BrainModelFactory {
       logger: this.logger,
       stateDir: this.stateDir,
       workspaceFor: this.workspaceFor,
+      ...(this.prepareSession === undefined ? {} : { prepareSession: this.prepareSession }),
       model: this.route,
     })
   }
@@ -308,6 +336,8 @@ export class Runtime {
   private channelPortRef: ChannelPort | undefined
   private countersRef: KvCounterStore | undefined
   private workspacesRef: WorkspaceService | undefined
+  private sessionsRef: ConversationSessions | undefined
+  private archiveRef: SessionArchiveService | undefined
   private promptsRef: PromptSource | undefined
   private promptsReady = false
   private promptError: string | null = null
@@ -380,6 +410,11 @@ export class Runtime {
   /** Per-conversation workspaces; constructed with the settings service. */
   private get workspaces(): WorkspaceService {
     return this.require(this.workspacesRef, 'workspaces')
+  }
+
+  /** Durable replier generations and the per-conversation preflight lock. */
+  private get sessions(): ConversationSessions {
+    return this.require(this.sessionsRef, 'sessions')
   }
 
   info(): RuntimeInfo {
@@ -463,6 +498,22 @@ export class Runtime {
     return this.workspaces.targetWorkspace(target)
   }
 
+  /**
+   * Archive every session of one target's conversation workspace.
+   *
+   * The service owns the enumeration, the per-session outcome partition and the
+   * replier rotation; this method only refuses to run without a composed
+   * registry, which the route maps to `503 state_unavailable`.
+   */
+  async archiveTargetSessions(
+    targetId: string,
+    options: ArchiveTargetSessionsRequest = {},
+  ): Promise<ArchiveTargetSessionsResult> {
+    const archive = this.archiveRef
+    if (archive === undefined) throw new SessionArchiveUnavailableError()
+    return await archive.archiveTarget(targetId, options)
+  }
+
   /** Everything a view builder may read. */
   viewContext(): ViewContext {
     return {
@@ -528,11 +579,29 @@ export class Runtime {
       const settings = new SettingsService(store, this.time)
       this.settingsRef = settings
       this.applySettingsSeed(settings)
+      const registry = this.overrides.workspaceRegistry ?? this.ctx?.workspaceRegistry
+      const sessionPersistence = this.overrides.sessionPersistence ?? this.ctx?.sessionPersistence
       this.workspacesRef = new WorkspaceService({
         settings: () => this.settings.current(),
         stateDir: this.stateDir,
         logger: this.executorLogger(),
-        ...(this.ctx === undefined ? {} : { registry: this.ctx.workspaceRegistry }),
+        ...(registry === undefined ? {} : { registry }),
+      })
+      this.sessionsRef = new ConversationSessions({
+        workspaces: this.workspaces,
+        kv: new Kv(store),
+        ...(registry === undefined ? {} : { registry }),
+        logger: this.executorLogger(),
+      })
+      this.archiveRef = new SessionArchiveService({
+        settings: () => this.settings.current(),
+        workspaces: this.workspaces,
+        sessions: this.sessions,
+        store,
+        clock: this.time,
+        ...(registry === undefined ? {} : { registry }),
+        ...(sessionPersistence === undefined ? {} : { sessionPersistence }),
+        logger: this.executorLogger(),
       })
       this.engineRef = new Engine({
         repos: store,
@@ -602,6 +671,10 @@ export class Runtime {
         this.settings.current().models.reply,
         logger,
         (threadKey, title) => this.workspaces.resolveThreadWorkspace(threadKey, title),
+        // Every turn preflights its generation, so a session archived in DSH is
+        // replaced before the next delivery instead of being blocked by the
+        // archive gate.
+        (threadKey, title, currentSessionId) => this.sessions.prepareReply(threadKey, title, currentSessionId),
       )
     }
 
@@ -614,6 +687,15 @@ export class Runtime {
             logger,
             stateDir: this.stateDir,
             workspaceFor: (task) => this.taskWorkspace(task),
+            // A conversation workspace record the owner removed in DSH is
+            // recreated before the worker session is created, so a retry or a
+            // restart never runs in an unregistered directory.
+            ensureWorkspace: async (_task, workspace) => {
+              await this.sessions.ensureWorkspace(workspace.path, workspace.title)
+            },
+            // A worker session archived in DSH must not be resumed: the durable
+            // generation moves the run to a session the archive gate allows.
+            prepareSessionId: async (_task, baseSessionId) => await this.sessions.ensureWorkerSessionId(baseSessionId),
             ...(this.promptsRef === undefined ? {} : { personaTemplate: this.promptsRef.get('persona') }),
           }))
     this.wireExecutor()

@@ -258,7 +258,13 @@ function auditTarget(data: unknown): string {
   return ''
 }
 
-const OWNER_ACTIONS = new Set(['task.approved', 'task.rejected', 'task.cancelled', 'task.retried'])
+const OWNER_ACTIONS = new Set([
+  'task.approved',
+  'task.rejected',
+  'task.cancelled',
+  'task.retried',
+  'workspace.sessions-archived',
+])
 
 function toAuditEntry(record: { seq: number; type: string; at: string; data: unknown }): AuditEntry {
   return {

@@ -2,6 +2,50 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的结构与 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.4.0] - 2026-11-04
+
+**归档一个目标工作区的全部会话，并让该会话在归档或工作区被移除后自愈**（WS14）。当前回复会话被归档后，下一条钉钉消息会落到新会话（正在运行而被拒绝归档的会话继续使用）；在 DSH 里手动移除工作区后，下一次回复或任务会重建记录并尽量附着仍在的旧会话。升级不移动、不删除任何目录与会话日志；schema 仍为 2，设置字段仍 57 个，无新依赖。
+
+### Added
+
+- **`POST /whale-chan/api/targets/:id/archive-sessions`（第 20 条冻结路由）**：body 可选 `{ stopActivity?: boolean }`，非布尔为 `400 invalid_body`；结果把候选按 `archived` / `alreadyArchived` / `refused` / `missing` / `failed` 分区，并返回 `workspace`、`replySessionRotated`、`nextReplySessionId`、`stopActivity`、`truncated`、`candidateCount`。未知目标 `404 unknown_target`、按会话工作区的目标 `400 per_conversation_workspace`、运行时未就绪 `503 state_unavailable`，其余沿用 `403` 同源头守卫。
+- **候选枚举**：registry 中同路径记录的 `sessionIds`、`sessionPersistence` 中 `header.cwd` 同路径的会话 id、当前回复器会话 id 三者的并集，按 `realpath` 规范化后比较路径，去重排序；上限 **500**（先排序再截断，当前回复器不丢），截断时 `truncated=true` 并返回 `candidateCount`。
+- **回复器 generation（KV `session.reply-generation:<threadKey>`）**：`g0` 与旧版本会话 id 逐字节一致；`g>0` 在 sha1 输入追加 `\u0000g<n>`。当前会话命中 DSH 归档集合时递增一代并写入 KV，重启后不会回到被归档的会话。
+- **每轮预检 `prepareReply`**：`mkdir` → registry `resolveByPath`（仅缺失时 `create`，**绝不改已有标题**）→ 重建记录时 best-effort `attachSession` 附着当前会话 → 命中归档集合则递增 generation。显式 attach 失败推进 generation，隐式失败不推进；`mkdir`/`resolve`/`create` 失败降级沿用当前 generation 并写 warning，归档轮换仍然生效。
+- **回复器 blocked 单次重试**：`SessionModel` 每轮先预检，id 变化就取消旧会话并 `fresh` 新建；回合以 `failed` 且 `detail` 含 `blocked` 结束（DSH 归档闸门拒绝投递）时，重新预检并用新幂等键 `:r1` 重试**一次**，第二次仍失败走原失败路径。
+- **任务侧 generation（KV `session.worker-generation:<base>`）**：worker 会话 id 在归档后变为 `<base>-g<n>`，同一派工的重复运行不会 resume 已归档会话；任务执行器在 `ensureSession` 前重建会话工作区记录（`ensureWorkspace`），所以 DSH 里被移除的记录会在下次运行前补回。
+- **面板「归档会话」入口**：目标页「工作区」卡片新增「操作」列；`mode: 'ready'` 的行有「归档会话」按钮 → 确认弹窗（含「同时停止正在运行的会话」开关，默认关）→ 结果摘要（五个分区计数、`refused` 的活动类型、截断提示、是否轮换回复器）并重拉 `targets`。`per-conversation` 目标不显示按钮。
+- **审计事件 `workspace.sessions-archived`**：`actor=owner` 出现在面板审计页，记录 threadKey、targetId、四类计数与 `stopActivity`/`replySessionRotated`。
+
+### Changed
+
+- **管理 API 从 19 条增加到 20 条**；`tests/contract.spec.ts` 断言新数量，`docs/011` 与 `docs/007` 同步。
+- **回复在每一轮都做一次会话预检**，不再只在重建时判断身份；预检失败不阻断回复，只降级沿用当前 generation。
+- **归档后的轮换以宿主归档集合为准**，不看本次 pass 是否“尝试过”归档当前回复器：只要当前回复器在归档集合里（本 pass、更早一次、DSH 手动或并发归档造成），下一条消息就会换新会话；运行中未归档的回复器继续使用原会话。
+- 面板新增 **25 个**文案 key（中英各一套）：21 个 `targets.archive.*`、`targets.workspace.actions` 与 3 个 `errors.archive*`；结果区 `role=status aria-live=polite`；locale 仍为 507 个顶层 key（含 `meta`，按既有「`meta` 除外」口径为 506）。
+
+### Fixed
+
+- **预检到投递之间被归档导致丢消息**：blocked 回合改为单次重试（新 `requestId` `:r1`），不再被判为普通失败。
+- **手动移除工作区后首条消息不 attach**：没有缓存会话时用当前 generation 命名的 id 作为隐式候选，重建记录后尝试附着，尽量保留可用上下文。
+- **任务重跑 resume 已归档 worker 会话**：改为按持久 generation 解析 `<base>-g<n>`。
+- **预检变成每轮致命依赖**：`mkdir`/registry 故障降级为沿用当前 generation，只有归档轮换继续生效。
+- **客户端审批 fixture 时间炸弹**：`tests/client-harness.tsx` 的 `LATER` 改为 2099 年，测试不再随系统时钟过期（仅测试，无产品代码变化）。
+
+### Migration
+
+- **升级不换会话**：从未归档过的安装 `g0` 与旧版本会话 id 完全相同，升级后继续使用原回复器与 worker 会话；generation KV 只在真正轮换时写入。
+- **无 schema、无设置变更**：`SCHEMA_VERSION` 仍为 2，设置仍 9 个 block / 57 个字段，没有新增 block、字段或依赖；不需要迁移脚本。
+- **不迁移、不删除**：归档只把会话从可见面隐藏，目录、文件、会话日志都保留；不提供 unarchive，在 DSH 手动 unarchive 也不会回退 generation，旧回复上下文不会自动恢复。
+- **回退安全**：回到 v0.3.0 可打开同一个 `state.db`；`session.*-generation` 行会留在 KV 中被旧版本忽略（旧版本按 `g0` 解析会话），归档集合仍由 DSH 自己持有。
+
+### Known limitations
+
+- 候选超过 500 时只处理排序后的前缀，已归档候选仍占名额，**重复调用不会推进尾部**；面板只说明“本次只处理一批”。
+- 归档并集包含主人在该目录手动创建的会话，也包含别目标显式批准到本目录的任务会话；`stopActivity=true` 会取消运行中的回复/任务，任务可能因此失败。
+- 同一 target id 重复出现时按 settings 行顺序取首行；`nextReplySessionId` 可能指向一个此前已被手动归档的 generation，下一条消息的预检会继续前进。
+- 本版未跑真机：DSH `ArchivedSessionGate` 与 activity 结构由 fake 按 `error.name` 模拟，macOS/Linux 未验证。
+
 ## [0.3.0] - 2026-11-03
 
 人设默认值改为**空人设**，蓝白鲸鱼女仆改为**可选预设模板**（WS12）。产品显示名、包名与内部标识不变；npm 包仍只含运行产物与 `README.md`，`docs/` 与 CHANGELOG 只在仓库/发行页。

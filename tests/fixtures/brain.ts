@@ -91,6 +91,7 @@ export function makeGateInput(overrides: GateInputOverrides = {}): GateInput {
       senderId: 'user-1',
       senderName: '小明',
       text: '在吗？',
+      kind: 'dm',
       conversationType: 'direct',
       addressed: false,
       broadcast: false,

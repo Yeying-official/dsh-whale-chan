@@ -16,6 +16,12 @@
  *    conversation rate, minimum gap);
  * 3. the target's own `replyMode` can still tighten the result, never loosen it.
  *
+ * Group addressing is enforced by the target: a group message is answered only
+ * when it is addressed, unless both the target's `mentionOnly` and the global
+ * `reply.requireMentionInGroups` are off. Either one being on requires the
+ * mention, so the per-target switch can tighten the global default without
+ * silently disabling it.
+ *
  * The gate decides replies only. It grants no task authority: capturing a task
  * still ends in `awaiting-approval`, and a person approves it in the panel.
  */
@@ -60,8 +66,33 @@ function matchesSenderId(list: readonly string[], senderId: string): boolean {
   return list.some((entry) => entry.trim() === id)
 }
 
+/**
+ * The target row governing one message, in order of specificity:
+ *
+ * 1. an at-me event is governed by the global at-me row when one exists, so a
+ *    group row's switches can never silence the subscription the owner enabled
+ *    for mentions;
+ * 2. otherwise the conversation's own `group` row wins over the row the first
+ *    message happened to arrive through — at-me and group subscriptions can
+ *    both feed `group:<cid>`, and looking only at `targetId` would let the
+ *    at-me row decide an ordinary group message;
+ * 3. finally the row that created the thread (direct messages and any
+ *    conversation without a matching group row).
+ */
 function findTarget(input: GateInput): TargetRow | undefined {
-  return input.settings.targets.rows.find((row) => row.id === input.thread.targetId)
+  const rows = input.settings.targets.rows
+  if (input.message.kind === 'at-me') {
+    const atMe = rows.find((row) => row.kind === 'at-me')
+    if (atMe) return atMe
+  }
+  if (input.thread.key.startsWith('group:')) {
+    const conversationId = input.thread.key.slice('group:'.length).trim()
+    if (conversationId !== '') {
+      const byConversation = rows.find((row) => row.kind === 'group' && row.id.trim() === conversationId)
+      if (byConversation) return byConversation
+    }
+  }
+  return rows.find((row) => row.id === input.thread.targetId)
 }
 
 function deny(reason: GateReason): GateDecision {
@@ -93,7 +124,11 @@ export function gateReply(input: GateInput): GateDecision {
     return deny('sender_not_allowed')
   }
 
-  if (message.conversationType === 'group' && settings.reply.requireMentionInGroups && !message.addressed) {
+  // A group message must address the assistant when either the target or the
+  // global switch asks for it. Direct and at-me messages are always addressed.
+  const requiresMention =
+    message.conversationType === 'group' && (target.mentionOnly || settings.reply.requireMentionInGroups)
+  if (requiresMention && !message.addressed) {
     return deny('not_addressed')
   }
   if (settings.reply.ignoreBroadcast && message.broadcast) return deny('broadcast')

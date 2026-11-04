@@ -168,6 +168,12 @@ export interface GateMessage {
   readonly senderId: string
   readonly senderName: string
   readonly text: string
+  /**
+   * How the channel classified the event that carried this message. A group
+   * thread is shared by at-me and group subscriptions, so this is the only
+   * signal that tells an at-me event from an ordinary group message.
+   */
+  readonly kind: BrainMessageKind
   readonly conversationType: 'group' | 'direct'
   readonly addressed: boolean
   readonly broadcast: boolean

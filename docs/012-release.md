@@ -1,6 +1,6 @@
 # 012 发布
 
-> 当前状态：**v0.5.0 在分支 `fix/ws15-target-subscriptions` 上准备就绪，尚未合并、未打 tag**（实现代理不执行 merge/tag/push）。WS0–WS15 已完成；v0.5.0 修复目标订阅链路（单聊发现、`open:` 出站、服务端拒绝可观测、`mentionOnly`、`GET channel`），管理 API **21 条**，schema 仍为 2，设置字段仍 57 / 9 个 block，locale 中英各 524 个顶层 key。
+> 当前状态：**v0.5.0 已合并到 `main` `858f6fd`**（`--no-ff` 合并提交 `chore(merge): ws15 target subscription fixes`）；tag `v0.5.0` 指向本记录提交（本地、未 push）。WS0–WS15 已完成；v0.5.0 修复目标订阅链路（单聊发现、`open:` 出站、服务端拒绝可观测、`mentionOnly`、`GET channel`），管理 API **21 条**，schema 仍为 2，设置字段仍 57 / 9 个 block，locale 中英各 524 个顶层 key。
 >
 > 版本 `0.5.0`，日期 `2026-11-04`。`private: true`，不发布到 npm。
 >
@@ -60,8 +60,8 @@ git status --porcelain
 - [x] `docs/001-domain.md` → 新增 §5 线程键与“权威目标”
 - [x] `docs/pr/WS15-target-subscriptions.md` → 缺陷清单、修复设计、契约变更、审核返工记录（W1/W2/W3）、测试证据、风险与合并坐标
 - [x] `docs/test-reports/WS15.md` → 单测证据、复现命令、真机未覆盖项与已知限制
-- [ ] 合并坐标：本分支尚未合并（实现代理未执行 merge/tag/push）
-- [ ] 发布 tag：`v0.5.0` **未打**；合并与 tag 由发布负责人复核后执行
+- [x] 合并坐标：`--no-ff` 合并提交 `858f6fd`（`chore(merge): ws15 target subscription fixes`），合并后工作区干净
+- [ ] 发布 tag：`v0.5.0` **本记录提交后打**（指向本发布记录提交）；由发布负责人复核后执行，本地、未 push
 - [ ] 真机验收：订阅/收发链路**未验收**（只有单测与假 `dws` 夹具）；发布负责人需在真实账号上补一次 `at-me`+`group` 同群、单聊订阅与单聊出站
 - [ ] 发布复核人确认“订阅链路未真机验收”的表述与 [WS15 报告](test-reports/WS15.md)、CHANGELOG 一致
 
@@ -163,12 +163,12 @@ pnpm format:check
 node scripts/check-pack.mjs
 git status --porcelain
 
-# annotated tag（合并后由协调者执行；本分支尚未合并）
+# annotated tag（合并后在发布记录提交上由协调者执行）
 git tag -a v0.5.0 -m "dsh-whale-chan-assistant 0.5.0"
 git show --stat v0.5.0
 ```
 
-- **`v0.5.0` 尚未打 tag**，本分支也尚未合并；tag 由发布负责人复核后由协调者打在合并后的 docs 提交上（本地，未 push）。实现/文档代理没有执行 merge、tag 或 push。
+- **`v0.5.0` 尚未打 tag**：合并在 `858f6fd` 已完成；tag 由发布负责人复核后打在**本发布记录提交**上（本地，未 push）。实现/文档代理没有执行 merge、tag 或 push。
 - tag 必须指向包含版本 bump、CHANGELOG、compatibility、PROGRESS、001/002/005/007/009/011/012 与 WS15 报告/PR 的提交。
 - 打 tag 后如需归档，再执行 `npm pack --ignore-scripts`；产物不入库（`.gitignore` 已忽略 `*.tgz`）。
 

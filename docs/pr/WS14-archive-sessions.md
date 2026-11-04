@@ -2,9 +2,9 @@
 
 - 分支：`feat/ws14-archive-sessions`
 - 基线：`main` `eda003f`（v0.3.0 发布后的文档提交）
-- 提交：`7bdf048`（后端功能）、`9b8a423`（后端测试）、`5ad5a0a`（客户端 fixture 时间炸弹）、`0771c1a`（面板功能）、`fe2cf92`（前端测试）、`3e7c97d`（[验收报告](../test-reports/WS14.md)）、`ceb13a7`（文档）、`0650fb0`（v0.4.0 发布）、`872a9a0`（生成器同步）、`77810e7`（QA 回填）
-- 状态：实现、测试与验收完成；**已合并到 `main` `d0ed2e6`**（`--no-ff`）；tag `v0.4.0` 打在本 docs 提交（本地、未 push）；代理未执行 merge/tag/push
-- 关联：[005 面板](../005-panel.md)、[007 架构](../007-architecture.md)、[011 设置合约](../011-settings-contract.md)、[012 发布](../012-release.md)、[013 安全](../013-security.md)、[兼容矩阵](../compatibility.md)、[WS14 验收报告](../test-reports/WS14.md)
+- 提交：`7bdf048`（后端功能）、`9b8a423`（后端测试）、`5ad5a0a`（客户端 fixture 时间炸弹）、`0771c1a`（面板功能）、`fe2cf92`（前端测试）、`3e7c97d`（[验收报告](../test-reports/WS14.md)）、`ceb13a7`（文档）、`0650fb0`（v0.4.0 发布）、`872a9a0`（生成器同步）、`77810e7`（QA 回填）、`ee6bb97`（[真机验活](../test-reports/WS14-live.md)）
+- 状态：实现、测试与验收完成；**已合并到 `main` `d0ed2e6`**（`--no-ff`）；tag `v0.4.0` 指向 `c82027a`（本地、未 push），其后的发布后定向真机验活为 `ee6bb97`；代理未执行 merge/tag/push
+- 关联：[005 面板](../005-panel.md)、[007 架构](../007-architecture.md)、[011 设置合约](../011-settings-contract.md)、[012 发布](../012-release.md)、[013 安全](../013-security.md)、[兼容矩阵](../compatibility.md)、[WS14 验收报告](../test-reports/WS14.md)、[WS14 真机验活报告](../test-reports/WS14-live.md)
 
 ## 1. 需求
 
@@ -181,7 +181,9 @@ content-type: application/json        # 可省略
 
 ### 5.3 独立验证
 
-[WS14 验收报告](../test-reports/WS14.md) 记录：变更范围审计、门禁、18 项独立探针（generation、手动归档、工作区重建、降级、blocked、worker、HTTP、截断、跨会话隔离）、红队核对（P0-1/P0-2/P1-3/P1-4/P2-7 确认修复）。本版**未跑真机**：`ArchivedSessionGate`/activity 结构由 fake 按 `error.name` 模拟。
+[WS14 验收报告](../test-reports/WS14.md) 记录：变更范围审计、门禁、18 项独立探针（generation、手动归档、工作区重建、降级、blocked、worker、HTTP、截断、跨会话隔离）、红队核对（P0-1/P0-2/P1-3/P1-4/P2-7 确认修复）。
+
+发布后（2026-11-04）又在运行中的 DSH Desktop 上做了**定向真机验活并通过**：面板归档 `archived=3`/`alreadyArchived=2`/`refused=failed=missing=0`、`replySessionRotated=true`，generation 1→2；下一条群消息 13:50:04 入库、13:50:06 新建 g2、13:50:21 群内回复；g0/g1 已归档、g2 未归档，三个目录保留。只覆盖“归档 → 下一条消息”，完整 T3/T4 未重跑，见 [WS14-live](../test-reports/WS14-live.md)。
 
 ## 6. 独立评审发现并修复的 5 项
 
@@ -202,8 +204,8 @@ content-type: application/json        # 可省略
 
 ## 7. 风险与未覆盖
 
-- **真机未跑**：DSH Desktop 本轮未启动；`blocked` 由代码阅读（`ArchivedSessionGate` 在 `agent/pre-step` 拒绝）+ `FakeSessionHost` 脚本化验证，不是活体证据。
-- **stopActivity 的真实取消未端到端**：只验证 flag 透传与 stop 分支；运行中的回复/任务被取消后的用户可见结果没有真机观察。测试替身 `FakeWorkspaceRegistry.archiveSession` 忽略 `stopActivity`，现有用例没有真正证明“活动会话被归档并发出 stop”。
+- **真机只做定向验活**：发布后已验证“归档 → 下一条消息”这一条链路（见 §5.3 与 [WS14-live](../test-reports/WS14-live.md)）；其余分支仍只有 fake/单测证据：`stopActivity=true` 的真实取消、任务 worker 归档、DSH 手动移除工作区后的重建/attach、单聊、多目标、Windows symlink/realpath。完整 T3/T4 未重跑。
+- **stopActivity 的真实取消未端到端**：真机补验保持默认关，只验证了 flag 透传与 stop 分支；运行中的回复/任务被取消后的用户可见结果没有真机观察。测试替身 `FakeWorkspaceRegistry.archiveSession` 忽略 `stopActivity`，现有用例没有真正证明“活动会话被归档并发出 stop”。
 - **二次 blocked 与任务侧竞态**：第二次仍 blocked 会显式失败（`ModelFailedError` → decision `deferred`，聊天里没有回复）；任务侧在 prepare→deliver 之间被归档没有单次重试，会显式报错。
 - **>500 尾部**：见 P2-6；面板只说明“本次只处理一批”。
 - **重复 target id**：settings 允许重复 id，服务用 `find` 取首行；未写测试。
@@ -214,10 +216,11 @@ content-type: application/json        # 可省略
 
 ## 8. 合并坐标
 
-| 项              | 值                                                                                                                        |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| 合并方式        | `--no-ff` 合并到 `main`（由协调者执行，代理未合并）                                                                       |
-| `main` 合并提交 | `d0ed2e6`（`chore(merge): ws14 archive workspace sessions`）                                                              |
-| 发布 tag        | `v0.4.0` 打在本 docs 提交（本地、未 push；代理未执行 tag/push）                                                           |
-| 工作区          | 合并前与本次 docs 提交前 `git status --porcelain` 均为空                                                                  |
-| 验收报告状态    | 已由 QA 回填（`77810e7`）：[WS14 报告](../test-reports/WS14.md) 的「文档随版本更新 = 已完成」；本文档代理不改 QA 报告正文 |
+| 项              | 值                                                                                                                                                                                    |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 合并方式        | `--no-ff` 合并到 `main`（由协调者执行，代理未合并）                                                                                                                                   |
+| `main` 合并提交 | `d0ed2e6`（`chore(merge): ws14 archive workspace sessions`）                                                                                                                          |
+| 发布 tag        | `v0.4.0` 指向 `c82027a`（本地、未 push；代理未执行 tag/push）；tag 之后的补验提交为 `ee6bb97`                                                                                         |
+| 真机补验        | 2026-11-04 发布后定向验活通过（归档 → 下一条消息），见 [WS14-live](../test-reports/WS14-live.md)                                                                                      |
+| 工作区          | 合并前与本次 docs 提交前 `git status --porcelain` 均为空                                                                                                                              |
+| 验收报告状态    | 已由 QA 回填（`77810e7`）：[WS14 报告](../test-reports/WS14.md) 的「文档随版本更新 = 已完成」；真机补验另见 [WS14-live](../test-reports/WS14-live.md)；本文档代理不改两份 QA 报告正文 |

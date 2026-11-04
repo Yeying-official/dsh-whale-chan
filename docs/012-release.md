@@ -1,10 +1,10 @@
 # 012 发布
 
-> 当前状态：**v0.4.0 已合并到 `main` `d0ed2e6`**（`--no-ff` 合并提交 `chore(merge): ws14 archive workspace sessions`）；tag `v0.4.0` 由协调者打在本 docs 提交上（本地、未 push）。WS0–WS14 已完成；v0.4.0 增加会话归档与工作区自愈，管理 API 20 条，schema 仍为 2，设置字段仍 57 / 9 个 block。
+> 当前状态：**v0.4.0 已合并到 `main` `d0ed2e6`**（`--no-ff` 合并提交 `chore(merge): ws14 archive workspace sessions`）；tag `v0.4.0` 指向 `c82027a`（本地、未 push），tag 之后有发布后定向真机验活补验提交 `ee6bb97`。WS0–WS14 已完成；v0.4.0 增加会话归档与工作区自愈，管理 API 20 条，schema 仍为 2，设置字段仍 57 / 9 个 block。
 >
 > 版本 `0.4.0`，日期 `2026-11-04`。`private: true`，不发布到 npm。
 >
-> 真机：**本版未重跑 T3/T4**。归档/恢复只改变“消息送到哪个会话”，分类、发送与任务回帖链路未改；归档后的真实 DSH 归档闸门与 `stopActivity` 取消行为**未在真机验证**，由单元/集成/组件测试与 QA 独立探针覆盖，见 [WS14 验收报告](test-reports/WS14.md)。Windows 真机 T0–T4 证据来自 v0.1.0，v0.2.0 的 T3/T4 复验见 [WS9/WS10 报告](test-reports/WS9-10.md)。
+> 真机：**T3/T4 未重跑**；归档/恢复只改变“消息送到哪个会话”，分类、发送与任务回帖链路未改。发布后已补做**定向真机验活并通过**（归档 → 下一条消息：面板归档 3 / 原本已归档 2 / 0 拒绝 / 0 失败，generation 1→2，下一条群消息新建 g2 并回复），见 [WS14-live 真机验活报告](test-reports/WS14-live.md)。`stopActivity=true` 取消、任务 worker 归档、DSH 手动移除工作区、单聊与多目标仍未真机覆盖。Windows 真机 T0–T4 证据来自 v0.1.0，v0.2.0 的 T3/T4 复验见 [WS9/WS10 报告](test-reports/WS9-10.md)。
 
 ## 1. 发布决策
 
@@ -49,8 +49,8 @@ git status --porcelain
 - [x] `src/shared/limits.ts` → `PLUGIN_VERSION = '0.4.0'`
 - [x] `scripts/check-pack.mjs` → 版本断言 `0.4.0`
 - [x] `CHANGELOG.md` → `## [0.4.0] - 2026-11-04`，含 Added / Changed / Fixed / Migration / Known limitations；`0.3.0`、`0.2.0`、`0.1.0` 段落保留
-- [x] `docs/compatibility.md` → 适用版本 `0.4.0`、归档行为、schema 仍 2、DSH 兼容声明不变、本版未真机
-- [x] `docs/PROGRESS.md` → WS14 完成并合并、849 tests / 62 files、合并提交 `d0ed2e6` 与 tag 回填、归档相关限制、冻结决策补充
+- [x] `docs/compatibility.md` → 适用版本 `0.4.0`、归档行为、schema 仍 2、DSH 兼容声明不变、发布后定向真机验活与仍存缺口
+- [x] `docs/PROGRESS.md` → WS14 完成并合并、849 tests / 62 files、合并提交 `d0ed2e6`、tag 与真机补验回填、归档相关限制、冻结决策补充
 - [x] `README.md` → v0.4.0 状态、功能表「会话归档与自愈」、20 条路由、工作区段新增归档/自愈要点、安装验证版本 `0.4.0`、排障入口
 - [x] `docs/005-panel.md` → 20 条路由、§3.4 归档按钮/确认弹窗/结果摘要/错误码、§4 错误表、§5 i18n 计数
 - [x] `docs/007-architecture.md` → 20 条路由、纯命名例外、§6.8 会话归档与恢复、测试索引
@@ -58,9 +58,11 @@ git status --porcelain
 - [x] `docs/013-security.md` → 追加“会话归档与恢复（v0.4.0）”小节（只追加）
 - [x] `docs/pr/WS14-archive-sessions.md` → 需求、设计、契约、破坏性边界、测试证据、5 项评审修复、风险与合并坐标
 - [x] `docs/test-reports/WS14.md` → 归档会话与恢复的验收报告（脱敏，由 QA 提供；『文档未完成』已由 QA 在 `77810e7` 回填为“已完成”）
+- [x] `docs/test-reports/WS14-live.md` → 发布后定向真机验活报告（归档 → 下一条消息，tag 之后补验 `ee6bb97`）
 - [x] 合并坐标：`--no-ff` 合并提交 `d0ed2e6`（`chore(merge): ws14 archive workspace sessions`），合并前工作区干净
-- [x] 发布 tag：`v0.4.0` 由协调者打在本 docs 提交上（本地，未 push；实现代理未执行 tag/push）
-- [ ] 发布复核人确认“本版未真机”的表述与 [WS14 报告](test-reports/WS14.md)、CHANGELOG 一致
+- [x] 发布 tag：`v0.4.0` 指向 `c82027a`（本地，未 push；实现代理未执行 tag/push）
+- [x] 发布后真机补验：2026-11-04 定向验活通过，见 [WS14-live](test-reports/WS14-live.md)
+- [ ] 发布复核人确认“T3/T4 未重跑、归档链路已定向真机验活”的表述与两份 WS14 报告、CHANGELOG 一致
 
 ## 4. 安装与卸载
 
@@ -129,22 +131,22 @@ locale/en.json
 
 真机只允许在测试群进行，按级别放行；每级失败都停在该级，不跳级。
 
-**本版（v0.4.0）未重跑 T3/T4，也没有在活体 DSH 上验证归档后的会话轮换。** 理由：WS14 不改分类、prompt、发送参数、任务执行与结果回帖，只决定“消息投递到哪个会话 / 任务用哪个 worker 会话 / 工作区记录是否存在”；这些分支由 `session-recovery`、`session-archive`、`executor-model`、`executor-task`、`api-routes` 与组件测试覆盖，QA 另跑 18 项独立探针（含 blocked 重试、手动归档、工作区重建、`stopActivity` 分支、>500 截断）。真实 DSH 的 `ArchivedSessionGate` 与 activity 结构由测试替身按 `error.name` 模拟，**不是活体证据**。
+**T3/T4 未在 v0.4.0 重跑；发布后已补做定向真机验活（归档 → 下一条消息）并通过。** 理由：WS14 不改分类、prompt、发送参数、任务执行与结果回帖，只决定“消息投递到哪个会话 / 任务用哪个 worker 会话 / 工作区记录是否存在”；这些分支由 `session-recovery`、`session-archive`、`executor-model`、`executor-task`、`api-routes` 与组件测试覆盖，QA 另跑 18 项独立探针（含 blocked 重试、手动归档、工作区重建、`stopActivity` 分支、>500 截断）。2026-11-04 13:37–13:53 在运行中的 DSH Desktop `0.2.1-rc.5` 上（插件 0.4.0，通过插件管理器 disable→enable 热重载，宿主未重启）验活了核心链路：面板归档 `archived=3`/`alreadyArchived=2`/`refused=failed=missing=0`、`replySessionRotated=true`，generation 1→2，第二条群消息 13:50:04 入库、13:50:06 新建 g2、13:50:21 群内出现回复，g0/g1 已归档而 g2 未归档，三个会话目录保留。证据见 [WS14-live](test-reports/WS14-live.md)。
 
-| 级别          | 目标                                                       | 本版处理                                       | 证据/通过标准                                                                                      |
-| ------------- | ---------------------------------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| T0–T2         | 认证/发现、目标校验、单条发送                              | 不重跑（未改 `dws` 通道、目标或发送层）        | [WS8 报告](test-reports/WS8-live.md)                                                               |
-| T3            | 群内 @ 自动回复                                            | 不重跑（未改分类/回复链路；只改会话身份）      | [WS8 报告](test-reports/WS8-live.md) + [WS9/WS10 报告](test-reports/WS9-10.md)                     |
-| T4            | 任务批准与执行                                             | 不重跑（未改执行器判定；只改 worker 会话身份） | 同上：`awaiting-approval` → `running` → `succeeded`，对外文本不含路由、工具名、会话 id、工作区路径 |
-| 归档/恢复     | 归档当前回复器后下一条消息换会话、工作区重建、stopActivity | **未真机**，仅单测/集成/组件测试 + 独立探针    | [WS14 报告](test-reports/WS14.md) 与 [WS14 PR](pr/WS14-archive-sessions.md) §5                     |
-| 人设默认/预设 | 空默认、`whale-maid` 预设、面板                            | 沿用 v0.3.0 的重载核对                         | [WS12 报告](test-reports/WS12-persona.md)                                                          |
+| 级别          | 目标                                                       | 本版处理                                              | 证据/通过标准                                                                                                                         |
+| ------------- | ---------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| T0–T2         | 认证/发现、目标校验、单条发送                              | 不重跑（未改 `dws` 通道、目标或发送层）               | [WS8 报告](test-reports/WS8-live.md)                                                                                                  |
+| T3            | 群内 @ 自动回复                                            | 不重跑（未改分类/回复链路；只改会话身份）             | [WS8 报告](test-reports/WS8-live.md) + [WS9/WS10 报告](test-reports/WS9-10.md)                                                        |
+| T4            | 任务批准与执行                                             | 不重跑（未改执行器判定；只改 worker 会话身份）        | 同上：`awaiting-approval` → `running` → `succeeded`，对外文本不含路由、工具名、会话 id、工作区路径                                    |
+| 归档/恢复     | 归档当前回复器后下一条消息换会话、工作区重建、stopActivity | **定向真机验活通过**（归档 → 下一条消息）；其余未覆盖 | [WS14-live](test-reports/WS14-live.md)；stopActivity/worker/手动移除/单聊/多目标未真机，见 [WS14 报告](test-reports/WS14.md) 与 PR §5 |
+| 人设默认/预设 | 空默认、`whale-maid` 预设、面板                            | 沿用 v0.3.0 的重载核对                                | [WS12 报告](test-reports/WS12-persona.md)                                                                                             |
 
 记录要求：
 
-- 证据写入对应报告：WS14 写入 `docs/test-reports/WS14.md`；其余沿用 WS8 / WS9-10 / WS12。日期、DSH 版本、`dws` 版本、OS、Node、目标类型（不要写真实群名/账号）、命令、脱敏输出与结论齐全。
+- 证据写入对应报告：WS14 的自动化验收写入 `docs/test-reports/WS14.md`，发布后定向真机验活写入 `docs/test-reports/WS14-live.md`；其余沿用 WS8 / WS9-10 / WS12。日期、DSH 版本、`dws` 版本、OS、Node、目标类型（不要写真实群名/账号）、命令、脱敏输出与结论齐全。
 - 截图必须裁掉真实群名、成员昵称、账号 id 与消息正文；README 的截图使用 mock/裁切版本。本版未新增浏览器截图，页面行为由组件测试覆盖。
-- 验收后把测试群目标设为 `enabled=false`（保留该行与工作区），让通道回到 `idle: no enabled targets`；重新启用前先核对目标与回复模式。
-- 若发布负责人决定补做真机归档验证：先备份 `stateDir`（归档不可撤销），只在测试群执行，记录 `GET targets` 的 `workspace`、归档结果摘要与下一条消息的回复器会话 id，并在 WS14 报告追加“已真机”结论后再改 README/兼容矩阵的措辞。
+- 验收后把测试群目标设为 `enabled=false`（保留该行与工作区），让通道回到 `idle: no enabled targets`；本次真机补验后已清空目标（`targets=[]`），通道 `idle: no enabled targets`。
+- 已完成的真机补验只覆盖“归档 → 下一条消息”；仍需补的项：`stopActivity=true` 的真实取消、任务 worker 归档、DSH 手动移除工作区后的重建/attach、单聊、多目标并发与 Windows symlink/realpath。补验前先备份 `stateDir`（归档不可撤销），只在测试群执行，并在 WS14-live 追加结论后再改 README/兼容矩阵措辞。
 
 ## 7. 打 tag
 
@@ -182,7 +184,7 @@ git show --stat v0.4.0
 - `GET /whale-chan/api/state` 版本 `0.4.0`；`API_ROUTES` 为 20 条，`POST targets/:id/archive-sessions` 存在。
 - `GET /whale-chan/api/persona` 返回四个字段；从未保存过人设的安装中 `persona`/`defaults` 为空人设，`presets` 含 `whale-maid`；已保存的人设不被覆盖。
 - 目标页工作区块显示启用目标的目录；`ready` 行有「归档会话」按钮，`per-conversation` 行没有。
-- 对一个测试目标归档一次：结果摘要五类计数齐全；若回复器被归档，`replySessionRotated=true`；发一条测试消息，确认回复出现在**新**会话里，且旧会话仍在 DSH 里可查。
+- 对一个测试目标归档一次：结果摘要五类计数齐全；若回复器被归档，`replySessionRotated=true`；发一条测试消息，确认回复出现在**新**会话里，且旧会话仍在 DSH 里可查。该链路已于 2026-11-04 定向真机验活通过，见 [WS14-live](test-reports/WS14-live.md)。
 - 在 DSH 里手动移除该工作区的记录后，再发一条消息，确认目录/记录被重建（标题保持原样）、回复正常。
 - 检查 `state.db` 的 schema 仍为 2、`effects` 无 dead 行、`audit` 有本次 `workspace.sessions-archived`。
 - 记录发布日期、tag、安装来源与验证人；更新 `docs/PROGRESS.md` 的发布坐标。

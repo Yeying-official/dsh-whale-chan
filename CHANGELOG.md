@@ -44,7 +44,7 @@
 - 候选超过 500 时只处理排序后的前缀，已归档候选仍占名额，**重复调用不会推进尾部**；面板只说明“本次只处理一批”。
 - 归档并集包含主人在该目录手动创建的会话，也包含别目标显式批准到本目录的任务会话；`stopActivity=true` 会取消运行中的回复/任务，任务可能因此失败。
 - 同一 target id 重复出现时按 settings 行顺序取首行；`nextReplySessionId` 可能指向一个此前已被手动归档的 generation，下一条消息的预检会继续前进。
-- 本版未跑真机：DSH `ArchivedSessionGate` 与 activity 结构由 fake 按 `error.name` 模拟，macOS/Linux 未验证。
+- 发布后（2026-11-04）在 Windows 真机做了**定向**验活并通过（归档 → 下一条消息：归档 3 / 原本已归档 2、generation 1→2、下一条群消息新建会话并回复）。完整 T3/T4 未重跑；`stopActivity=true`、任务 worker 归档、DSH 手动移除工作区、单聊、多目标与 Windows symlink 未真机覆盖，macOS/Linux 未验证。
 
 ## [0.3.0] - 2026-11-03
 

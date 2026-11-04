@@ -133,6 +133,7 @@ describe('management API contract', () => {
     'PUT settings/:block',
     'GET persona',
     'GET health',
+    'GET channel',
     'POST monitor/pause',
     'GET audit',
   ]
@@ -141,7 +142,7 @@ describe('management API contract', () => {
     expect(API_ROUTES.map((route) => route.key).sort()).toEqual([...expectedRoutes].sort())
     expect(new Set(API_ROUTES.map((route) => route.key)).size).toBe(API_ROUTES.length)
     expect(new Set(API_ROUTES.map((route) => `${route.method} ${route.path}`)).size).toBe(API_ROUTES.length)
-    expect(API_ROUTES).toHaveLength(20)
+    expect(API_ROUTES).toHaveLength(21)
   })
 
   it('uses the frozen prefix and consistent HTTP methods', () => {

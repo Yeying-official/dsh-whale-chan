@@ -1,6 +1,6 @@
 # 012 发布
 
-> 当前状态：**v0.4.0 已合并到 `main` `d0ed2e6`**（`--no-ff` 合并提交 `chore(merge): ws14 archive workspace sessions`）；tag `v0.4.0` 指向 `c82027a`（本地、未 push），tag 之后有发布后定向真机验活补验提交 `ee6bb97`。WS0–WS14 已完成；v0.4.0 增加会话归档与工作区自愈，管理 API 20 条，schema 仍为 2，设置字段仍 57 / 9 个 block。
+> 当前状态：**v0.4.0 已合并到 `main` `d0ed2e6`**（`--no-ff` 合并提交 `chore(merge): ws14 archive workspace sessions`）；tag `v0.4.0` 指向 `c82027a`（本地、未 push）。tag 之后的提交包括发布后定向真机验活 `ee6bb97`、真机文档回填 `b9b4205` 以及本次坐标修正提交。WS0–WS14 已完成；v0.4.0 增加会话归档与工作区自愈，管理 API 20 条，schema 仍为 2，设置字段仍 57 / 9 个 block。
 >
 > 版本 `0.4.0`，日期 `2026-11-04`。`private: true`，不发布到 npm。
 >

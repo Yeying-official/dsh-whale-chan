@@ -2,6 +2,48 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的结构与 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.5.0] - 2026-11-04
+
+**修好“订阅建立不起来、失败看不见原因、单聊发不出去”这条链路**（WS15）。单聊目标改由通讯录按姓名发现，只接受对端 `userId` 或 `open:<openDingtalkId>`；单聊回复的出站 id 保留 `open:` 前缀，防环查询同时认得三种历史写法；`supervisor` 把 `dws` stdout 上的结构化错误当作服务端拒绝来记录（不再算 malformed 事件），按 `retry_after_seconds` 退避，并在连续 3 次无重试提示的拒绝后停止自动重启；新增 `GET channel` 与目标页「订阅」列，让每个目标的 `state`/`restarts`/`lastError` 可见。`mentionOnly` 现在真正生效：群消息在目标行或全局 `requireMentionInGroups` 任一为真时要求已 @。管理 API 20 → 21 条；schema 仍为 2，设置字段仍 57 / 9，无迁移、无新依赖。**订阅与收发链路本轮只有单测与假 `dws` 夹具覆盖，尚未在真实账号上验收。**
+
+### Added
+
+- **`GET /whale-chan/api/channel`（第 21 条冻结路由）**：返回 `ChannelHealthView`（`state`、`running`、`targets[]`）；每个目标带 `targetId`、`kind`、可选 `label`、`state`（`starting`/`ready`/`stopped`/`failed`/`orphaned`）、`restarts` 与可选的 `readyAt`、`lastError`（单行、已脱敏）。只读订阅状态，不读写设置；运行时未就绪为 `503 state_unavailable`。
+- **目标页「订阅」列**：`GET channel` 成功时每行显示状态徽标、`N 次重启` 与失败原因原文（`title` 保留全文）；`GET channel` 失败时只显示「订阅状态不可用」，其余编辑/发现/校验/保存/归档不受影响。
+- **单聊按姓名发现**：`dws contact user search --query <姓名> --format json` 发现单聊候选，优先 `userId`，只有 open id 时生成 `open:<openDingtalkId>`；输入框与提示按类型区分（单聊要求填联系人姓名）。
+- **目标行内提示**：`at-me` 的 id 仅作标记、`dm` 的 id 形态（`userId` 或 `open:<openDingtalkId>`）、`mentionOnly` 仅 `group` 生效——开关在非 `group` 行禁用并说明原因。
+
+### Changed
+
+- **管理 API 从 20 条增加到 21 条**；`tests/contract.spec.ts` 断言新数量，`docs/011`、`docs/007` 与 README 同步。
+- **`mentionOnly` 语义落地（行为变更）**：`policy.findTarget` 先按消息来源分派——at-me 消息取全局 at-me 行、否则取 `group:<cid>` 会话行、最后回退到创建线程的目标行；群消息在 `target.mentionOnly || reply.requireMentionInGroups` **任一为真**时要求 `addressed`，否则 `not_addressed`。`at-me` 与 `dm` 恒视为已定向，`mentionOnly` 对它们无效。
+- **dm 目标 id 规则收紧**：`dm` 只接受对端 `userId` 或 `open:<openDingtalkId>`；形如 `cid…=`（含 `open:cid…=`）的会话 ID 在本地直接判 `invalid-target` 并提示改填，不再等到服务端拒绝。
+- **`supervisor` 失败策略**：`dws` stdout 上的结构化 `{"error":{…}}` 记为服务端拒绝（不再计入 malformed 事件）；退避取 `max(指数退避, retry_after_seconds)` 并以 `dws.restartBackoffMaxSeconds` 封顶；连续 3 次拒绝且没有 `retry_after_seconds` 时停止自动重启（`state=failed`），把真实原因留在 `lastError`。
+- **面板新增 17 个文案 key**（中英各一套：`targets.health.*` 9 个、`targets.discover.queryPlaceholderDm`、`settings.rows.idPlaceholder.*` / `idHint.*` / `mentionOnly.*` 7 个）；locale 为 524 个顶层 key（含 `meta`，按既有「`meta` 除外」口径为 523）。
+
+### Fixed
+
+- **D1 单聊订阅必然被拒**：`dws chat +chat-list --types p2p` 只返回 `openConversationId`（会话 ID），没有 `userId`/`openDingtalkId`；旧实现把会话 ID 当成 open id 去订阅，服务端返回 `SYSTEM_ERROR: subscribeUser failed: registerToEventCenter failed`。现在单聊发现改走 `contact user search`，p2p 会话列表不再作为单聊订阅来源。
+- **D2 单聊回复发不出去**：单聊事件只带 `sender_open_dingtalk_id`；`threadTarget` 现在为单聊输出 `open:<openDingTalkId>`（发送走 `--open-dingtalk-id`），`threadKeyOf` 去掉前缀让计数与防环仍落在同一会话；防环 SQL 同时匹配 `userId`、裸 open id 与 `open:<openId>` 三种历史写法，升级后不会把旧出站记录当别人说的话。
+- **D3 拒绝原因被吞掉**：订阅失败过去只表现为“进程退出 + 退避重启”，`lastError` 为空；现在记录脱敏后的服务端原因，`GET channel` 与目标页「订阅」列都能看到。
+- **D4 `--dry-run` 通过但服务端拒绝**：`validateTarget` 只证明参数被解析，不证明服务端能注册；对 `cid…=` 形态的 dm id 现在本地先拒绝，避免“校验通过、订阅失败”的误导。
+- **D5/D6 群消息被 `mentionOnly` 静默丢弃、at-me 与 group 共用同群时策略串味**：按消息来源分派目标行后，普通群消息按 `group` 行、@ 消息按 at-me 行；at-me 与 group 同时订阅同一群时不再互相覆盖。
+
+### Migration
+
+- **必须改的旧配置**：v0.4.0 及更早通过「单聊」发现加进来、id 是会话 ID（`cid…=`，或 `open:cid…=`）的目标行，升级后会被判 `invalid-target`，订阅不会建立。请在目标页改成对端 `userId` 或 `open:<openDingtalkId>`（用「单聊」+ 联系人姓名重新搜索即可得到）。这是有意的失败关闭：旧 id 无论如何都订阅不上。
+- **`mentionOnly` 新语义**：此前该字段在策略层没有生效，群消息只受全局 `reply.requireMentionInGroups` 约束；现在目标行的 `mentionOnly=true` 也会要求 @。若某群目标原本靠“全局关闭 + 行内 true”侥幸回复全部消息，升级后会开始只回 @ 消息——把该行 `mentionOnly` 关掉即可恢复。
+- **无 schema、无设置变更**：`SCHEMA_VERSION` 仍为 2，设置仍 9 个 block / 57 个字段，没有新增 block、字段或依赖；不需要迁移脚本。
+- **回退安全**：回到 v0.4.0 可打开同一个 `state.db`；`GET channel` 只是新增只读路由，旧面板不调用它。回退后 `mentionOnly` 重新失效、单聊仍需手工维护 id，但既有数据不受影响。
+
+### Known limitations
+
+- **订阅/收发链路未真机验收**：本轮修复的证据只有单元测试与假 `dws` 夹具（`tests/fixtures/fake-dws.mjs`）。`at-me` 订阅本身在真实 `dws` 上曾以 `--ephemeral` 临时探测到 ready（修复前排查时执行），但 `at-me` + `group` 同群去重、单聊订阅与单聊出站回复均未在真实账号上跑通。
+- **`contact user search` 的形状只来自一次实测**：字段别名按 `userId`/`staffId`/`openDingtalkId` 等容错解析；同名联系人、跨部门重名与分页语义未验证，候选仍需人工确认。
+- **`GET channel` 是进程内视图**：`orphaned` 进程不会因此被清理，`lastError` 只保留最近一次失败原因；插件重启后状态清零。
+- **本地规则的边界**：`cid…=` 判断基于正则形状而不是服务端契约；服务端若引入新的会话 id 形态，本地仍可能放过一个注定失败的 id。
+- **`retry_after_seconds` 只认数字秒**：字符串或其它单位按无提示处理，仍走本地指数退避。
+
 ## [0.4.0] - 2026-11-04
 
 **归档一个目标工作区的全部会话，并让该会话在归档或工作区被移除后自愈**（WS14）。当前回复会话被归档后，下一条钉钉消息会落到新会话（正在运行而被拒绝归档的会话继续使用）；在 DSH 里手动移除工作区后，下一次回复或任务会重建记录并尽量附着仍在的旧会话。升级不移动、不删除任何目录与会话日志；schema 仍为 2，设置字段仍 57 个，无新依赖。

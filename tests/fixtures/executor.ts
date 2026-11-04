@@ -56,6 +56,8 @@ export class FakeSessionHost implements SessionHost {
 
   /** Answer of the next turn waits; replaced per test. */
   turnOutcome: TurnEndOutcome = { status: 'completed' }
+  /** Scripted endings consumed in order before `turnOutcome`; used for blocked/retry tests. */
+  readonly outcomes: TurnEndOutcome[] = []
   /** Text `readFinalText` reports. */
   finalText: FinalText = { text: '已完成，改了 a.txt。', found: true }
   /** When set, `ensureSession` throws it. */
@@ -131,6 +133,8 @@ export class FakeSessionHost implements SessionHost {
       else this.turnCountWaiters.push(waiter)
     }
     if (options.signal.aborted) return { status: 'aborted' }
+    const scripted = this.outcomes.shift()
+    if (scripted !== undefined) return { ...scripted }
     if (!this.held) return { ...this.turnOutcome }
     return await new Promise<TurnEndOutcome>((resolve) => {
       const onAbort = (): void => {

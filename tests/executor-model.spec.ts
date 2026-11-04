@@ -195,6 +195,158 @@ describe('per-conversation workspaces', () => {
   })
 })
 
+describe('session preflight', () => {
+  /** A resolver shaped like the app layer's, so the assertions name the contract. */
+  const workspaceFor = (threadKey: string, title?: string): { path: string; title: string } => ({
+    path: `/srv/conversations/${threadKey}`,
+    title: `钉钉 · ${title ?? threadKey}`,
+  })
+
+  it('uses the prepared session and workspace', async () => {
+    const host = new FakeSessionHost()
+    const prepared: string[] = []
+    const model = new SessionModel({
+      host,
+      threadKey: 'dm:u1',
+      title: '小明',
+      homeDir: '/home/owner',
+      workspaceFor,
+      prepareSession: async (threadKey, title, currentSessionId) => {
+        prepared.push(`${threadKey}|${title}|${currentSessionId ?? ''}`)
+        return { sessionId: 'whale-reply-prepared', workspace: { path: '/srv/prepared', title: '钉钉 · 小明' } }
+      },
+    })
+    await model.complete(request(), new AbortController().signal)
+    expect(prepared).toEqual(['dm:u1|小明|'])
+    expect(host.ensured[0]?.sessionId).toBe('whale-reply-prepared')
+    expect(host.ensured[0]?.workspace).toBe('/srv/prepared')
+    expect(host.ensured[0]?.workspaceTitle).toBe('钉钉 · 小明')
+    expect(host.cancellations).toEqual([])
+  })
+
+  it('cancels the cached session and rebuilds fresh when the preflight rotated', async () => {
+    const host = new FakeSessionHost()
+    let sessionId = 'whale-reply-gen0'
+    const seen: Array<string | undefined> = []
+    const model = new SessionModel({
+      host,
+      threadKey: 'dm:u1',
+      title: '小明',
+      homeDir: '/home/owner',
+      workspaceFor,
+      prepareSession: async (_threadKey, _title, currentSessionId) => {
+        seen.push(currentSessionId)
+        return { sessionId, workspace: { path: `/srv/${sessionId}`, title: '钉钉 · 小明' } }
+      },
+    })
+    const signal = new AbortController().signal
+    await model.complete(request('第一句'), signal)
+    expect(host.ensured[0]?.fresh).toBe(false)
+
+    sessionId = 'whale-reply-gen1'
+    await model.complete(request('第二句'), signal)
+
+    expect(seen).toEqual([undefined, 'whale-reply-gen0'])
+    expect(host.cancellations).toEqual([{ sessionId: 'whale-reply-gen0', reason: 'replier session rotated' }])
+    expect(host.ensured).toHaveLength(2)
+    expect(host.ensured[1]?.sessionId).toBe('whale-reply-gen1')
+    expect(host.ensured[1]?.fresh).toBe(true)
+    expect(host.ensured[1]?.workspace).toBe('/srv/whale-reply-gen1')
+    expect(host.deliveries.map((delivery) => delivery.sessionId)).toEqual(['whale-reply-gen0', 'whale-reply-gen1'])
+  })
+
+  it('keeps the cached session when the preflight returns the same id', async () => {
+    const host = new FakeSessionHost()
+    const model = new SessionModel({
+      host,
+      threadKey: 'dm:u1',
+      title: '小明',
+      homeDir: '/home/owner',
+      prepareSession: async () => ({ sessionId: 'whale-reply-stable' }),
+    })
+    const signal = new AbortController().signal
+    await model.complete(request('第一句'), signal)
+    await model.complete(request('第二句'), signal)
+    expect(host.ensured).toHaveLength(1)
+    expect(host.cancellations).toEqual([])
+    // No workspace in the prepared value: the resolver still decides.
+    expect(host.ensured[0]?.workspace).toBe(join('/home/owner', '.dsh-whale-chan', 'workspace'))
+  })
+
+  it('keeps the historical session id and no cancellation without a preflight', async () => {
+    const { host, model } = learning()
+    const signal = new AbortController().signal
+    await model.complete(request('第一句'), signal)
+    await model.complete(request('第二句'), signal)
+    expect(host.ensured[0]?.sessionId).toBe(layoutSessionId('dm:u1'))
+    expect(host.cancellations).toEqual([])
+  })
+})
+
+describe('archive gate', () => {
+  it('rotates and retries once when the host blocked an archived delivery', async () => {
+    const host = new FakeSessionHost()
+    let calls = 0
+    const model = new SessionModel({
+      host,
+      threadKey: 'dm:u1',
+      title: '小明',
+      homeDir: '/home/owner',
+      prepareSession: async () => {
+        calls += 1
+        const sessionId = calls <= 2 ? 'whale-reply-gen0' : 'whale-reply-gen1'
+        return { sessionId, workspace: { path: `/srv/${sessionId}`, title: '钉钉 · 小明' } }
+      },
+    })
+    const signal = new AbortController().signal
+    await model.complete(request('第一句'), signal)
+    // The owner archives the session after the second preflight but before the
+    // delivery: DSH ends that turn as blocked instead of running it.
+    host.outcomes.push({ status: 'failed', detail: 'blocked: the session is archived' })
+    const text = await model.complete(request('第二句'), signal)
+
+    expect(text).toBe('已完成，改了 a.txt。')
+    expect(host.deliveries).toHaveLength(3)
+    expect(host.deliveries[1]?.sessionId).toBe('whale-reply-gen0')
+    expect(host.deliveries[2]?.sessionId).toBe('whale-reply-gen1')
+    // The retry is a new idempotency key, so the host cannot dedupe it away.
+    expect(host.deliveries[2]?.requestId).toBe(`${host.deliveries[1]?.requestId}:r1`)
+    expect(host.cancellations).toEqual([{ sessionId: 'whale-reply-gen0', reason: 'replier session rotated' }])
+    expect(host.ensured.map((ensured) => ensured.sessionId)).toEqual(['whale-reply-gen0', 'whale-reply-gen1'])
+    expect(host.ensured[1]?.fresh).toBe(true)
+  })
+
+  it('does not retry a second blocked turn', async () => {
+    const host = new FakeSessionHost()
+    let calls = 0
+    const model = new SessionModel({
+      host,
+      threadKey: 'dm:u1',
+      title: '小明',
+      homeDir: '/home/owner',
+      prepareSession: async () => {
+        calls += 1
+        return {
+          sessionId: `whale-reply-${String(calls)}`,
+          workspace: { path: `/srv/${String(calls)}`, title: '钉钉 · 小明' },
+        }
+      },
+    })
+    host.outcomes.push({ status: 'failed', detail: 'blocked' })
+    host.outcomes.push({ status: 'failed', detail: 'blocked' })
+    await expect(model.complete(request(), new AbortController().signal)).rejects.toThrow(ModelFailedError)
+    expect(host.deliveries).toHaveLength(2)
+    expect(host.deliveries[1]?.requestId).toBe(`${host.deliveries[0]?.requestId}:r1`)
+  })
+
+  it('keeps the normal failure path for a detail that does not name the gate', async () => {
+    const { host, model } = learning()
+    host.outcomes.push({ status: 'failed', detail: 'the model provider refused the request' })
+    await expect(model.complete(request(), new AbortController().signal)).rejects.toThrow(ModelFailedError)
+    expect(host.deliveries).toHaveLength(1)
+  })
+})
+
 describe('turn budget', () => {
   it('gives one replier turn 90 seconds, so a slow first token is not a timeout', async () => {
     const { host, model } = learning()

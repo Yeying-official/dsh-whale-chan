@@ -6,7 +6,9 @@ import { userErrorStatus } from '../src/app/http.ts'
 import { fakeChannel, jsonBody, request, startTestServer, type TestServer } from './fixtures/http.ts'
 import type { ChannelPort } from '../src/app/channel-port.ts'
 import { conversationWorkspace, conversationWorkspaceTitle } from '../src/executor/workspace.ts'
+import { replySessionIdForGeneration } from '../src/executor/reply-session.ts'
 import { inboundMessage } from './fixtures/domain.ts'
+import { FakeSessionPersistence, FakeWorkspaceRegistry } from './fixtures/workspace-registry.ts'
 import { SETTINGS_BLOCKS, SETTINGS_DEFAULTS } from '../src/shared/settings.ts'
 import { EMPTY_PERSONA, WHALE_MAID_PERSONA } from '../src/shared/persona-defaults.ts'
 
@@ -259,6 +261,131 @@ describe('read routes', () => {
 
     const rest = (await (await request(baseUrl, '/whale-chan/api/audit?limit=50')).json()) as { items: unknown[] }
     expect(rest.items.length).toBeGreaterThanOrEqual(4)
+  })
+})
+
+describe('target session archiving', () => {
+  const THREAD = 'group:cid-1'
+  const ROUTE = '/whale-chan/api/targets/cid-1/archive-sessions'
+
+  async function startArchive(
+    options: { rows?: readonly Record<string, unknown>[]; withRegistry?: boolean } = {},
+  ): Promise<{ server: TestServer; registry: FakeWorkspaceRegistry }> {
+    const registry = new FakeWorkspaceRegistry()
+    const persistence = new FakeSessionPersistence()
+    server = await startTestServer({
+      stateDir: join(root, 'state'),
+      overrides: {
+        ...(options.withRegistry === false ? {} : { workspaceRegistry: registry, sessionPersistence: persistence }),
+        settings: {
+          targets: { rows: options.rows ?? [{ kind: 'group', id: 'cid-1', label: '项目群' }] },
+        },
+      },
+    })
+    return { server, registry }
+  }
+
+  function workspaceOf(testServer: TestServer): string {
+    return conversationWorkspace(join(testServer.runtime.stateDir, 'workspaces'), THREAD)
+  }
+
+  it('archives the target workspace sessions and rotates the replier', async () => {
+    const { server: started, registry } = await startArchive()
+    const path = workspaceOf(started)
+    const replier = replySessionIdForGeneration(THREAD, 0)
+    registry.seed(path, conversationWorkspaceTitle('项目群', THREAD), [replier, 'session-a'])
+
+    const response = await request(started.baseUrl, ROUTE, jsonBody('POST', {}))
+
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as Record<string, unknown>
+    expect(body).toMatchObject({
+      targetId: 'cid-1',
+      threadKey: THREAD,
+      workspace: { path, title: conversationWorkspaceTitle('项目群', THREAD) },
+      archived: ['session-a', replier],
+      alreadyArchived: [],
+      refused: [],
+      missing: [],
+      failed: [],
+      replySessionRotated: true,
+      nextReplySessionId: replySessionIdForGeneration(THREAD, 1),
+      stopActivity: false,
+      truncated: false,
+      candidateCount: 2,
+    })
+  })
+
+  it('passes stopActivity through and ignores unknown body keys', async () => {
+    const { server: started, registry } = await startArchive()
+    registry.seed(workspaceOf(started), '钉钉 · 项目群', ['session-a'])
+
+    const response = await request(
+      started.baseUrl,
+      ROUTE,
+      jsonBody('POST', { stopActivity: true, unknownKey: 'ignored' }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ stopActivity: true })
+    expect(registry.archiveCalls.length).toBeGreaterThan(0)
+    expect(registry.archiveCalls.every((call) => call.stopActivity === true)).toBe(true)
+  })
+
+  it('rejects a non-boolean stopActivity and a malformed target id', async () => {
+    const { server: started } = await startArchive()
+
+    const invalid = await request(started.baseUrl, ROUTE, jsonBody('POST', { stopActivity: 'yes' }))
+    expect(invalid.status).toBe(400)
+    expect(await invalid.json()).toMatchObject({ ok: false, error: { code: 'invalid_body' } })
+
+    const malformed = await request(started.baseUrl, '/whale-chan/api/targets/%E0%A4%A/archive-sessions', {
+      method: 'POST',
+    })
+    expect(malformed.status).toBe(400)
+    expect(await malformed.json()).toMatchObject({ ok: false, error: { code: 'invalid_path' } })
+  })
+
+  it('answers 404 for an unknown target', async () => {
+    const { server: started } = await startArchive()
+    const response = await request(
+      started.baseUrl,
+      '/whale-chan/api/targets/missing/archive-sessions',
+      jsonBody('POST', {}),
+    )
+    expect(response.status).toBe(404)
+    expect(await response.json()).toMatchObject({ ok: false, error: { code: 'unknown_target' } })
+  })
+
+  it('answers 400 for a target without a single conversation workspace', async () => {
+    const { server: started } = await startArchive({ rows: [{ kind: 'at-me', id: 'global', label: '@我' }] })
+    const response = await request(
+      started.baseUrl,
+      '/whale-chan/api/targets/global/archive-sessions',
+      jsonBody('POST', {}),
+    )
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({
+      ok: false,
+      error: { code: 'per_conversation_workspace' },
+    })
+  })
+
+  it('answers 503 while no workspace registry is attached', async () => {
+    const { server: started } = await startArchive({ withRegistry: false })
+    const response = await request(started.baseUrl, ROUTE, jsonBody('POST', {}))
+    expect(response.status).toBe(503)
+    expect(await response.json()).toMatchObject({ ok: false, error: { code: 'state_unavailable' } })
+  })
+
+  it('guards the method and the same-origin header', async () => {
+    const { server: started } = await startArchive()
+    const wrongMethod = await request(started.baseUrl, ROUTE, { method: 'GET' })
+    expect(wrongMethod.status).toBe(405)
+    expect(wrongMethod.headers.get('allow')).toBe('POST')
+
+    const anonymous = await request(started.baseUrl, ROUTE, jsonBody('POST', {}), false)
+    expect(anonymous.status).toBe(403)
   })
 })
 

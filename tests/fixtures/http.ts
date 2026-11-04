@@ -9,7 +9,7 @@ import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { ChannelPort } from '../../src/app/channel-port.ts'
 import { createHttpHandler, httpDeps } from '../../src/app/http.ts'
-import { Runtime } from '../../src/app/runtime.ts'
+import { Runtime, type RuntimeOverrides } from '../../src/app/runtime.ts'
 import { API_REQUEST_HEADER, API_REQUEST_HEADER_VALUE } from '../../src/shared/api.ts'
 import type { TargetKind } from '../../src/shared/limits.ts'
 import type { TargetCandidate, TargetDraft, TargetValidation } from '../../src/shared/models.ts'
@@ -49,6 +49,8 @@ export interface TestServerOptions {
   readonly stateDir: string
   readonly channel?: ChannelPort
   readonly clock?: MutableClock
+  /** Test seams for host capabilities the API-only runtime would not compose. */
+  readonly overrides?: RuntimeOverrides
 }
 
 export interface TestServer {
@@ -75,7 +77,11 @@ export async function startTestServer(options: TestServerOptions): Promise<TestS
   const clock = options.clock ?? createClock()
   const runtime = new Runtime(
     { stateDir: options.stateDir, logLevel: 'info' },
-    { now: () => clock.now(), ...(options.channel === undefined ? {} : { channel: options.channel }) },
+    {
+      now: () => clock.now(),
+      ...(options.channel === undefined ? {} : { channel: options.channel }),
+      ...(options.overrides === undefined ? {} : { overrides: options.overrides }),
+    },
   )
   try {
     await runtime.ready

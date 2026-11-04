@@ -311,7 +311,7 @@ pnpm build          # 生成 lib/index.js 与 lib/client.js
 ## 状态
 
 - WS0 骨架与冻结合约、WS1 领域与持久化、WS2 `dws` 通道、WS3 人设与策略、WS4 执行器、WS5a 设置/API、WS5b 组合根、WS6 面板、WS7 文档与安全基线、WS8 真机验收、WS9 按会话工作区、WS10 目标页工作区与显示名、WS11 发布收口、WS12 空默认人设与可选预设、WS13 v0.3.0 收口、WS14 会话归档与工作区自愈、WS15 目标订阅修复与订阅健康：**全部完成**。
-- 当前版本 `0.5.0`（2026-11-04），管理 API 21 条；v0.2.0 工作区、v0.3.0 人设默认/预设、v0.4.0 归档会话与 v0.5.0 订阅修复均在 Windows 上开发并由自动化测试覆盖。**v0.5.0 的订阅/收发链路没有真机验收**（只有单测与假 `dws` 夹具）；`v0.5.0` 已本地打 tag（指向本发布记录提交）、**未 push**。
+- 当前版本 `0.5.0`（2026-11-04），管理 API 21 条；v0.2.0 工作区、v0.3.0 人设默认/预设、v0.4.0 归档会话与 v0.5.0 订阅修复均在 Windows 上开发并由自动化测试覆盖。**v0.5.0 的订阅/收发链路没有真机验收**（只有单测与假 `dws` 夹具）；`v0.5.0` 已本地打 tag（annotated，指向 `3a8c788`）、**未 push**。
 - 真机范围：Windows 10/11、DSH Desktop `0.2.1-rc.5`、`dws` `1.0.66`；单聊 o2o、`@我`/`open:` 惰性工作区、macOS/Linux 未真机覆盖，见 [WS8 真机报告](docs/test-reports/WS8-live.md)、[WS9/WS10 报告](docs/test-reports/WS9-10.md)、[WS12 人设报告](docs/test-reports/WS12-persona.md) 与 [兼容矩阵](docs/compatibility.md)。**v0.4.0 已做发布后定向真机验活**（2026-11-04，Windows，归档 → 下一条消息）：归档 3 / 原本已归档 2、0 拒绝/0 失败，generation 1→2，下一条群消息新建 g2 并正常回复；`stopActivity`、worker 归档、DSH 手动移除工作区、单聊与多目标未真机覆盖，完整 T3/T4 未重跑，见 [WS14 真机验活报告](docs/test-reports/WS14-live.md)。**v0.5.0 的 `at-me` 订阅在真实 `dws` 上曾以 `--ephemeral` 探测到 ready，但 `at-me`+`group` 同群去重、单聊订阅与单聊出站回复仍未真机确认**，见 [WS15 验收报告](docs/test-reports/WS15.md)。
 - 历史验收后测试群目标为 `enabled=false`（保留该行与工作区）；2026-11-04 的 v0.4.0 真机补验后测试目标已清空（`targets=[]`），通道为 `idle: no enabled targets`。重新启用前请先核对目标、`dryRun` 与回复模式。
 

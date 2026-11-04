@@ -1,7 +1,7 @@
 # 项目进度（v0.5.0 发布）
 
 > 快照时间：2026-11-04 17:05（Asia/Shanghai）。
-> 状态：**WS0–WS15 完成**；`0.5.0` 已合并到 `main` `858f6fd`（`--no-ff` 合并提交 `chore(merge): ws15 target subscription fixes`）；tag `v0.5.0` 指向本发布记录提交（本地、未 push）；profile 安装未执行。
+> 状态：**WS0–WS15 完成**；`0.5.0` 已合并到 `main` `858f6fd`（`--no-ff` 合并提交 `chore(merge): ws15 target subscription fixes`）；tag `v0.5.0` 已打（annotated，指向 `3a8c788`，本地、未 push）；profile 安装未执行。
 > 真机：Windows + DSH Desktop `0.2.1-rc.5` + `dws` `1.0.66` 上 T0–T4 全过（v0.1.0）；v0.2.0 的工作区改造做了 T3/T4 冒烟；v0.3.0 的人设默认/预设做了重载后接口与面板核对；v0.4.0 于 2026-11-04 发布后做了定向真机验活并通过（归档 → 下一条消息），完整 T3/T4 未重跑；**v0.5.0 的订阅/收发链路尚未在真实账号上验收**（只有单测与假 `dws` 夹具），见 [WS15 报告](test-reports/WS15.md)。
 
 ---
@@ -39,7 +39,7 @@
 | 全量测试    | **880 tests / 63 files**（本分支门禁实跑；基线 v0.4.0 为 849 / 62）                                                                                           |
 | 打包        | `15 artifacts`，icon 711 bytes（本版不增删产物）                                                                                                              |
 | 真机        | **v0.5.0 订阅/收发链路未验收**（单测 + 假 `dws` 夹具）；`at-me` 曾在修复前以 `--ephemeral` 探测到 ready                                                       |
-| tag         | **`v0.5.0` 指向本发布记录提交**（本记录提交后打，本地、未 push）；历史 tag `v0.4.0` 指向 `c82027a`                                                            |
+| tag         | **`v0.5.0` 已打**（annotated，指向 `3a8c788`，本地、未 push）；历史 tag `v0.4.0` 指向 `c82027a`                                                               |
 | 安装        | 未执行 profile 安装/升级；本版没有安装方式变化                                                                                                                |
 
 ## 3. WS15 与 v0.5.0 结论
@@ -70,7 +70,7 @@ WS15 修的是“订阅建立不起来、失败看不见原因、单聊发不出
 - 单测证据（见 [WS15 报告](test-reports/WS15.md)）：`channel-supervisor`（拒绝/退避/停止重启 12 条）、`channel-targets`（dm id 规则 14 条）、`channel-discover-auth`（联系人发现 21 条）、`brain-policy`（目标行 OR 全局 27 条）、`thread-state`（open id 出站与防环 7 条）、`client-targets`（订阅列与降级 25 条）、`api-routes`（`GET channel` 等 32 条）、`contract`（21 条路由与版本一致）。
 - **没有真机证据**：v0.5.0 的订阅/收发链路未在真实账号上跑过；`at-me` 曾在修复前以 `--ephemeral` 探测到 ready（随后撤销），这不是本版验收。
 - 文档门禁：README / CHANGELOG / 001 / 002 / 005 / 007 / 009 / 011 / 012 / 兼容矩阵 / PR / 报告链接核对通过；`docs/011` 由生成器产出，未手改。
-- 坐标：分支 `fix/ws15-target-subscriptions`（worktree `wt-ws15`）已以 `--no-ff` 合并到 `main` `858f6fd`；两个提交 `chore(release): v0.5.0`（`dbab720`）与 `docs: record ws15 target subscription fixes`（`829e9f6`）随合并进入 `main`；tag `v0.5.0` 指向本发布记录提交（本地、未 push）。
+- 坐标：分支 `fix/ws15-target-subscriptions`（worktree `wt-ws15`）已以 `--no-ff` 合并到 `main` `858f6fd`；两个提交 `chore(release): v0.5.0`（`dbab720`）与 `docs: record ws15 target subscription fixes`（`829e9f6`）随合并进入 `main`；tag `v0.5.0` 已打（annotated，指向 `3a8c788`，本地、未 push）。
 - 面板：目标页订阅列、行内提示与 `GET channel` 降级由组件测试覆盖；本版未新增浏览器截图。
 
 ## 5. 已知限制与未覆盖

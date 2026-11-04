@@ -3,7 +3,7 @@
 - 分支：`fix/ws15-target-subscriptions`（worktree `wt-ws15`）
 - 基线：`main` `7a0b4df`（v0.4.0 发布后的坐标修正提交）
 - 提交：`1ecea26`（单聊出站保留 open id）、`320fbe8`（联系人发现）、`488cf0a`（目标行策略）、`a80f6b3`（服务端拒绝可观测）、`a0ec771`（`GET channel`）、`aebc663`（订阅列与按类型提示）、`f97340e` / `fd8affb`（两个 `--no-ff` 合并）
-- 状态：实现与自动化验收完成；**已合并到 `main` `858f6fd`**（`--no-ff` 合并提交 `chore(merge): ws15 target subscription fixes`）；tag `v0.5.0` 指向本发布记录提交（本地、未 push）；**订阅/收发链路未真机验收**
+- 状态：实现与自动化验收完成；**已合并到 `main` `858f6fd`**（`--no-ff` 合并提交 `chore(merge): ws15 target subscription fixes`）；tag `v0.5.0` 已打（annotated，指向 `3a8c788`，本地、未 push）；**订阅/收发链路未真机验收**
 - 关联：[001 领域模型](../001-domain.md)、[002 授权与回复策略](../002-authorization.md)、[005 面板](../005-panel.md)、[007 架构](../007-architecture.md)、[009 DWS 协议](../009-dws-protocol.md)、[011 设置合约](../011-settings-contract.md)、[012 发布](../012-release.md)、[兼容矩阵](../compatibility.md)、[WS15 验收报告](../test-reports/WS15.md)
 
 ## 1. 缺陷清单
@@ -121,7 +121,8 @@
 - 分支：`fix/ws15-target-subscriptions`，基于 `main` `7a0b4df`。
 - 本 PR 的提交：`1ecea26`、`320fbe8`、`488cf0a`、`a80f6b3`、`a0ec771`、`aebc663`（外加两个 `--no-ff` 合并提交）；文档与版本提交为 `dbab720`（`chore(release): v0.5.0`）与 `829e9f6`（`docs: record ws15 target subscription fixes`）。
 - **已合并**：以 `--no-ff` 合并到 `main` `858f6fd`（`chore(merge): ws15 target subscription fixes`）。
-- **未执行**：`git tag v0.5.0`、push、profile 安装。tag 由发布负责人复核后打在**本发布记录提交**上（本地、未 push），见 [012 发布](../012-release.md) §7。
+- **tag 已打**：`v0.5.0`（annotated）由发布负责人打在 `3a8c788`（本地、未 push），见 [012 发布](../012-release.md) §7。
+- **未执行**：push、profile 安装。
 
 ## 8. 相关文档
 

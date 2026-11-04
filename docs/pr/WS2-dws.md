@@ -90,7 +90,7 @@ review 同步：已 merge `main` `b69177d`（仅 `docs/PROGRESS.md` 格式修复
 
 现网 `available=false` 而终端 `dws --version` 正常，根因是宿主 `PATH` 不含 `%APPDATA%\npm`，`cross-spawn` 无法解析裸 `dws`。修复：
 
-- 新增 `src/channel/command.ts`：`resolveDwsCommand(command, env, platform)`，规则与测试见 009 §3.1；
+- 新增 `src/channel/command.ts`：`resolveDwsCommand(command, env, platform)`，规则与测试见 009 §3.2；
 - `runOnce` 与 `DwsProcess.start` 在实际 spawn 前解析，`probeAuth`/`send`/`discover`/`validate`/supervisor 全部共享，不在各处重复；
 - supervisor 解析一次、日志打印一次，`TargetHealth.command` 暴露解析后的路径（仅路径）；
 - `channel-command.spec.ts` 10 条：PATH `.cmd`、`%APPDATA%` 回退、`%ProgramFiles%` 与 `.cmd` 优先、`%LOCALAPPDATA%` 存在性、`Path` 拼写、绝对路径、已带扩展名、无命中、非 win32、以及通过 `.cmd` shim 端到端 `probeAuth`（win32）。

@@ -63,7 +63,7 @@ app（存储、effect、HTTP、组合根）→ core / shared / Node
 3. `src/app/http.ts`：实现 handler，统一错误码映射（`missing` 404、`invalid` 400、`refused` 409、未就绪 503）。
 4. `src/app/store-read.ts`：只读查询加分页与行映射；写操作必须走 `Engine` 命令，不在 handler 里直接写库。
 5. `tests/api-routes.spec.ts` / `tests/task-actions.spec.ts`：覆盖成功、分页、错误码与同源守卫。
-6. 更新 `docs/011` 的“管理 API 变更”与 `docs/005` 的页签路由表。20 条是当前冻结数量（WS14 新增 `POST targets/:id/archive-sessions`，可对照 [WS14 PR](pr/WS14-archive-sessions.md)）；新增端点属于合约变更，需要评审。
+6. 更新 `docs/011` 的“管理 API 变更”与 `docs/005` 的页签路由表。21 条是当前冻结数量（WS14 新增 `POST targets/:id/archive-sessions`，WS15 新增只读 `GET channel`，可对照 [WS15 PR](pr/WS15-target-subscriptions.md)）；新增端点属于合约变更，需要评审。
 
 ## 7. 新增一个面板页签或交互
 
@@ -80,7 +80,7 @@ app（存储、effect、HTTP、组合根）→ core / shared / Node
 - **通道**：`tests/fixtures/fake-dws.mjs` 模拟 NDJSON/退出码/回执；不启动真实 `dws`，不发真实消息。
 - **brain**：stub `ModelPort` / `ResearchPort`；覆盖分类失败、低置信、回复清洗、限流、防环、静默。
 - **执行器**：fake `SessionHost`；覆盖批准门、工作区、模型路由、超时/取消、重试、回调次数。
-- **API**：真实 handler + 临时 Store；覆盖 20 条路由、错误码、分页、同源头。
+- **API**：真实 handler + 临时 Store；覆盖 21 条路由、错误码、分页、同源头。
 - **会话身份/归档**：`tests/session-recovery.spec.ts` 与 `tests/session-archive.spec.ts` 用 fake registry、persistence 与 `SessionHost` 覆盖 generation、工作区重建、候选并集与轮换；归档的破坏性边界（不删目录、不 unarchive）由这些 spec 钉住，不要改成真实文件系统删除。
 - **客户端**：真实组件 + mock fetch；覆盖七页签、批准流、409 恢复、i18n、无障碍。
 - 不把真实账号、群 ID、消息正文写进夹具或快照；测试产物不进 git。

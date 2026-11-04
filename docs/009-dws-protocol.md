@@ -1,6 +1,6 @@
 # 009 DWS 协议（个人授权通道）
 
-> 当前状态：WS2 实现完成。本文描述 `src/channel` 如何调用本机 `dws`（v1.0.66 help 实测契约 + 实现），并逐项标注证据等级。
+> 当前状态：WS2 实现完成；WS15 补齐服务端拒绝的可观测性、单聊发现与 `open:` 出站规则。本文描述 `src/channel` 如何调用本机 `dws`（v1.0.66 help 实测契约 + 实现），并逐项标注证据等级。
 >
 > 证据标记：
 >
@@ -31,6 +31,8 @@
 
 `at-me` 目标行的 `id` 只作为消息的 `targetId` 透传，不参与订阅参数；WS5 会把该行初始化为 `at-me`。
 
+`dm` 目标的 id 只有两种合法形态：对端 `userId`（走 `--user`），或 `open:<openDingtalkId>`（走 `--open-dingtalk-id`）。**会话 ID（`cid…=`）不是合法形态**：它指向一段聊天而不是一个人，`event consume … --open-dingtalk-id <conversation id>` 会被服务端拒绝（实测 `SYSTEM_ERROR: subscribeUser failed: registerToEventCenter failed`）。`src/channel/targets.ts` 的 `parsePeerAddress` 因此在本地就把 `cid…=` 与 `open:cid…=` 判为 `invalid-target`，并提示改填 `userId` 或 `open:<openDingtalkId>`；`validateTarget` 的 `--dry-run` 也会在构造参数阶段直接失败。
+
 ## 3. 订阅命令 **[H]**
 
 ```text
@@ -40,7 +42,8 @@ dws event consume <event_key> --flatten -f ndjson --ttl <hours>h
     [--profile <profile>]
 ```
 
-- **目标只用显式 ID**：`group` 用 `openConversationId`；`dm` 用 `userId`；只拿到 open id 时目标 id 写成 `open:<id>`，订阅走 `--open-dingtalk-id`。名称从不在订阅路径上被解析。
+- **目标只用显式 ID**：`group` 用 `openConversationId`；`dm` 用对端 `userId`，只拿到 open id 时目标 id 写成 `open:<id>`、订阅走 `--open-dingtalk-id`；`at-me` 不传任何目标参数（事件键本身就是全局 @ 订阅）。名称从不在订阅路径上被解析。
+- **`dm` 不接受会话 ID**：`cid…=` / `open:cid…=` 在本地被拒绝（见 §2 末段）。`--dry-run` 只证明参数被解析，不证明服务端能注册，所以这类 id 必须在参数构造阶段拦下。
 - **TTL** 取 `settings.dws.eventTtlHours`（默认 24，范围 1–720），以 Go duration 形式传 `<hours>h`，断线重连只补收有界窗口。**T1 实测**：`--ttl 1` 被 dws 拒绝（exit 3，`invalid argument "1" for "--ttl" flag: time: missing unit in duration "1"`），因此 v1 固定整数小时 + `h` 后缀，不接受裸数字。
 - **就绪行**（stderr）**[H]**：
   ```text
@@ -50,7 +53,34 @@ dws event consume <event_key> --flatten -f ndjson --ttl <hours>h
 - **`--dry-run`** 只打印计划并退出，不创建订阅。`validateTarget` 用它做非破坏校验；非零退出、超时、`not logged in`/`未登录` 之类的授权错误都判为无效。
 - **`group` 目标接收群内全部消息**，`mentionOnly` 与 `addressed` 由归一化/决策层处理，订阅参数不承担该过滤。
 
-### 3.1 Windows 命令解析
+### 3.1 服务端拒绝、退避与冷却（WS15）
+
+`dws` 把被拒绝的订阅写成 **stdout 上的一行结构化 JSON**，而不是事件，也不是退出码：
+
+```json
+{
+  "error": {
+    "category": "api",
+    "server_error_code": "SYSTEM_ERROR",
+    "reason": "personal_subscription_unknown",
+    "message": "subscribeUser failed: registerToEventCenter failed"
+  }
+}
+```
+
+（实测样例：`reason` 的取值与其余字段以服务端实际返回为准，实现只要求 `error` 是对象并按下面的顺序取字符串。）
+
+旧实现把这一行当事件消费，于是真正的拒绝原因被记成 `malformed`（“不是事件”），`lastError` 只剩退出码。现在 `supervisor` 先判断 `parsed.error` 是否为对象：是就当作服务端拒绝处理，不进入事件解码。
+
+规则：
+
+- **记原因**：`message` → `cause` → `reason` 依次取第一个字符串，`redact` + 压成单行 + 截断 240 字符后写入该目标的 `lastError`（`GET channel` 与面板「订阅」列直接展示）。
+- **退避**：`delay = min(dws.restartBackoffMaxSeconds, max(指数退避, retry_after_seconds × 1000))`。服务端给的 `retry_after_seconds` 只在**比本地退避更长**时生效，且永远不超过配置上限（默认 60 s，范围 10–300）。
+- **停止重启**：连续 **3** 次服务端拒绝、且**本次拒绝没有给出** `retry_after_seconds` 时，说明目标本身错了（id 形态不对、无权限、被禁用），继续重试只会用新的退出噪音盖住同一句原因。此时状态置 `failed`、不再安排重启，原因留在 `lastError`；修好配置后保存目标或重启插件即可重试。注意重试提示是 **attempt 级**的：每次重新启动都会清空，所以判据是“累计已 3 次 + 第 3 次这条拒绝本身没有提示”；前几次即使带过提示，只要本次没有且累计已到 3 次，同样停止。
+- **`dws` 侧冷却**：真机排查时观察到 `dws` 本机会在 `personal_subscription_attempts.json` 里记录订阅尝试，短时间内重复订阅同一目标会被它自己限流，表现为新的失败直到冷却结束。插件无法也不应绕过这个冷却；遇到“刚改完 id 仍失败”先等一会或清掉该文件再试。这一条来自修复前的排查记录，**本轮没有重新在真机上验证**。
+- **排查入口**：`dws event status` 列出当前仍在运行的订阅与其 `Consumers`（消费方）。插件为每个目标起一个 `dws event consume`，所以“目标页显示 ready 但 `event status` 里没有对应订阅”基本等于插件进程已被替换或订阅已被外部停掉；反过来，“`event status` 里有订阅但插件没有这个目标”是孤儿订阅，用 `dws event stop <subscribe_id> --yes` 清理。
+
+### 3.2 Windows 命令解析
 
 DSH 宿主进程不保证继承交互 shell 的 `PATH`。Windows 上 npm 全局安装的 `dws` 实际是 `%APPDATA%\npm\dws.cmd`；`cross-spawn` 对裸命令只按 `PATH` 找 `.exe`/`.cmd`，宿主 `PATH` 缺少 npm 全局目录时就会解析失败（现象：health `available=false`，而终端里 `dws --version` 正常）。
 
@@ -126,7 +156,7 @@ DSH 宿主进程不保证继承交互 shell 的 `PATH`。Windows 上 npm 全局�
 
 `@所有人` 广播：当 `settings.reply.ignoreBroadcast` 为真且没有直接 @ 本人时，整条消息跳过（skip `broadcast`）；若同时直接 @ 了本人，仍按 `addressed: true` 保留。
 
-**group 的 `mentionOnly` 属于 WS3 策略层**：通道始终如实输出 `addressed`，不会在通道层丢弃未 @ 的群消息（订阅本身接收群内全部消息）。是否回复、是否只看提及，由策略层基于 `addressed` 与 `mentionOnly` 决定。
+**group 的 `mentionOnly` 由 WS3 策略层执行（WS15 起真正生效）**：通道始终如实输出 `addressed`，不会在通道层丢弃未 @ 的群消息（订阅本身接收群内全部消息）。是否回复、是否只看提及，由 `policy.findTarget` + `gateReply` 基于 `addressed` 与 `mentionOnly` 决定：先按消息来源选目标行（at-me 消息 → 全局 at-me 行；否则 `group:<cid>` 会话行；最后回退到创建线程的行），群消息在 `target.mentionOnly || settings.reply.requireMentionInGroups` **任一为真**时要求 `addressed`，否则 `not_addressed`；`at-me` 与 `dm` 恒视为已定向，`mentionOnly` 对它们无效。这个“任一为真”是**或**语义：全局开关不能放宽目标行的收紧。
 
 ### 4.3 跳过原因（固定顺序）**[F]**
 
@@ -141,7 +171,7 @@ DSH 宿主进程不保证继承交互 shell 的 `PATH`。Windows 上 npm 全局�
 
 纯媒体事件在 v1 **不回复**：核心 `InboundMessage` 没有附件字段，回复一张没有说明的图片也没有意义，因此以 `unsupported` + `detail=media-only` 跳过；带文字说明的图文仍按文字处理。
 
-`threadKey`：`dm` → `dm:<对端 userId>`；群（含 `at-me` 落在群内）→ `group:<openConversationId>`。`targetId` 取目标配置的显式 id。
+`threadKey`：`dm` → `dm:<对端 userId>`，只有 open id 时用裸 open id（`open:` 只是发送侧前缀，`threadKeyOf` 会去掉它，避免同一会话出现两个键）；群（含 `at-me` 落在群内）→ `group:<openConversationId>`。`targetId` 取目标配置的显式 id。
 
 ### 4.4 调试摘要 **[F]**
 
@@ -164,7 +194,8 @@ dws chat +messages-send --as user --ai-tag --idempotency-key <key> --wait-delive
 
 - `--markdown` 与 `--text` 互斥；正文始终作为一个 argv 元素传入，不做 shell 拼接。
 - `--ai-tag` 由代码固定追加，模型输出无法移除。
-- 群与 `at-me` 回复都用 `--chat-id <conversationId>`；单聊用 `--user`；`open:` 前缀的目标用 `--open-dingtalk-id`。
+- 群与 `at-me` 回复都用 `--chat-id <conversationId>`；单聊用 `--user <userId>`。
+- **`open:` 前缀的单聊目标必须走 `--open-dingtalk-id <openDingTalkId>`**：裸 open id 与 `userId` 无法从形状上区分，按 `--user` 发出去会被 `dws` 拒绝（“用户不存在/无法解析”一类错误），因此 `threadTarget` 为单聊输出 `open:<openDingTalkId>`（事件里只有 `sender_open_dingtalk_id`），由发送层按前缀选参数；`threadKeyOf` 再去掉前缀，让计数与防环仍落在同一个 `dm:<peer>` 会话上。裸 `userId` 仍用 `--user`。
 - 没有 `idempotencyKey`、正文为空、目标会话 id 为空时**不 spawn**，直接判 `failed`。
 - **非交互确认 `--yes`**：dws 在非交互环境要求显式确认，缺失时 exit 3 并返回 `{"error":{"category":"validation","reason":"confirmation_required",...}}`。发送总是发生在主人已配置/已批准的流程里，不能等待 stdin，因此 `buildSendArgs` 固定追加 `--yes`；`event stop` 同样使用 `--yes`。**T2 实测**：不带 `--yes` 的发送被 dws 拒绝（exit 3，`confirmation_required`），修复后通过。
 
@@ -229,32 +260,38 @@ dws auth status --format json
 
 **owner 身份**：`probeAuth` 还返回可选的 `userId`（`auth status` 载荷里的账号 id，接受 `user_id`/`userId`/`staff_id`/`staffId`/`open_dingtalk_id`/`openDingTalkId` 别名）。它只交给宿主用于自消息过滤：**绝不写日志、绝不持久化、绝不写入文档**。宿主把它作为 `ownerUserId` 注入 `DingTalkChannel`，`start` 在“存在 enabled target 且 `ownerUserId` 为空”时抛 `ChannelError('owner-unknown')` 并拒绝订阅；通道**不再**从 at-me 行 id 回退猜测。缺失时强行启动会让助手把自己的回复当成新消息，形成回环。
 
-## 8. 目标发现 **[H]** + **[P]**
+## 8. 目标发现 **[H]** + **[F]**
 
 ```text
 dws chat +chat-search --query <q> --limit 50 --format json
-dws chat +chat-list --types p2p --page-size 50 --format json
+dws contact user search --query <姓名> --format json
 ```
 
-- `+chat-search` 返回 `{ chats: [{ name, openConversationId, ... }] }` 已记录 **[H]**；本实现从 `chats`/`conversations`/`items`/`list`/`results`/`data` 中容错取数组，按 `openConversationId` 等字段建候选。
-- `+chat-list --types p2p` 的返回结构**未实测 [P]**。实现同时接受 `userId`/`staffId`/`peerUserId` 与 `openDingTalkId`/`openConversationId`/`conversationId`/`chatId`；有 userId 时优先用它（`--user`），只有 open id 时加 `open:` 前缀。查询在本地按名称/ID 子串过滤，因为该命令的查询参数未确认。
-- 发现结果最多 50 条、按 `kind:id` 去重，只作为**待人工确认的候选**；名称永远不会被自动转换成订阅或发送目标。
+- **群目标走 `+chat-search`**：返回 `{ chats: [{ name, openConversationId, … }] }` 已记录 **[H]**；实现从 `chats`/`conversations`/`items`/`list`/`results`/`data` 中容错取数组，按 `openConversationId` 等字段建候选，并按名称/ID 子串在本地再过滤一次。
+- **单聊目标走 `contact user search`（WS15 变更）**：这是目前唯一被实测返回**人**的标识的命令——候选带 `userId` 与/或 `openDingTalkId`。`--query` 必填（该命令没有“列出全部联系人”的契约），搜索由 `dws` 按联系人姓名执行，因此本地**不再**按显示名过滤：`nick` 与 `name` 不同的联系人会被本地过滤误杀。结果按 `userId` 优先，只有 `openDingTalkId` 时生成 `open:<openDingTalkId>`；两者都有时把 `openDingTalkId` 放进候选的 `description` 供人工核对。
+- **`chat +chat-list --types p2p` 不再是单聊订阅来源**：实测它只返回 `openConversationId`（会话 ID）与名称，**没有** `userId`/`openDingtalkId`。会话 ID 指向聊天而不是人，拿它去 `--open-dingtalk-id` 订阅会被服务端拒绝（`SYSTEM_ERROR: subscribeUser failed: registerToEventCenter failed`），拿它去 `--user` 发送也解析不到人。因此 v0.5.0 起该命令不再用于发现；旧版本用它生成的 `dm` 行必须手工改成 `userId` 或 `open:<openDingtalkId>`。
+- 发现结果最多 50 条、按 `kind:id` 去重，只作为**待人工确认的候选**；名称永远不会被自动转换成订阅或发送目标（`TargetCandidate.source` 记录它来自 `chat-search` 还是 `contact-search`）。
 - 非 JSON 输出、非零退出、超时分别抛出 `ChannelError` 的 `dws-output`、`dws-failed`、`dws-timeout`，错误信息脱敏并截断。
+
+> 证据边界：`contact user search --format json` 的字段形状来自修复前的一次实测记录（`userId`/`openDingTalkId` 同时出现），实现对其余别名（`staffId`、`user_id`、`open_id` 等）做容错解析；同名联系人、重名与分页语义**未验证**，见 §9。
 
 ## 9. 未验证（provisional）清单
 
 以下行为/字段在实现中已被夹具覆盖，但**尚未在真机确认**；T1–T2 验证时按顺序核对，任何不一致都必须先改文档与测试再改实现：
 
-1. `user_im_message_receive_*` 三个事件键在登录态下的实际可用性（[H] 来自 help）。
-2. NDJSON 字段名：群 flatten 的真实结构已由 T3 证实（见 §4.1）；其它事件类型（`at`/`o2o`）、单聊的 `sender_staff_id` 是否存在、`conversationType` 的显式取值集合、`create_time` 在其它时区的表现仍待补充。
-3. `+chat-list --types p2p` 的响应结构与分页语义；`+chat-search` 的 `--format json` 是否被接受。
+1. `user_im_message_receive_*` 三个事件键在登录态下的实际可用性（[H] 来自 help）。`at-me` 在修复前的排查中曾以 `--ephemeral` 临时探测到 ready；`group` 由 T3 证实；`o2o`（单聊）尚未实测 ready。
+2. NDJSON 字段名：群 flatten 的真实结构已由 T3 证实（见 §4.1）；**单聊（o2o）事件已实测只带 `sender_open_dingtalk_id`，没有 `sender_staff_id`**，所以单聊回复必须用 `--open-dingtalk-id`（这是 D2 的根因）；`at` 事件类型、`conversationType` 的显式取值集合、`create_time` 在其它时区的表现仍待补充。
+3. `+chat-search` 的 `--format json` 是否在所有版本被接受（本版的群发现依赖它）；`+chat-list --types p2p` 已确认**只返回会话 ID、没有人员 id**，因此不作为发现来源，也不再列为待验证项。
 4. `auth status --format json` 的字段名、`expires_at` 格式与账号 id 字段（`user_id`/`userId`/`staff_id` 等别名）。
 5. `+messages-send` 的成功回执字段已由 T2 证实为 `openMessageId` + `deliveryStatus` + `idempotencyKey`；其他失败码的分类与 `--wait-delivery` 的边界行为仍待补充。
 6. Windows：`stdin.end()` 是否能优雅结束订阅；`dws event stop <id> --yes` 的实际语法与权限。
 7. `--ttl` 的补收窗口语义（单位已由 T1 证实必须带 `h`，v1 固定整数小时）；断线后是否重复投递旧事件。
 8. `--profile` 在 `event consume` / `auth status` / `send` 上的位置与可接受性。
-9. `open:<id>` 前缀是本项目的显式约定（不是 dws 语法），用于区分 `--user` 与 `--open-dingtalk-id`。
+9. `open:<id>` 前缀是本项目的显式约定（不是 dws 语法），用于区分 `--user` 与 `--open-dingtalk-id`；本地由 `parsePeerAddress` 与测试钉住，服务端只看到裸 id。
 10. 群目标“订阅全部消息 + 本地 mention 过滤”的权限前提（是否要求管理员授权）。
+11. `contact user search` 的**同名/重名联系人排序**与分页语义；字段形状只在一次实测中确认（含 `userId` 与 `openDingTalkId`），别名容错未经真机逐项核对。
+12. `dws` 侧 `personal_subscription_attempts.json` 的冷却窗口与清理方式：来自修复前的排查记录，本轮未重新验证；实现不读写该文件，只保证不绕过它。
+13. 服务端拒绝里的 `retry_after_seconds`：实现只接受正数字（秒）并按 `max(指数退避, 该值)` 且封顶 `dws.restartBackoffMaxSeconds`；其它单位的真实表现未验证。
 
 ## 相关文档
 

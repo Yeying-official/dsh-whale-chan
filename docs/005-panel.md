@@ -1,6 +1,6 @@
 # 005 面板
 
-> 状态：WS6 已实现七个页签的管理面板（`feat/ws6-panel`）；WS14 在目标页工作区卡片上增加「归档会话」。入口 `src/client/index.tsx`；视图在 `src/client/pages/*`；数据层在 `src/client/api.ts`；文案在 `locale/{zh,en}.json`（命名空间 `dshWhaleChan`）。面板只调用 `/whale-chan/api/*` 的 20 条冻结路由，不导入宿主实现层。
+> 状态：WS6 已实现七个页签的管理面板（`feat/ws6-panel`）；WS14 在目标页工作区卡片上增加「归档会话」；WS15 在目标表增加只读「订阅」列与按类型的行内提示。入口 `src/client/index.tsx`；视图在 `src/client/pages/*`；数据层在 `src/client/api.ts`；文案在 `locale/{zh,en}.json`（命名空间 `dshWhaleChan`）。面板只调用 `/whale-chan/api/*` 的 21 条冻结路由，不导入宿主实现层。
 
 面板是DSH助理**唯一的人工入口**：查看运行状态、浏览只读会话、批准/拒绝/取消/重试任务、维护目标与人设、按块修改设置、核对审计记录。它不发送钉钉消息，也不直接写数据库。
 
@@ -24,15 +24,15 @@ main(whale-chan)
 
 ## 2. 七个页签与数据来源
 
-| 页签 | 视图                                                                                   | 路由（全部经 `apiUrl`）                                                                                                                                                  |
-| ---- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 概览 | 监控开关、通道状态、待批准/运行中/会话/启用目标计数、健康检查、最近 5 条审计、快捷入口 | `GET overview`（5s）、`GET health`（壳层 5s）、`GET tasks?status=running&limit=100`、`GET audit?limit=5`、`POST monitor/pause`                                           |
-| 会话 | 只读会话列表 → 消息详情；加载更早消息                                                  | `GET threads?offset&limit=20`、`GET threads/:key?before&limit=50`                                                                                                        |
-| 任务 | 状态筛选、任务详情、审批与动作弹窗                                                     | `GET tasks?status&offset&limit=20`、`GET tasks/:id`、`POST tasks/:id/{approve,reject,cancel,retry}`、`GET settings`（仅取 `tasks.workspaceRoot` 提示）                   |
-| 目标 | 目标表编辑、发现、校验、逐块保存、归档会话                                             | `GET targets`、`GET settings`（取 `targets` 的 revision）、`POST targets/discover`、`POST targets/validate`、`POST targets/:id/archive-sessions`、`PUT settings/targets` |
-| 人设 | 注册表驱动的表单 + 本地实时预览                                                        | `GET persona`、`PUT settings/persona`                                                                                                                                    |
-| 设置 | monitor/reply/research/tasks/models/dws/advanced 七个 block 的注册表表单               | `GET settings`、`PUT settings/:block`                                                                                                                                    |
-| 审计 | 时间/类型/摘要表格，加载更多                                                           | `GET audit?offset&limit=50`                                                                                                                                              |
+| 页签 | 视图                                                                                   | 路由（全部经 `apiUrl`）                                                                                                                                                                                 |
+| ---- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 概览 | 监控开关、通道状态、待批准/运行中/会话/启用目标计数、健康检查、最近 5 条审计、快捷入口 | `GET overview`（5s）、`GET health`（壳层 5s）、`GET tasks?status=running&limit=100`、`GET audit?limit=5`、`POST monitor/pause`                                                                          |
+| 会话 | 只读会话列表 → 消息详情；加载更早消息                                                  | `GET threads?offset&limit=20`、`GET threads/:key?before&limit=50`                                                                                                                                       |
+| 任务 | 状态筛选、任务详情、审批与动作弹窗                                                     | `GET tasks?status&offset&limit=20`、`GET tasks/:id`、`POST tasks/:id/{approve,reject,cancel,retry}`、`GET settings`（仅取 `tasks.workspaceRoot` 提示）                                                  |
+| 目标 | 目标表编辑、发现、校验、逐块保存、归档会话、订阅状态                                   | `GET targets`、`GET settings`（取 `targets` 的 revision）、`POST targets/discover`、`POST targets/validate`、`POST targets/:id/archive-sessions`、`PUT settings/targets`、`GET channel`（只读订阅状态） |
+| 人设 | 注册表驱动的表单 + 本地实时预览                                                        | `GET persona`、`PUT settings/persona`                                                                                                                                                                   |
+| 设置 | monitor/reply/research/tasks/models/dws/advanced 七个 block 的注册表表单               | `GET settings`、`PUT settings/:block`                                                                                                                                                                   |
+| 审计 | 时间/类型/摘要表格，加载更多                                                           | `GET audit?offset&limit=50`                                                                                                                                                                             |
 
 轮询只在概览与壳层健康徽标上启用（5s）；其余页签首次加载后手动刷新。所有请求都有 `AbortController`、15s 超时与卸载取消，卸载后不会再有状态写入。
 
@@ -71,9 +71,11 @@ main(whale-chan)
 ### 3.4 目标
 
 - 行编辑：类型、目标 ID、名称、仅 @、回复模式、启用；新增/删除仅在草稿中生效，保存时才 `PUT settings/targets`。
+- **按类型的行内提示（WS15）**：`at-me` 行的 ID 输入框提示「仅作标记，不参与订阅」；`dm` 行提示「userId 或 `open:<openDingtalkId>`」，并说明会话 ID（`cid…`）会被拒绝；「仅 @」开关**只在 `group` 行可用**，`at-me`/`dm` 行禁用并显示原因（恒视为已定向），避免主人以为开关能生效。
+- **只读「订阅」列（WS15）**：`GET channel` 成功时表格多一列，每行显示该目标订阅状态的徽标（就绪/启动中/已停止/失败/残留/未知）、`N 次重启`（`restarts > 0` 时）与 `lastError` 原文；原因过长时视觉截断，`title` 保留全文。徽标按 `targetId` 匹配——同一个 id 出现多行时它们共享同一个状态，这是数据本身的边界而不是渲染取舍。列**只读**：点不动、不写入 `PUT settings/targets`，也不会因为状态是 `failed` 而阻止保存或校验。
 - 目标行编辑器下方是**只读工作区**区块：遍历 `GET targets` 的 `targets[].workspace`，显示目标名称/类型与 `path`（等宽字体，可复制到剪贴板）；`mode: 'ready'` 显示「已创建」，`mode: 'per-conversation'`（`at-me` 与 `open:` 单聊）显示「按会话创建」。该投影由宿主派生，不是可编辑字段，也从不写入 `PUT settings/targets`；响应中没有 `workspace` 时整个区块隐藏。`tasks.workspaceRoot` 是回复与任务的共用根，每个会话在根下拥有独立子目录；相对路径会被宿主忽略并回退到 `<stateDir>/workspaces`，设置页与目标页的提示文案同步说明这一点。
-- 发现：选择类型 + 关键词，`POST targets/discover` 返回候选；重复目标提示，加入草稿后需保存。通道未接入时宿主返回 `503 channel_unavailable`，面板显示「通道尚未接入」。
-- 校验：`POST targets/validate` 校验当前草稿行，显示有效/无效计数与逐行原因；同样处理 503。
+- 发现：选择类型 + 关键词，`POST targets/discover` 返回候选；重复目标提示，加入草稿后需保存。单聊类型要求输入**联系人姓名**（placeholder 与群聊不同），候选优先带 `userId`，只有 open id 时给出 `open:<openDingtalkId>`。通道未接入时宿主返回 `503 channel_unavailable`，面板显示「通道尚未接入」。
+- 校验：`POST targets/validate` 校验当前草稿行，显示有效/无效计数与逐行原因；同样处理 503。`--dry-run` 只证明参数被 dws 解析，**不证明服务端能注册**；因此 `cid…=` 形态的 `dm` id 由宿主在本地先拒绝，面板按普通无效行展示原因。
 
 **归档会话（WS14）**
 
@@ -106,26 +108,27 @@ main(whale-chan)
 
 ## 4. 错误、加载与空态
 
-| 情况                             | 表现                                                                                       |
-| -------------------------------- | ------------------------------------------------------------------------------------------ |
-| 无数据且首次加载                 | 骨架屏（`role=status`，label 本地化）                                                      |
-| 离线 / 超时                      | 错误横幅 + 重试；离线文案「无法连接…」，超时单独提示                                       |
-| `400`                            | 有 `issues` 时显示字段问题数并逐字段标注；否则显示输入不合法                               |
-| `400 per_conversation_workspace` | 归档弹窗内专用文案：该目标按会话创建工作区，没有单一工作区可归档                           |
-| `403`                            | 提示缺少同源校验头                                                                         |
-| `404`                            | 记录不存在或被删除；任务动作后自动重拉                                                     |
-| `404 unknown_target`             | 归档弹窗内专用文案：目标已被删除或不在当前设置里；弹窗保持打开可重试（不自动重拉 targets） |
-| `409 settings_conflict`          | 「配置已在别处更新」+ 保留草稿 + 自动重拉 + 可重试                                         |
-| `409` 其他（状态冲突）           | 按 `code` 显示当前状态不允许，并重拉详情                                                   |
-| `503 channel_unavailable`        | 「钉钉通道尚未接入」                                                                       |
-| `503` 其他 / `state_unavailable` | 「宿主尚未就绪，请稍后重试」（归档弹窗内为归档专用文案）                                   |
-| 空列表                           | 本地化空态（会话/任务筛选/目标/审计/消息/最近活动）                                        |
+| 情况                             | 表现                                                                                                                       |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| 无数据且首次加载                 | 骨架屏（`role=status`，label 本地化）                                                                                      |
+| 离线 / 超时                      | 错误横幅 + 重试；离线文案「无法连接…」，超时单独提示                                                                       |
+| `400`                            | 有 `issues` 时显示字段问题数并逐字段标注；否则显示输入不合法                                                               |
+| `400 per_conversation_workspace` | 归档弹窗内专用文案：该目标按会话创建工作区，没有单一工作区可归档                                                           |
+| `403`                            | 提示缺少同源校验头                                                                                                         |
+| `404`                            | 记录不存在或被删除；任务动作后自动重拉                                                                                     |
+| `404 unknown_target`             | 归档弹窗内专用文案：目标已被删除或不在当前设置里；弹窗保持打开可重试（不自动重拉 targets）                                 |
+| `409 settings_conflict`          | 「配置已在别处更新」+ 保留草稿 + 自动重拉 + 可重试                                                                         |
+| `409` 其他（状态冲突）           | 按 `code` 显示当前状态不允许，并重拉详情                                                                                   |
+| `503 channel_unavailable`        | 「钉钉通道尚未接入」                                                                                                       |
+| `GET channel` 失败（任意原因）   | 目标表只显示「订阅状态不可用」的提示条，**不**替换表格、不清空草稿、不拦编辑/保存/发现/校验/归档；刷新或等运行时就绪后再看 |
+| `503` 其他 / `state_unavailable` | 「宿主尚未就绪，请稍后重试」（归档弹窗内为归档专用文案）                                                                   |
+| 空列表                           | 本地化空态（会话/任务筛选/目标/审计/消息/最近活动）                                                                        |
 
 所有失败都只显示稳定错误码与本地化文案，不回显宿主内部路径或堆栈。
 
 ## 5. i18n
 
-- 全部 UI 文案来自 `ctx.locale` 的 `dshWhaleChan` 命名空间；`locale/zh.json` 与 `locale/en.json` 各 **507 个顶层 key**（含 `meta`；按既有「`meta` 除外」口径为 **506**），key 集合由测试强制一致。WS14 新增 25 个 key（21 个 `targets.archive.*`、`targets.workspace.actions`、3 个 `errors.archive*`）。
+- 全部 UI 文案来自 `ctx.locale` 的 `dshWhaleChan` 命名空间；`locale/zh.json` 与 `locale/en.json` 各 **524 个顶层 key**（含 `meta`；按既有「`meta` 除外」口径为 **523**），key 集合由测试强制一致。WS14 新增 25 个 key（21 个 `targets.archive.*`、`targets.workspace.actions`、3 个 `errors.archive*`）；WS15 再新增 17 个（9 个 `targets.health.*`、`targets.discover.queryPlaceholderDm`、`settings.rows.idPlaceholder.*` 2 个、`settings.rows.idHint.*` 2 个、`settings.rows.mentionOnly.*` 3 个）。
 - 覆盖页签、按钮、字段 label/hint、空态、错误、确认、成功/失败提示、危险项说明、无障碍标签；`src/client/**` 不含中文字面量（测试扫描），英文词典不含中文。
 - 插值沿用 DSH locale 的 `{name}` 语法（如 `{status}`、`{count}`、`{block}`、`{root}`）。
 - 宿主返回的检查详情、事件类型、目标 ID 是数据而非文案，按原样显示；事件类型使用等宽字体，避免伪装成翻译。
@@ -144,7 +147,7 @@ main(whale-chan)
 ## 7. 已知限制（v1）
 
 1. **无收件箱会话**：会话页是只读视图，不能新建/回复/标记已读；宿主 `ThreadsPage` 的 `unreadCount` 目前恒为 0。任务失败或投递结果 `unknown` 只写审计通知，不创建 DSH 收件箱会话，因此这类事件在审计/概览中查看。
-2. **review 模式草稿没有面板入口**：闸门降级为 `review` 时后端只生成草稿、不自动发送；20 条冻结路由中没有 `decisions/*` 或发送动作，`GET threads/:key` 也只返回收到的消息。因此面板无法展示或确认草稿，主人需在钉钉中手动处理；扩展该能力需要新增路由与共享视图（v0.2 backlog）。
+2. **review 模式草稿没有面板入口**：闸门降级为 `review` 时后端只生成草稿、不自动发送；21 条冻结路由中没有 `decisions/*` 或发送动作，`GET threads/:key` 也只返回收到的消息。因此面板无法展示或确认草稿，主人需在钉钉中手动处理；扩展该能力需要新增路由与共享视图（v0.2 backlog）。
 3. **无实时推送**：概览与健康每 5s 轮询，其余页签手动刷新；没有 WebSocket 或 SSE。轮询在卸载时取消，不泄漏。
 4. **会话详情字段有限**：`MessageView` 没有「是否 @」与决策/草稿状态，v1 只展示发送者、方向、时间、正文；接口扩展后才能补齐。
 5. **任务详情字段有限**：`TaskDetail` 只有 task/approval/messages，没有派工、结果与会话 ID；面板对可选的 `assignment`/`sessionId` 做前向兼容读取，缺失时明确提示。
@@ -162,3 +165,5 @@ main(whale-chan)
 - [WS6 测试报告](test-reports/WS6.md)
 - [WS14 PR](pr/WS14-archive-sessions.md)
 - [WS14 测试报告](test-reports/WS14.md)
+- [WS15 PR](pr/WS15-target-subscriptions.md)
+- [WS15 测试报告](test-reports/WS15.md)

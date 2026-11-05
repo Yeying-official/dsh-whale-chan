@@ -257,3 +257,80 @@ describe('delivery outcomes', () => {
     expect(outbound['status']).toBe('pending')
   })
 })
+
+describe('compose retries', () => {
+  /** Reply calls only: the classifier is the one request bounded at 800 chars. */
+  function replyCalls(h: PipelineHarness): number {
+    return h.model.current.requests.filter((request) => request.maxChars !== 800).length
+  }
+
+  function onlyDecision(h: PipelineHarness) {
+    const row = h.runtime.store.db.prepare('SELECT id FROM decisions LIMIT 1').get() as Record<string, unknown>
+    return h.runtime.engine.decision(String(row['id']))
+  }
+
+  it('retries one empty draft and sends the second answer', async () => {
+    const h = await start()
+    h.model.current.replies = ['', '收到，我来看看。']
+    await deliver(h)
+
+    expect(h.channel.sends).toHaveLength(1)
+    expect(h.channel.sends[0]).toMatchObject({ text: '收到，我来看看。' })
+    // The retry keeps the classification reason: only the log may name the failure.
+    expect(onlyDecision(h)).toMatchObject({ status: 'sent', attempts: 1, reason: 'test' })
+    expect(replyCalls(h)).toBe(2)
+  })
+
+  it('retries a draft that cleaning emptied and sends the second answer', async () => {
+    const h = await start()
+    h.model.current.replies = ['我是人类', '收到，我来看看。']
+    await deliver(h)
+
+    expect(h.channel.sends).toHaveLength(1)
+    expect(h.channel.sends[0]).toMatchObject({ text: '收到，我来看看。' })
+    expect(onlyDecision(h)).toMatchObject({ status: 'sent', attempts: 1, reason: 'test' })
+    expect(replyCalls(h)).toBe(2)
+  })
+
+  it('defers after the one retry also comes back empty', async () => {
+    const h = await start()
+    h.model.current.replies = ['', '']
+    await deliver(h)
+
+    expect(h.channel.sends).toEqual([])
+    expect(onlyDecision(h)).toMatchObject({ status: 'deferred', reason: 'compose:empty', attempts: 1 })
+    expect(replyCalls(h)).toBe(2)
+  })
+
+  it('does not retry when the owner turned autoRetry off', async () => {
+    const h = await start({ settings: { reply: { autoRetry: false } } })
+    h.model.current.replies = ['', '收到，我来看看。']
+    await deliver(h)
+
+    expect(h.channel.sends).toEqual([])
+    expect(onlyDecision(h)).toMatchObject({ status: 'deferred', reason: 'compose:empty', attempts: 0 })
+    expect(replyCalls(h)).toBe(1)
+  })
+
+  it('sends the body when research returns citations longer than the body budget', async () => {
+    const h = await start()
+    h.model.current.classifyAnswer = classifyAnswer('question', { need_search: true })
+    h.model.current.replyAnswer = '明天十点开始，我先确认一下日程。'
+    h.research.hit = {
+      facts: ['会议在 10:00 开始'],
+      sources: [
+        '关于 DeepSeek V4.1 Pro 发布与订阅价格的官方说明',
+        '关于 DSH 鲸鱼酱插件 v0.6.0 升级说明与已知问题',
+        '钉钉个人授权与 dws 订阅的常见问题汇总',
+      ].map((title, index) => ({ title, url: `https://example.com/docs/${'a'.repeat(90)}${index}` })),
+    }
+    await deliver(h, { text: '这个怎么配置？' })
+
+    expect(h.channel.sends).toHaveLength(1)
+    const text = h.channel.sends[0]?.text ?? ''
+    expect(text.startsWith('明天十点开始，我先确认一下日程。')).toBe(true)
+    expect(text).toContain('参考：')
+    expect([...text].length).toBeGreaterThan(300)
+    expect(onlyDecision(h)).toMatchObject({ status: 'sent', attempts: 0 })
+  })
+})

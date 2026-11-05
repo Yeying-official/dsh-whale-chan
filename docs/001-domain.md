@@ -33,6 +33,7 @@ queued|classified ──defer──> deferred
 queued ──classify(task)──> task_created
 ```
 
+- **compose 重试不迁移状态**：回复生成失败且允许重试时（`reply.autoRetry` 开启、失败词可重试、`attempts < 1`），`classified` 上只累加 `attempts` 后重跑 compose（`Engine.recordReplyAttempt`），不发生状态迁移；第二次仍失败才 `defer`，`defer` 是唯一失败终态。
 - `sending → *` 只由通道回执推进；`sent` 之后不再改变。
 - `send_unknown` 是终态：不自动重发，需主人核对通道；后续只能由显式的 retry 命令（WS4/WS5 实现）重新发起。
 - `deferred` 与终态都不能再被分类或排队。

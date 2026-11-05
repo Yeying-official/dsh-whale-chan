@@ -2,6 +2,44 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的结构与 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.6.0] - 2026-11-05
+
+**修好“正文被引用脚注挤空、群聊收不到回复”这条链路**（WS16）。`persona.maxReplyChars` 现在只约束回复正文；末尾的引用脚注有独立上限 `CITATIONS_MAX_CHARS`（600 码点），超出时逐行取舍（放得下的整行保留、放不下的整行跳过），一行都放不下就整体丢弃，**不会**再截短或清空正文。模型一个字都没给与“给了但被清洗成空”现在是两个失败词：后者为新增的 `sanitized_empty`。回复块新增 `reply.autoRetry`（默认开）：`empty`/`sanitized_empty`/`model_error` 最多自动重试一次，第二次仍失败才 `defer`；`timeout` 与 `echoes_system_prompt` 不重试。管理 API 仍 21 条、schema 仍 2、无迁移；设置字段 57 → **58 / 9**，locale 中英各 526 个顶层 key。**本版只有单测证据，未做真实账号验收。**
+
+### Added
+
+- **`reply.autoRetry`（boolean，默认 `true`）**：设置页「回复」块的新开关。开启时，可重试的回复生成失败（`empty`、`sanitized_empty`、`model_error`）会先自动重试**一次**，第二次仍失败才把决策置为 `deferred`（`reason` 为 `compose:<失败词>`）；关闭后恢复“一次失败即 defer”。`timeout` 与 `echoes_system_prompt` 属于确定性失败，无论开关如何都不重试。
+- **失败词 `sanitized_empty`**（`src/brain/reply.ts`）：模型有输出、但清洗（去围栏/引号、去身份声明、URL 白名单、凭证脱敏）后正文为空时使用，`detail` 带模型输出前 200 字符样本。模型输出本身就是空白时仍是 `empty`。完整失败词表：`timeout` / `empty` / `sanitized_empty` / `echoes_system_prompt` / `model_error`。
+- **`SanitizeResult.citations`**：取值 `kept` / `trimmed` / `dropped`，记录引用脚注这次是完整保留、逐行取舍还是整体丢弃；`sources` 的语义不变，仍只报告最终文本里出现的检索 URL。`dropped` 同时覆盖“没有请求引用”和“请求了但一行都放不下”两种情况，调用方不应从该值反推原因。
+- **内部错误码 `notRetryable`**（`refused`）：只由 `Engine.recordReplyAttempt` 使用——只有 `classified` 状态的决策才能记一次重试，其它状态记了也用不上。管理 API 不暴露这个错误码，也没有新增路由。
+
+### Changed
+
+- **引用预算与正文预算分离（行为变更）**：旧实现先从 `persona.maxReplyChars` 里扣掉引用脚注的长度，再截正文，三条长来源（362 字符）对上默认 300 上限时正文预算为负，整条回复被清空并 `defer` 为 `compose:empty`，群聊收不到任何回复。现在正文独占 `maxReplyChars`（1–800，按码点、优先断在句末标点），引用脚注另按 `CITATIONS_MAX_CHARS = 600` 码点逐行取舍：整行放得下就保留，放不下就跳过，绝不切半条 URL；一条都放不下时脚注整体消失（`citations: 'dropped'`），正文照发。**升级后，此前“因为引用太长而静默失败”的消息会开始正常回复**，这是本版最明显的行为变化。
+- **`persona.maxReplyChars` 的提示文案**：面板 hint 改为“单条回复正文的最大字符数；末尾的引用链接不计入该上限”，避免主人误以为引用会挤占正文。
+- **设置字段 57 → 58，block 仍 9**：`reply.autoRetry` 追加在 `reply` block 末尾；`docs/011-settings-contract.md` 由 `pnpm docs:settings` 重新生成。locale 中英各新增 2 个 key（`settings.reply.autoRetry.label/hint`），并改写 `settings.persona.maxReplyChars.hint`，顶层 key 524 → **526**（按既有「`meta` 除外」口径 523 → **525**）。
+- **重试只累加 `decisions.attempts`**：重试不是状态迁移，决策保持 `classified` 以便再次 compose；分类时的 `reason` 原样保留，不会被重试原因覆盖；不写新的领域事件，只在 host logger 记一条 `compose retry 1/1 for decision <id> after <失败词>`（不含消息正文）。重试会携带上一次的 `research` 结果，第二次草稿仍能引用同一批来源。
+
+### Fixed
+
+- **正文被引用脚注挤空**：`sanitizeReply` 不再为引用预留正文预算，`persona.maxReplyChars` 全部给正文；引用在自己的 600 码点预算内逐行取舍或整体丢弃。默认 300 字正文 + 3 条长来源不再互相打架。
+- **“模型没说话”与“被我们清空”混为一谈**：旧实现两者都报 `empty`；现在只有真空输出是 `empty`，清洗后为空是 `sanitized_empty`，调用方据此决定是否值得重试。
+- **失败一次就放弃**：可重试的失败现在默认多花一次模型调用；第二次仍失败才 defer，减少“模型偶发空输出”导致的丢回复。
+
+### Migration
+
+- **默认开启的一次重试会让失败时多一次模型调用**：`reply.autoRetry` 默认 `true`，`empty`/`sanitized_empty`/`model_error` 失败时最多多调用一次模型（只一次，不循环）。若主人希望保持 v0.5.0 的“一次失败即 defer”与调用成本，在「设置 → 回复」关掉该开关即可；开关只影响未来失败，不改历史决策。
+- **无 schema / API / 依赖变化**：`SCHEMA_VERSION` 仍为 2，管理 API 仍 **21 条**，`engines` 与 `dsh.compatibility` 不变，没有新增依赖，也不需要迁移脚本。设置只多一个带默认值的布尔字段，旧设置行读取时自动补 `true`。
+- **回退安全**：回到 v0.5.0 可打开同一个 `state.db`；多出来的 `reply.autoRetry` 会被旧 schema 的 strict 校验当作未知字段，v0.5.0 启动时会把整个 `reply` block 回退默认值并记录 warning（`SettingsService` 的既有行为）——回退前请先记录该 block 的自定义值（允许/屏蔽发送者、限速、@ 规则等），回退后重新保存。引用语义回退后重新变成“脚注挤占正文”，长引用场景会再次丢回复。
+- **不需要重发旧消息**：本版不重放、不修复历史 `deferred` 决策；被旧版本 `compose:empty` 丢掉的回复不会自动补发，需要主人在钉钉里手动处理。
+
+### Known limitations
+
+- **重试原因只在 host 日志**：自动重试不产生独立审计事件，`decisions.attempts` 会 +1，但面板与审计流看不到“这次多试了一次”；排障需要看 host logger 的 `compose retry …` 行。
+- **本版未做真实账号验收**：证据只有单元测试（`tests/brain-reply.spec.ts`、`tests/pipeline-chat.spec.ts`、`tests/core-engine.spec.ts` 等）与假 `dws` 夹具，没有在真实钉钉账号上触发过“长引用 + 失败重试”的组合。真实模型是否会在重试后给出不同草稿、引用取舍在真实来源长度下的表现，均未实测。
+- **引用取舍是静默的**：脚注被 `trimmed`/`dropped` 时，聊天里只表现为“少了几条参考”，没有面向主人的提示；`SanitizeResult.citations` 目前只给代码与测试用。
+- **`timeout` 不重试**：60 秒预算耗尽后直接 defer；如果首轮只是慢而不是坏，本版不会为它多等一轮。
+
 ## [0.5.0] - 2026-11-04
 
 **修好“订阅建立不起来、失败看不见原因、单聊发不出去”这条链路**（WS15）。单聊目标改由通讯录按姓名发现，只接受对端 `userId` 或 `open:<openDingtalkId>`；单聊回复的出站 id 保留 `open:` 前缀，防环查询同时认得三种历史写法；`supervisor` 把 `dws` stdout 上的结构化错误当作服务端拒绝来记录（不再算 malformed 事件），按 `retry_after_seconds` 退避，并在连续 3 次无重试提示的拒绝后停止自动重启；新增 `GET channel` 与目标页「订阅」列，让每个目标的 `state`/`restarts`/`lastError` 可见。`mentionOnly` 现在真正生效：群消息在目标行或全局 `requireMentionInGroups` 任一为真时要求已 @。管理 API 20 → 21 条；schema 仍为 2，设置字段仍 57 / 9，无迁移、无新依赖。**订阅与收发链路本轮只有单测与假 `dws` 夹具覆盖，尚未在真实账号上验收。**

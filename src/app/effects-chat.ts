@@ -23,6 +23,7 @@ import {
   composeReply,
   gateReply,
   isEcho,
+  isRetryableComposeFailure,
   research as runResearch,
   ResearchCache,
   type ClassifySuccess,
@@ -32,6 +33,7 @@ import {
   type ThreadWindow,
 } from '../brain/index.ts'
 import { classify } from '../brain/index.ts'
+import type { ExecutorLogger } from '../executor/index.ts'
 import type { Effects } from './effects.ts'
 import type { KvCounterStore } from './counters.ts'
 import { counterKey, readGateCounters } from './counters.ts'
@@ -77,6 +79,9 @@ export interface NoticePayload {
   readonly reason?: string
 }
 
+/** Automatic compose retries one decision may spend; a retry never loops. */
+const MAX_COMPOSE_RETRIES = 1
+
 export interface ChatEffectDeps {
   readonly engine: Engine
   readonly store: Store
@@ -93,6 +98,8 @@ export interface ChatEffectDeps {
   readonly lifetime: AbortSignal
   /** Mint an id such as `outbound-…`; supplied by the composition root. */
   readonly ids: { next(prefix: string): string }
+  /** Optional host logger; only failure transitions without message text are written. */
+  readonly logger?: ExecutorLogger
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -341,7 +348,25 @@ export class ChatEffects {
       this.deps.lifetime,
     )
     if (!composed.ok) {
-      this.defer(decisionId, `compose:${composed.reason}`)
+      const reason = `compose:${composed.reason}`
+      if (
+        isRetryableComposeFailure(composed.reason) &&
+        settings.reply.autoRetry &&
+        decision.attempts < MAX_COMPOSE_RETRIES
+      ) {
+        this.deps.engine.recordReplyAttempt(decisionId)
+        this.deps.logger?.warn?.(
+          `dsh-whale-chan: compose retry ${decision.attempts + 1}/${MAX_COMPOSE_RETRIES} for decision ${decisionId} after ${composed.reason}`,
+        )
+        // The research result travels with the retry, or the reply would lose
+        // the citations that made the question worth researching.
+        this.deps.effects.enqueue('compose', decisionId, {
+          decisionId,
+          ...(researchResult === undefined ? {} : { research: researchResult }),
+        })
+        return
+      }
+      this.defer(decisionId, reason)
       return
     }
 

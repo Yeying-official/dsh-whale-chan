@@ -83,6 +83,7 @@ export const FIELDS: readonly FieldSpec[] = [
   field('reply', 'requireMentionInGroups', 'boolean', true),
   field('reply', 'ackOnTaskCapture', 'boolean', true),
   field('reply', 'declineOnReject', 'boolean', false),
+  field('reply', 'autoRetry', 'boolean', true),
 
   field('research', 'enabled', 'boolean', true),
   field('research', 'onQuestionsOnly', 'boolean', true),

@@ -721,6 +721,7 @@ export class Runtime {
       lifetime: this.lifetimeController.signal,
       ids: this.idSource,
       probe: () => this.probe(),
+      logger: this.executorLogger(),
     })
     this.pipelineRef.register()
     this.passesRef = new Passes({

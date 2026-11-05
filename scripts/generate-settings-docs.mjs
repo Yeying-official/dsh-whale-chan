@@ -30,7 +30,7 @@ const rows = FIELDS.map(
 
 const doc = `# 011 设置合约
 
-> 状态：WS0 冻结字段，WS5a 起持久化（schema v2）；WS14（v0.4.0）把管理 API 增至 20 条，WS15（v0.5.0）增至 21 条，但**设置字段与 block 数仍为 57 / 9**，schema 仍为 2，没有新增设置字段或迁移。生成来源：\`src/shared/fields.ts\`；默认值来源：\`src/shared/settings.ts\`（persona 的默认值与预设定义在 \`src/shared/persona-defaults.ts\`）；持久化实现：\`src/app/settings.ts\`。
+> 状态：WS0 冻结字段，WS5a 起持久化（schema v2）；WS14（v0.4.0）把管理 API 增至 20 条，WS15（v0.5.0）增至 21 条；WS16（v0.6.0）新增 \`reply.autoRetry\`，设置字段增至 **${FIELDS.length} / ${SETTINGS_BLOCKS.length}**，schema 仍为 2，没有迁移。生成来源：\`src/shared/fields.ts\`；默认值来源：\`src/shared/settings.ts\`（persona 的默认值与预设定义在 \`src/shared/persona-defaults.ts\`）；持久化实现：\`src/app/settings.ts\`。
 
 本文件是设置字段的唯一人读表格，由 \`scripts/generate-settings-docs.mjs\` 生成。机器可读的唯一真源是：
 

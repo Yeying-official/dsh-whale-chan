@@ -16,7 +16,7 @@
  */
 import type { Clock, Engine, InboundMessage, ReceiveResult } from '../core/index.ts'
 import type { PromptSource, ResearchPort } from '../brain/index.ts'
-import type { TaskExecutor } from '../executor/index.ts'
+import type { ExecutorLogger, TaskExecutor } from '../executor/index.ts'
 import type { ChannelRuntime } from './channel-runtime.ts'
 import type { KvCounterStore } from './counters.ts'
 import type { Effects } from './effects.ts'
@@ -43,6 +43,8 @@ export interface PipelineOptions {
   readonly lifetime: AbortSignal
   readonly ids: { next(prefix: string): string }
   readonly probe: () => Promise<void>
+  /** Optional host logger, passed through to the reply-path effects. */
+  readonly logger?: ExecutorLogger
 }
 
 export class Pipeline {
@@ -69,6 +71,7 @@ export class Pipeline {
       channelRunning: options.channelRunning,
       lifetime: options.lifetime,
       ids: options.ids,
+      logger: options.logger,
     }
     const task: TaskEffectDeps = {
       engine: options.engine,

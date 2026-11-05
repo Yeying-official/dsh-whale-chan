@@ -10,8 +10,8 @@
  *   citation cannot reach the chat;
  * - a verbatim line of the system prompt is treated as a leak and the draft is
  *   refused rather than sent;
- * - the text is cut to `persona.maxReplyChars`, and citations are appended only
- *   when they still fit.
+ * - the text is cut to `persona.maxReplyChars`; citations have a separate
+ *   ceiling and are trimmed or dropped instead of shortening the body.
  */
 import type { PersonaSettings } from '../shared/settings.ts'
 import { withDeadline } from './deadline.ts'
@@ -30,6 +30,7 @@ import { renderResearchGuide } from './research.ts'
 import type {
   BrainMessage,
   ClassifySuccess,
+  ComposeFailureReason,
   ComposeResult,
   ModelPort,
   PromptSource,
@@ -43,6 +44,14 @@ export const DEFAULT_REPLY_TIMEOUT_MS = 60_000
 
 /** A system-prompt line shorter than this is too generic to prove a leak. */
 const LEAK_LINE_MIN_CHARS = 24
+
+/**
+ * Independent ceiling for the trailing citation block, in code points.
+ *
+ * Citations are evidence, not the reply: they are bounded on their own (about
+ * twice the default body limit) so a long footer can never eat the body budget.
+ */
+export const CITATIONS_MAX_CHARS = 600
 
 /** Claimed-identity phrasings that never belong in a reply written as the owner. */
 const DISCLAIMER_CLAUSE =
@@ -70,6 +79,13 @@ export interface SanitizeResult {
   readonly sources: readonly string[]
   readonly echoedSystemPrompt: boolean
   readonly truncated: boolean
+  /**
+   * What happened to the citation block: kept whole, trimmed by lines, or omitted.
+   * `'dropped'` means both "no citations were requested" and "the block was
+   * dropped after exceeding its ceiling"; callers should check only whether
+   * content exists, not infer the cause from this value.
+   */
+  readonly citations: 'kept' | 'trimmed' | 'dropped'
 }
 
 /** Remove one whole-output code fence, or a stray fence line at either edge. */
@@ -151,9 +167,36 @@ export function echoesSystemPrompt(reply: string, systemPrompt: string | undefin
   return longLines(systemPrompt).some((line) => normalized.includes(line))
 }
 
-function buildCitations(sources: readonly ResearchSource[], limit = 3): string {
-  const lines = sources.slice(0, limit).map((source) => `- ${source.title}：${source.url}`)
+/** Lines of the trailing citation block; one source contributes one line. */
+function buildCitations(sources: readonly ResearchSource[], limit = 3): string[] {
+  return sources.slice(0, limit).map((source) => `- ${source.title}：${source.url}`)
+}
+
+function renderCitations(lines: readonly string[]): string {
   return lines.length === 0 ? '' : `参考：\n${lines.join('\n')}`
+}
+
+/**
+ * Fit the citation block into its own ceiling, line by line.
+ *
+ * A line is never cut: half a URL is not a citation. Each source line is kept
+ * when it still fits and skipped when it does not, so one oversized line cannot
+ * evict the shorter lines that follow it. The block disappears entirely when no
+ * line fits.
+ */
+function fitCitations(lines: readonly string[]): { footer: string; citations: SanitizeResult['citations'] } {
+  if (lines.length === 0) return { footer: '', citations: 'dropped' }
+  const kept: string[] = []
+  let skipped = false
+  for (const line of lines) {
+    if (codePointLength(renderCitations([...kept, line])) <= CITATIONS_MAX_CHARS) {
+      kept.push(line)
+      continue
+    }
+    skipped = true
+  }
+  if (kept.length === 0) return { footer: '', citations: 'dropped' }
+  return { footer: renderCitations(kept), citations: skipped ? 'trimmed' : 'kept' }
 }
 
 /**
@@ -161,7 +204,8 @@ function buildCitations(sources: readonly ResearchSource[], limit = 3): string {
  *
  * The order matters: cleaning happens before the leak check (so a fence cannot
  * hide a leaked line), the leak check happens before truncation (so a cut cannot
- * hide one), and citations are reserved room before the body is cut.
+ * hide one), and citations are appended last against their own ceiling so the
+ * body always keeps the full persona limit.
  */
 export function sanitizeReply(draft: string, options: SanitizeOptions): SanitizeResult {
   const maxChars = Math.max(options.maxChars, 0)
@@ -176,19 +220,25 @@ export function sanitizeReply(draft: string, options: SanitizeOptions): Sanitize
   const echoedSystemPrompt = echoesSystemPrompt(text, options.systemPrompt)
   const truncated = codePointLength(text) > maxChars
 
-  const footer =
-    allowed && options.citeSources && options.citeSources.length > 0 && urlsIn(text).size === 0
-      ? buildCitations(options.citeSources)
-      : ''
-  const footerLength = codePointLength(footer)
-  const bodyBudget = footer.length > 0 ? maxChars - footerLength - 2 : maxChars
-  const body = bodyBudget > 0 ? truncateSentence(text, bodyBudget) : ''
+  // The body owns the whole persona budget. Citations are paid for separately,
+  // so an oversized footer can never shorten or empty the reply itself.
+  const body = truncateSentence(text, maxChars)
+  const fitted =
+    body.length > 0 && allowed && options.citeSources && options.citeSources.length > 0 && urlsIn(body).size === 0
+      ? fitCitations(buildCitations(options.citeSources, 3))
+      : { footer: '', citations: 'dropped' as const }
 
-  const finalText = body.length > 0 ? (footer.length > 0 ? `${body}\n\n${footer}` : body) : ''
+  const finalText = fitted.footer.length > 0 ? `${body}\n\n${fitted.footer}` : body
   const present = urlsIn(finalText)
   const sources = options.allowedUrls === undefined ? [] : options.allowedUrls.filter((url) => present.has(url))
 
-  return { text: finalText, sources, echoedSystemPrompt, truncated: truncated || body.length < codePointLength(text) }
+  return {
+    text: finalText,
+    sources,
+    echoedSystemPrompt,
+    truncated: truncated || body.length < codePointLength(text),
+    citations: fitted.citations,
+  }
 }
 
 function describeClassification(classification: ClassifySuccess): string {
@@ -233,6 +283,17 @@ function describeMessage(message: BrainMessage): string {
   const where = message.conversationType === 'group' ? '群聊' : '私聊'
   const addressed = message.addressed ? '（@ 了助理）' : ''
   return `${message.senderName || '对方'}（${where}）${addressed}：${message.text}`
+}
+
+/**
+ * Whether a compose failure is worth one automatic retry.
+ *
+ * A timeout is usually a transient or load problem, but a retry spends another
+ * full deadline that the caller's budget already governs; a leaked system prompt
+ * is deterministic. Neither is retried here.
+ */
+export function isRetryableComposeFailure(reason: ComposeFailureReason): boolean {
+  return reason === 'empty' || reason === 'sanitized_empty' || reason === 'model_error'
 }
 
 /**
@@ -289,6 +350,9 @@ export async function composeReply(input: ComposeInput, model: ModelPort, signal
     if (outcome.reason === 'aborted') return { ok: false, reason: 'model_error', detail: 'cancelled' }
     return { ok: false, reason: 'model_error', detail: outcome.detail ?? 'model error' }
   }
+  // Distinguish "the model said nothing" from "cleaning left nothing": the two
+  // failures keep separate semantics and share the same one-retry policy.
+  if (outcome.value.trim() === '') return { ok: false, reason: 'empty', detail: outputSample(outcome.value) }
 
   const research = input.research
   const sanitized = sanitizeReply(outcome.value, {
@@ -301,6 +365,6 @@ export async function composeReply(input: ComposeInput, model: ModelPort, signal
   })
 
   if (sanitized.echoedSystemPrompt) return { ok: false, reason: 'echoes_system_prompt' }
-  if (sanitized.text.length === 0) return { ok: false, reason: 'empty', detail: outputSample(outcome.value) }
+  if (sanitized.text.length === 0) return { ok: false, reason: 'sanitized_empty', detail: outputSample(outcome.value) }
   return { ok: true, text: sanitized.text, sources: sanitized.sources }
 }

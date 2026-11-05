@@ -110,6 +110,7 @@ export const ReplySchema = z
     requireMentionInGroups: z.boolean().default(true),
     ackOnTaskCapture: z.boolean().default(true),
     declineOnReject: z.boolean().default(false),
+    autoRetry: z.boolean().default(true),
   })
   .strict()
 

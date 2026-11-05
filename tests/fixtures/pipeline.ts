@@ -162,6 +162,13 @@ export function classifyAnswer(
 export class ScriptedModel implements ModelPort {
   classifyAnswer = classifyAnswer('chat')
   replyAnswer = '收到，我来看看。'
+  /**
+   * Queued reply bodies, consumed in call order; when empty, `replyAnswer` is used.
+   *
+   * The classifier is never served from this queue, so a test can script compose
+   * retries without depending on how the model distinguishes its two callers.
+   */
+  replies: string[] = []
   readonly requests: ModelRequest[] = []
   /** When set, every call rejects with it. */
   error: Error | undefined
@@ -171,7 +178,9 @@ export class ScriptedModel implements ModelPort {
     if (signal.aborted) throw new Error('aborted')
     if (this.error !== undefined) throw this.error
     // The classifier asks for a bounded JSON answer; a reply asks for the persona limit.
-    return request.maxChars === 800 ? this.classifyAnswer : this.replyAnswer
+    if (request.maxChars === 800) return this.classifyAnswer
+    const queued = this.replies.shift()
+    return queued ?? this.replyAnswer
   }
 }
 

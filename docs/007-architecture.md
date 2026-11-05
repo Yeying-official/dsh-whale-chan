@@ -58,7 +58,7 @@
 1. **通道（WS2）**：`DingTalkChannel` 为每个启用目标维持一个 `dws event consume` 子进程，按行解码成 `InboundMessage`，过滤自己发出的消息、广播与无效行，投给 `EventSink`。
 2. **领域（WS1）**：app 调用 `engine.receive(message)` 落库并建 Decision（`queued`），随后的写命令各自一个事务。
 3. **分类（WS3）**：`classify()` 用 `ModelPort` 判定 `chat|question|task|ignore` 与置信度，app 调 `engine.classify`。
-4. **回复（WS3）**：`gateReply()` 读设置与计数器决定是否回、是否需要检索；`composeReply()` 生成并清洗文本；app 调 `engine.draft` 与 `engine.queueReply`，领域写入 Outbound（`pending`）。
+4. **回复（WS3）**：`gateReply()` 读设置与计数器决定是否回、是否需要检索；`composeReply()` 生成并清洗文本（正文按 `persona.maxReplyChars` 截断，引用脚注按 `CITATIONS_MAX_CHARS` 逐行取舍或整体丢弃）；可重试失败（`empty`/`sanitized_empty`/`model_error`）在 `reply.autoRetry` 开启时**最多重试一次**，重试携带上一次的 `research` 结果，只累加 `decisions.attempts` 并写 host 日志；第二次仍失败才 `defer`。app 调 `engine.draft` 与 `engine.queueReply`，领域写入 Outbound（`pending`）。
 5. **任务（WS4）**：`intent: 'task'` 时领域建 Task + Approval，等人在面板批准；批准后 app 交给 `DshTaskExecutor.execute()`，`onStarted`/`onFinished` 映射为 `assignmentStarted`/`assignmentEnded`。
 6. **投递（outbox）**：`Effects` 的 `send` handler 取 `pending` Outbound，交给 `DingTalkChannel.send()`；`sent` / `unknown` / `failed` 分别由 `replySent`/`replyUnknown`/`replyFailed` 或 `outboundSent`/`outboundUnknown`/`outboundFailed` 落库。任务结果也走这条路——执行器不自己发消息。
 7. **观察与清扫**：`store-read` 的分页查询与 `/whale-chan/api/*` 路由供面板读状态；`Passes` 负责批准过期扫描（60 s）、授权探测（5 min）与启动时的 outbox 恢复。
@@ -149,16 +149,16 @@ Effects 不感知领域事务：调用方必须在命令事务提交后入队。
 
 ### 5.1 已注册的 effect 种类（WS5b）
 
-| kind       | key            | 输入 payload                                   | 下一步                                               | 幂等依据                                             |
-| ---------- | -------------- | ---------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------- |
-| `classify` | `decisionId`   | `{decisionId}`                                 | `research` / `compose` / 终点（task、ignore、defer） | `decision.status === 'queued'`                       |
-| `research` | `decisionId`   | `{decisionId}`                                 | `compose`（带 `ResearchResult`，降级也继续）         | `classified` + `intent === 'question'`               |
-| `compose`  | `decisionId`   | `{decisionId, research?}`                      | `draft`；`auto` 再 `queueReply` 并 enqueue `send`    | 只处理 `classified`；闸门拒绝则 `defer`              |
-| `send`     | `outboundId`   | `{outboundId, decisionId?, threadKey?}`        | `replySent`/`outboundSent`（或 unknown/failed）      | 只处理 `outbound.status === 'pending'`               |
-| `launch`   | `taskId`       | `{assignmentId?, workspace?}`                  | `finish`（成功）或 `notify`（失败/拒绝）             | 只处理 `approved` + `approved` 批准 + `pending` 派工 |
-| `finish`   | `taskId`       | `{taskId, assignmentId, summary, sessionId}`   | `queueFollowup` 后 enqueue `send`                    | 任务必须 `succeeded`；外发键固定                     |
-| `probe`    | `auth`         | 无                                             | 更新健康；授权失效则停通道                           | 探测只读；重复执行无副作用                           |
-| `notify`   | `kind:目标 id` | `{kind, taskId?, outboundId?, decisionId?, …}` | 写一条 `notice` 审计事件（v1 不建 DSH 会话）         | 事件追加，重复写只影响审计                           |
+| kind       | key            | 输入 payload                                             | 下一步                                                                                                                                                  | 幂等依据                                             |
+| ---------- | -------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `classify` | `decisionId`   | `{decisionId}`                                           | `research` / `compose` / 终点（task、ignore、defer）                                                                                                    | `decision.status === 'queued'`                       |
+| `research` | `decisionId`   | `{decisionId}`                                           | `compose`（带 `ResearchResult`，降级也继续）                                                                                                            | `classified` + `intent === 'question'`               |
+| `compose`  | `decisionId`   | `{decisionId, research?}`（重试原样携带同一 `research`） | `draft`；`auto` 再 `queueReply` 并 enqueue `send`；可重试失败在 `reply.autoRetry` 开启时重试一次（只累加 `attempts`），第二次仍失败或不可重试则 `defer` | 只处理 `classified`；闸门拒绝或失败终态一律 `defer`  |
+| `send`     | `outboundId`   | `{outboundId, decisionId?, threadKey?}`                  | `replySent`/`outboundSent`（或 unknown/failed）                                                                                                         | 只处理 `outbound.status === 'pending'`               |
+| `launch`   | `taskId`       | `{assignmentId?, workspace?}`                            | `finish`（成功）或 `notify`（失败/拒绝）                                                                                                                | 只处理 `approved` + `approved` 批准 + `pending` 派工 |
+| `finish`   | `taskId`       | `{taskId, assignmentId, summary, sessionId}`             | `queueFollowup` 后 enqueue `send`                                                                                                                       | 任务必须 `succeeded`；外发键固定                     |
+| `probe`    | `auth`         | 无                                                       | 更新健康；授权失效则停通道                                                                                                                              | 探测只读；重复执行无副作用                           |
+| `notify`   | `kind:目标 id` | `{kind, taskId?, outboundId?, decisionId?, …}`           | 写一条 `notice` 审计事件（v1 不建 DSH 会话）                                                                                                            | 事件追加，重复写只影响审计                           |
 
 `finish` 的群回复只渲染任务标题与面向发起人的摘要：按行剔除 `Route:`、`Aegis Reason Note:`、`会话：`、`Session:` 等内部行后再折叠、截断；`sessionId` 只留在任务结果/审计与面板，不进入 outbound 文本。
 
@@ -362,7 +362,7 @@ Runtime.status() → RuntimeServiceStatus.channelState / channelTargets / channe
 
 | 文件                                | 覆盖                                                                                                                                                 |
 | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tests/core-engine.spec.ts`         | 领域命令、事件、会话绑定与标题（28 条）                                                                                                              |
+| `tests/core-engine.spec.ts`         | 领域命令、事件、会话绑定与标题；`recordReplyAttempt` 只接受 `classified`（29 条）                                                                    |
 | `tests/core-invariants.spec.ts`     | 10 条硬不变量 + 中途失败回滚 + 迟到批准 + 偏移时间与非法时间（16 条）                                                                                |
 | `tests/store.spec.ts`               | 打开/迁移/索引/往返/回滚/唯一约束/损坏 JSON/分页/裁剪/KV（13 条）                                                                                    |
 | `tests/effects.spec.ts`             | 顺序、并发、覆盖、运行中重排、退避、上限、Later、dead、drain（10 条）                                                                                |
@@ -386,7 +386,7 @@ Runtime.status() → RuntimeServiceStatus.channelState / channelTargets / channe
 | `tests/runtime-lock.spec.ts`        | 打开/持久化/锁冲突/释放/启动失败（6 条）                                                                                                             |
 | `tests/core-outbound.spec.ts`       | `queueFollowup` 幂等/目标匹配/空值；outbound 终态与重复上报（10 条）                                                                                 |
 | `tests/rate-counters.spec.ts`       | 窗口滚动、裁剪、跨重启、gap、损坏恢复、消息窗口与回环状态（11 条）                                                                                   |
-| `tests/pipeline-chat.spec.ts`       | 自动回复、闸门降级/拒绝、检索、回声、unknown/failed 发送（18 条）                                                                                    |
+| `tests/pipeline-chat.spec.ts`       | 自动回复、闸门降级/拒绝、检索、回声、unknown/failed 发送、一次 compose 重试与 `autoRetry` 开关（23 条）                                              |
 | `tests/pipeline-task.spec.ts`       | 任务批准可见、批准后执行与回帖、未批准/取消/派工不符不执行、失败只通知、内部行脱敏（9 条）                                                           |
 | `tests/runtime-pipeline.spec.ts`    | 启动授权门、暂停/恢复、防抖重启、outbox 恢复、过期/probe pass、停机顺序、ownerNick、会话式重建（18 条）                                              |
 | `tests/health-view.spec.ts`         | channel 健康语义：disabled/paused/无 target 为 ok，有 target 却 stopped 为 degraded（4 条）                                                          |
@@ -395,6 +395,7 @@ Runtime.status() → RuntimeServiceStatus.channelState / channelTargets / channe
 ## 9. v1 限制
 
 - **没有历史补拉（backfill）**：`dws` 事件流只支持按 TTL 的消费窗口，WS2 没有实现「过去消息」补拉；插件只处理启动后收到的消息，不在本期伪造历史。
+- **回复失败的唯一终态是 `defer`**：自动重试不改变状态机，只在 `classified` 上累加 `decisions.attempts`（`Engine.recordReplyAttempt`）；`timeout` 与 `echoes_system_prompt` 不重试，第二次可重试失败后同样 `defer`，没有第三条失败路径。
 - **模板缺失即插件降级**：`prompts/*.md` 属于包完整性；任一模板缺失/空白时通道、流水线与 effect 队列都不装配，health 显示 `prompts: error`。这是有意的 fail-closed，不尝试通用提示词。
 - **review 无发送路由**：闸门降级为 `review` 时只写 Draft；面板（WS6）只读展示并允许复制，由主人自行在钉钉发送。`POST decisions/:id/send` 需要扩 21 条冻结合约，列入 v0.2 backlog。
 - **归档只增不减**：`session.*-generation` 只前进；在 DSH 手动 unarchive 旧会话不会回退 generation，旧回复上下文不会自动恢复。归档并集包含主人手建的会话与别目标显式批准到该目录的任务会话，且不删目录/文件/日志、不提供 unarchive。

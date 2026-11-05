@@ -72,7 +72,7 @@
 | `knowledge`     | `""`     | 无角色背景                                                     |
 | `samples`       | `[]`     | 无示例                                                         |
 | `allowEmoji`    | `true`   | 保持产品默认                                                   |
-| `maxReplyChars` | `300`    | 保持产品默认                                                   |
+| `maxReplyChars` | `300`    | 保持产品默认；只约束回复正文，引用脚注不计入                   |
 
 数组默认值使用工厂（`() => [...EMPTY_PERSONA.rules]` / `() => [...EMPTY_PERSONA.samples]`），
 `SettingsSchema` 的 persona block 默认值也改为工厂，因此每次解析都得到独立数组，调用方
@@ -94,7 +94,7 @@
 | `persona.knowledge`     | 外形、性格、表达方式三段背景                                                     |
 | `persona.samples`       | 3 条原创示例回复                                                                 |
 | `persona.allowEmoji`    | `true`                                                                           |
-| `persona.maxReplyChars` | `300`                                                                            |
+| `persona.maxReplyChars` | `300`（只约束正文，引用脚注不计入）                                              |
 
 完整的 `identity`、`tone`、`rules`、`knowledge`、`samples` 原文只保存在
 `src/shared/persona-defaults.ts` 的 `WHALE_MAID_PERSONA`，本文件不复制全文，避免两处漂移。
@@ -118,7 +118,8 @@
      真正的写入仍只有 `PUT settings/persona`。旧 host 不返回 `defaults` / `presets` 时，
      对应按钮整块隐藏，页面行为与升级前一致。
 5. **brain**：空 `name` 回落 `鲸鱼酱`；空 `tone` 回落到原有的「自然、克制，不喧宾夺主」，
-   不额外注入任何女仆语气。渲染骨架与长度裁剪逻辑不变。
+   不额外注入任何女仆语气。渲染骨架不变；长度裁剪仍按 `maxReplyChars`，但它只约束正文，
+   引用脚注另按 `CITATIONS_MAX_CHARS` 独立裁剪（v0.6.0，见 [004 提示词](004-prompts.md) §5）。
 
 ## 8. 升级行为
 

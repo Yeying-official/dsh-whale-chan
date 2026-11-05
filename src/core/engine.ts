@@ -518,6 +518,27 @@ export class Engine {
     })
   }
 
+  /**
+   * Record one automatic compose attempt without leaving the `classified` state.
+   *
+   * A retry is not a transition: the decision stays draftable so the compose
+   * handler can run again, and the attempt count is what bounds the retries. Only
+   * a classified decision can spend an attempt; any other state would record one
+   * it can never use. The classification reason is kept as-is: the retry reason
+   * belongs in the log, and a decision that later sends must not look like the
+   * failure that preceded it.
+   */
+  recordReplyAttempt(decisionId: string): Decision {
+    return this.command(() => {
+      const at = this.now()
+      const decision = this.requireDecision(decisionId)
+      if (decision.status !== 'classified') throw new UserError('notRetryable')
+      const recorded: Decision = { ...decision, attempts: decision.attempts + 1, updatedAt: at }
+      this.repos.decisions.save(recorded)
+      return recorded
+    })
+  }
+
   // Approval gate
 
   /**

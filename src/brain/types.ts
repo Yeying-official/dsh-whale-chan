@@ -153,7 +153,7 @@ export interface ComposeSuccess {
 }
 
 /** Why a reply was discarded; the caller defers instead of sending. */
-export type ComposeFailureReason = 'timeout' | 'empty' | 'echoes_system_prompt' | 'model_error'
+export type ComposeFailureReason = 'timeout' | 'empty' | 'sanitized_empty' | 'echoes_system_prompt' | 'model_error'
 
 export interface ComposeFailure {
   readonly ok: false

@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CITATIONS_MAX_CHARS,
   DEFAULT_REPLY_TIMEOUT_MS,
   composeReply,
   echoesSystemPrompt,
+  isRetryableComposeFailure,
   sanitizeReply,
   stripDisclaimers,
   stripFences,
   stripWrappingQuotes,
   type ComposeInput,
 } from '../src/brain/reply.ts'
-import type { ClassifySuccess, ResearchResult } from '../src/brain/types.ts'
+import type { ClassifySuccess, ComposeFailureReason, ResearchResult } from '../src/brain/types.ts'
 import { hangingModel, makeMessage, makePersona, shippedPromptStore, stubModel } from './fixtures/brain.ts'
 
 const prompts = shippedPromptStore()
@@ -96,7 +98,7 @@ describe('sanitizeReply', () => {
     expect(result.text).toContain('sk-***')
   })
 
-  it('appends citations only when they fit the budget', () => {
+  it('appends citations outside the body budget', () => {
     const source = { title: '日程页', url: 'https://example.com/schedule' }
     const withRoom = sanitizeReply('会议十点开始。', {
       maxChars: 200,
@@ -106,10 +108,106 @@ describe('sanitizeReply', () => {
     expect(withRoom.text).toContain('参考：')
     expect(withRoom.text).toContain('https://example.com/schedule')
     expect(withRoom.sources).toEqual([source.url])
+    expect(withRoom.citations).toBe('kept')
 
-    const noRoom = sanitizeReply('会议十点开始。', { maxChars: 12, allowedUrls: [source.url], citeSources: [source] })
-    expect(noRoom.sources).toEqual([])
-    expect([...noRoom.text].length).toBeLessThanOrEqual(12)
+    // The body limit never pays for the footer: a tight body budget still keeps
+    // the whole body, and citations stay as long as they fit their own ceiling.
+    const tight = sanitizeReply('会议十点开始。', { maxChars: 12, allowedUrls: [source.url], citeSources: [source] })
+    expect(tight.text.startsWith('会议十点开始。')).toBe(true)
+    expect(tight.text).toContain('参考：')
+    expect(tight.citations).toBe('kept')
+    expect(tight.sources).toEqual([source.url])
+  })
+
+  it('keeps the body when the citation footer is longer than the body budget', () => {
+    const sources = [
+      '关于 DeepSeek V4.1 Pro 发布与订阅价格的官方说明',
+      '关于 DSH 鲸鱼酱插件 v0.6.0 升级说明与已知问题',
+      '钉钉个人授权与 dws 订阅的常见问题汇总',
+    ].map((title, index) => ({ title, url: `https://example.com/docs/${'a'.repeat(90)}${index}` }))
+    const body = '明天十点开始，我先确认一下日程。'
+    const result = sanitizeReply(body, {
+      maxChars: 300,
+      allowedUrls: sources.map((source) => source.url),
+      citeSources: sources,
+    })
+
+    const footer = result.text.slice(result.text.indexOf('参考：'))
+    expect([...footer].length).toBeGreaterThan(300)
+    expect([...footer].length).toBeLessThanOrEqual(CITATIONS_MAX_CHARS)
+    expect(result.citations).toBe('kept')
+    expect(result.text.startsWith(body)).toBe(true)
+    expect([...result.text].length).toBeGreaterThan(300)
+    expect(result.sources).toEqual(sources.map((source) => source.url))
+  })
+
+  it('trims citation lines from the tail when the footer exceeds its own ceiling', () => {
+    const first = { title: '来源一', url: `https://example.com/${'x'.repeat(250)}a` }
+    const second = { title: '来源二', url: `https://example.com/${'x'.repeat(250)}b` }
+    const third = { title: '来源三', url: `https://example.com/${'x'.repeat(250)}c` }
+    const sources = [first, second, third]
+    const result = sanitizeReply('正文保留。', {
+      maxChars: 300,
+      allowedUrls: sources.map((source) => source.url),
+      citeSources: sources,
+    })
+
+    expect(result.citations).toBe('trimmed')
+    expect(result.text.startsWith('正文保留。')).toBe(true)
+    expect(result.text).toContain(first.url)
+    expect(result.text).toContain(second.url)
+    expect(result.text).not.toContain(third.url)
+    expect(result.sources).toEqual([first.url, second.url])
+    const footer = result.text.slice(result.text.indexOf('参考：'))
+    expect([...footer].length).toBeLessThanOrEqual(CITATIONS_MAX_CHARS)
+  })
+
+  it('drops the citation block entirely when not one line fits', () => {
+    const sources = [0, 1, 2].map((index) => ({
+      title: `来源${index + 1}`,
+      url: `https://example.com/${'x'.repeat(700)}`,
+    }))
+    const body = '正文保留。'
+    const result = sanitizeReply(body, {
+      maxChars: 300,
+      allowedUrls: sources.map((source) => source.url),
+      citeSources: sources,
+    })
+
+    expect(result.citations).toBe('dropped')
+    expect(result.text).toBe(body)
+    expect(result.sources).toEqual([])
+  })
+
+  it('cuts only the body to maxChars and appends the footer after it', () => {
+    const source = { title: '日程页', url: 'https://example.com/schedule' }
+    const result = sanitizeReply('第一句话很长很长很长很长。第二句话也很长很长很长很长。', {
+      maxChars: 20,
+      allowedUrls: [source.url],
+      citeSources: [source],
+    })
+
+    expect(result.truncated).toBe(true)
+    expect(result.citations).toBe('kept')
+    const [body = '', footer = ''] = result.text.split('\n\n')
+    expect([...body].length).toBeLessThanOrEqual(20)
+    expect(footer).toBe('参考：\n- 日程页：https://example.com/schedule')
+    expect([...result.text].length).toBe([...body].length + 2 + [...footer].length)
+  })
+})
+
+describe('isRetryableComposeFailure', () => {
+  it('retries only the failures a second call can fix', () => {
+    const cases: readonly (readonly [ComposeFailureReason, boolean])[] = [
+      ['empty', true],
+      ['sanitized_empty', true],
+      ['model_error', true],
+      ['timeout', false],
+      ['echoes_system_prompt', false],
+    ]
+    for (const [reason, expected] of cases) {
+      expect(isRetryableComposeFailure(reason), reason).toBe(expected)
+    }
   })
 })
 
@@ -183,12 +281,37 @@ describe('composeReply', () => {
     expect(result).toMatchObject({ ok: false, reason: 'echoes_system_prompt' })
   })
 
-  it('treats an empty or all-disclaimer draft as empty', async () => {
+  it('separates a silent model from a draft that cleaning emptied', async () => {
+    const silent = await composeReply(makeInput(), stubModel(''), new AbortController().signal)
+    expect(silent).toMatchObject({ ok: false, reason: 'empty' })
+
+    // A fence or a disclaimer-only draft is not silence: the model spoke, but
+    // cleaning left nothing, and only that case may be retried once by the app.
     const fenced = await composeReply(makeInput(), stubModel('```\n```'), new AbortController().signal)
-    expect(fenced).toMatchObject({ ok: false, reason: 'empty' })
+    expect(fenced).toMatchObject({ ok: false, reason: 'sanitized_empty' })
 
     const disclaimer = await composeReply(makeInput(), stubModel('我是人类'), new AbortController().signal)
-    expect(disclaimer).toMatchObject({ ok: false, reason: 'empty', detail: '我是人类' })
+    expect(disclaimer).toMatchObject({ ok: false, reason: 'sanitized_empty', detail: '我是人类' })
+  })
+
+  it('keeps the reply when retrieved sources produce a footer longer than the body budget', async () => {
+    const sources = [
+      '关于 DeepSeek V4.1 Pro 发布与订阅价格的官方说明',
+      '关于 DSH 鲸鱼酱插件 v0.6.0 升级说明与已知问题',
+      '钉钉个人授权与 dws 订阅的常见问题汇总',
+    ].map((title, index) => ({ title, url: `https://example.com/docs/${'a'.repeat(90)}${index}` }))
+    const research = researchResult({ sources })
+    const result = await composeReply(
+      makeInput({ research }),
+      stubModel('明天十点开始，我先确认一下日程。'),
+      new AbortController().signal,
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.text.startsWith('明天十点开始，我先确认一下日程。')).toBe(true)
+    expect(result.text).toContain('参考：')
+    expect([...result.text].length).toBeGreaterThan(300)
+    expect(result.sources).toEqual(sources.map((source) => source.url))
   })
 
   it('defaults to a 60s budget and accepts a slow draft inside it', async () => {

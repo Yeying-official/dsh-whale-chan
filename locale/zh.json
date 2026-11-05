@@ -75,7 +75,7 @@
   "settings.reply.declineOnReject.label": "拒绝时说明",
   "settings.reply.declineOnReject.hint": "任务被拒绝后，在来源会话中发送一条礼貌说明。",
   "settings.reply.autoRetry.label": "失败时自动重试一次",
-  "settings.reply.autoRetry.hint": "回复生成失败（模型空输出、调用失败或清洗后为空）时自动重试一次；关闭后失败直接转存草稿状态。",
+  "settings.reply.autoRetry.hint": "回复生成失败（模型空输出、调用失败或清洗后为空）时自动重试一次；关闭后失败直接搁置、不生成草稿。超时与系统提示泄露不自动重试。",
   "settings.research.enabled.label": "启用检索",
   "settings.research.enabled.hint": "允许在回答前使用 DSH 的 web 检索服务补充事实。",
   "settings.research.onQuestionsOnly.label": "仅问题触发检索",

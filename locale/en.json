@@ -75,7 +75,7 @@
   "settings.reply.declineOnReject.label": "Explain rejections",
   "settings.reply.declineOnReject.hint": "Send a brief, polite note in the source conversation when a task is rejected.",
   "settings.reply.autoRetry.label": "Retry once on failure",
-  "settings.reply.autoRetry.hint": "Retry once when reply generation fails (empty model output, a failed call, or empty after cleaning); when off, a failed attempt is deferred immediately.",
+  "settings.reply.autoRetry.hint": "Retry once when reply generation fails (empty model output, a failed call, or empty after cleaning); when off, a failure is deferred without drafting. Timeouts and system-prompt leaks are not retried automatically.",
   "settings.research.enabled.label": "Enable research",
   "settings.research.enabled.hint": "Allow the assistant to use DSH web search to add facts before replying.",
   "settings.research.onQuestionsOnly.label": "Questions only",

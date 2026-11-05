@@ -79,7 +79,12 @@ export interface SanitizeResult {
   readonly sources: readonly string[]
   readonly echoedSystemPrompt: boolean
   readonly truncated: boolean
-  /** What happened to the citation block: kept whole, trimmed by lines, or omitted. */
+  /**
+   * What happened to the citation block: kept whole, trimmed by lines, or omitted.
+   * `'dropped'` means both "no citations were requested" and "the block was
+   * dropped after exceeding its ceiling"; callers should check only whether
+   * content exists, not infer the cause from this value.
+   */
   readonly citations: 'kept' | 'trimmed' | 'dropped'
 }
 
@@ -172,22 +177,26 @@ function renderCitations(lines: readonly string[]): string {
 }
 
 /**
- * Fit the citation block into its own ceiling, dropping whole lines from the tail.
+ * Fit the citation block into its own ceiling, line by line.
  *
- * A line is never cut: half a URL is not a citation. Trimming therefore removes
- * sources instead of shortening them, and the block disappears entirely when no
- * single line fits.
+ * A line is never cut: half a URL is not a citation. Each source line is kept
+ * when it still fits and skipped when it does not, so one oversized line cannot
+ * evict the shorter lines that follow it. The block disappears entirely when no
+ * line fits.
  */
 function fitCitations(lines: readonly string[]): { footer: string; citations: SanitizeResult['citations'] } {
   if (lines.length === 0) return { footer: '', citations: 'dropped' }
-  if (codePointLength(renderCitations(lines)) <= CITATIONS_MAX_CHARS) {
-    return { footer: renderCitations(lines), citations: 'kept' }
+  const kept: string[] = []
+  let skipped = false
+  for (const line of lines) {
+    if (codePointLength(renderCitations([...kept, line])) <= CITATIONS_MAX_CHARS) {
+      kept.push(line)
+      continue
+    }
+    skipped = true
   }
-  for (let count = lines.length - 1; count >= 1; count -= 1) {
-    const footer = renderCitations(lines.slice(0, count))
-    if (codePointLength(footer) <= CITATIONS_MAX_CHARS) return { footer, citations: 'trimmed' }
-  }
-  return { footer: '', citations: 'dropped' }
+  if (kept.length === 0) return { footer: '', citations: 'dropped' }
+  return { footer: renderCitations(kept), citations: skipped ? 'trimmed' : 'kept' }
 }
 
 /**
@@ -279,8 +288,9 @@ function describeMessage(message: BrainMessage): string {
 /**
  * Whether a compose failure is worth one automatic retry.
  *
- * A timeout and a leaked system prompt are refused: retrying either would spend
- * another call for the same deterministic outcome.
+ * A timeout is usually a transient or load problem, but a retry spends another
+ * full deadline that the caller's budget already governs; a leaked system prompt
+ * is deterministic. Neither is retried here.
  */
 export function isRetryableComposeFailure(reason: ComposeFailureReason): boolean {
   return reason === 'empty' || reason === 'sanitized_empty' || reason === 'model_error'
@@ -340,8 +350,8 @@ export async function composeReply(input: ComposeInput, model: ModelPort, signal
     if (outcome.reason === 'aborted') return { ok: false, reason: 'model_error', detail: 'cancelled' }
     return { ok: false, reason: 'model_error', detail: outcome.detail ?? 'model error' }
   }
-  // A model that said nothing is a different failure from a draft that our own
-  // cleaning emptied; keeping them apart lets the app retry only the latter.
+  // Distinguish "the model said nothing" from "cleaning left nothing": the two
+  // failures keep separate semantics and share the same one-retry policy.
   if (outcome.value.trim() === '') return { ok: false, reason: 'empty', detail: outputSample(outcome.value) }
 
   const research = input.research

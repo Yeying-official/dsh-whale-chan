@@ -141,7 +141,7 @@ describe('sanitizeReply', () => {
     expect(result.sources).toEqual(sources.map((source) => source.url))
   })
 
-  it('trims citation lines from the tail when the footer exceeds its own ceiling', () => {
+  it('keeps only the citation lines that fit in its own ceiling', () => {
     const first = { title: '来源一', url: `https://example.com/${'x'.repeat(250)}a` }
     const second = { title: '来源二', url: `https://example.com/${'x'.repeat(250)}b` }
     const third = { title: '来源三', url: `https://example.com/${'x'.repeat(250)}c` }
@@ -177,6 +177,25 @@ describe('sanitizeReply', () => {
     expect(result.citations).toBe('dropped')
     expect(result.text).toBe(body)
     expect(result.sources).toEqual([])
+  })
+
+  it('skips an oversized citation line and keeps the ones after it', () => {
+    const huge = { title: '来源超大', url: `https://example.com/${'x'.repeat(700)}` }
+    const first = { title: '来源一', url: 'https://example.com/one' }
+    const second = { title: '来源二', url: 'https://example.com/two' }
+    const body = '正文保留。'
+    const result = sanitizeReply(body, {
+      maxChars: 300,
+      allowedUrls: [huge.url, first.url, second.url],
+      citeSources: [huge, first, second],
+    })
+
+    expect(result.citations).toBe('trimmed')
+    expect(result.text.startsWith(body)).toBe(true)
+    expect(result.text).toContain(first.url)
+    expect(result.text).toContain(second.url)
+    expect(result.text).not.toContain(huge.url)
+    expect(result.sources).toEqual([first.url, second.url])
   })
 
   it('cuts only the body to maxChars and appends the footer after it', () => {
@@ -285,8 +304,8 @@ describe('composeReply', () => {
     const silent = await composeReply(makeInput(), stubModel(''), new AbortController().signal)
     expect(silent).toMatchObject({ ok: false, reason: 'empty' })
 
-    // A fence or a disclaimer-only draft is not silence: the model spoke, but
-    // cleaning left nothing, and only that case may be retried once by the app.
+    // A fence or a disclaimer-only draft is not silence: the model spoke but
+    // cleaning left nothing. Both failures share the same one-retry policy.
     const fenced = await composeReply(makeInput(), stubModel('```\n```'), new AbortController().signal)
     expect(fenced).toMatchObject({ ok: false, reason: 'sanitized_empty' })
 

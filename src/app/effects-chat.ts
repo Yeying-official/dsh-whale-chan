@@ -356,7 +356,7 @@ export class ChatEffects {
       ) {
         this.deps.engine.recordReplyAttempt(decisionId)
         this.deps.logger?.warn?.(
-          `dsh-whale-chan: compose retry ${decision.attempts + 1}/${MAX_COMPOSE_RETRIES} after ${composed.reason}`,
+          `dsh-whale-chan: compose retry ${decision.attempts + 1}/${MAX_COMPOSE_RETRIES} for decision ${decisionId} after ${composed.reason}`,
         )
         // The research result travels with the retry, or the reply would lose
         // the citations that made the question worth researching.

@@ -156,8 +156,11 @@
 - 每条消息的 Decision 记录 `intent`、`confidence`、`reason` 与状态；回复策略的 `reason`
   是枚举 code，因此面板可以显示“为什么没回/为什么进复核”而不必读日志。
 - 触发限速、防环、静默的记录不会写入消息正文（`010` §8 日志脱敏）。
-- 回复被拒（`timeout`/`empty`/`echoes_system_prompt`/`model_error`）与分类失败
-  （`invalid`/`timeout`/`low_confidence`）都走 defer，不会因为模型抖动而发错东西。
+- 回复被拒（`timeout`/`empty`/`sanitized_empty`/`echoes_system_prompt`/`model_error`）与分类失败
+  （`invalid`/`timeout`/`low_confidence`）都走 defer，不会因为模型抖动而发错东西。其中
+  `empty`/`sanitized_empty`/`model_error` 在 `reply.autoRetry` 开启时会先自动重试一次
+  （只累加 `decisions.attempts`，不覆盖分类 `reason`、不发领域事件），第二次仍失败才 defer；
+  `timeout` 与 `echoes_system_prompt` 不重试。
 
 ## 10. 不在本文范围内的授权
 

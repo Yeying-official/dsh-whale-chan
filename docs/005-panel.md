@@ -36,7 +36,7 @@ main(whale-chan)
 
 轮询只在概览与壳层健康徽标上启用（5s）；其余页签首次加载后手动刷新。所有请求都有 `AbortController`、15s 超时与卸载取消，卸载后不会再有状态写入。
 
-`targets` 与 `persona` 有独立页签，所以设置页只渲染其余七个 block；字段顺序、类型、范围与 label/hint 全部来自 `src/shared/fields.ts` 的 `FIELDS`，没有第二份表单定义。
+`targets` 与 `persona` 有独立页签，所以设置页只渲染其余七个 block；字段顺序、类型、范围与 label/hint 全部来自 `src/shared/fields.ts` 的 `FIELDS`，没有第二份表单定义。回复 block（WS16 起）含 `autoRetry`（失败时自动重试一次，默认开）；它和其它布尔字段一样由字段表渲染，不额外写表单。
 
 ## 3. 交互规则
 
@@ -128,7 +128,7 @@ main(whale-chan)
 
 ## 5. i18n
 
-- 全部 UI 文案来自 `ctx.locale` 的 `dshWhaleChan` 命名空间；`locale/zh.json` 与 `locale/en.json` 各 **524 个顶层 key**（含 `meta`；按既有「`meta` 除外」口径为 **523**），key 集合由测试强制一致。WS14 新增 25 个 key（21 个 `targets.archive.*`、`targets.workspace.actions`、3 个 `errors.archive*`）；WS15 再新增 17 个（9 个 `targets.health.*`、`targets.discover.queryPlaceholderDm`、`settings.rows.idPlaceholder.*` 2 个、`settings.rows.idHint.*` 2 个、`settings.rows.mentionOnly.*` 3 个）。
+- 全部 UI 文案来自 `ctx.locale` 的 `dshWhaleChan` 命名空间；`locale/zh.json` 与 `locale/en.json` 各 **526 个顶层 key**（含 `meta`；按既有「`meta` 除外」口径为 **525**），key 集合由测试强制一致。WS14 新增 25 个 key（21 个 `targets.archive.*`、`targets.workspace.actions`、3 个 `errors.archive*`）；WS15 再新增 17 个（9 个 `targets.health.*`、`targets.discover.queryPlaceholderDm`、`settings.rows.idPlaceholder.*` 2 个、`settings.rows.idHint.*` 2 个、`settings.rows.mentionOnly.*` 3 个）；WS16 再新增 2 个（`settings.reply.autoRetry.label` / `.hint`），并把 `settings.persona.maxReplyChars.hint` 从“超过后截断或重新生成”改为“只约束正文，末尾引用链接不计入”。
 - 覆盖页签、按钮、字段 label/hint、空态、错误、确认、成功/失败提示、危险项说明、无障碍标签；`src/client/**` 不含中文字面量（测试扫描），英文词典不含中文。
 - 插值沿用 DSH locale 的 `{name}` 语法（如 `{status}`、`{count}`、`{block}`、`{root}`）。
 - 宿主返回的检查详情、事件类型、目标 ID 是数据而非文案，按原样显示；事件类型使用等宽字体，避免伪装成翻译。

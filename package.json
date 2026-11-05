@@ -1,6 +1,6 @@
 {
   "name": "dsh-whale-chan-assistant",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "description": "DSH助理 · 钉钉助理：通过 dws 个人授权把钉钉消息接入 DeepSeek Harness 的 Cordis 插件。",
   "license": "MIT",

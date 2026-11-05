@@ -56,6 +56,7 @@ exports[`settings defaults > matches the committed default snapshot 1`] = `
     "ackOnTaskCapture": true,
     "allowedSenders": [],
     "autoReply": true,
+    "autoRetry": true,
     "blockedSenders": [],
     "declineOnReject": false,
     "ignoreBroadcast": true,

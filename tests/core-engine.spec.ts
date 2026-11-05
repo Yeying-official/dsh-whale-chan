@@ -173,6 +173,45 @@ describe('classification and drafting', () => {
       expect.objectContaining({ code: 'notDeferrable' }),
     )
   })
+
+  it('records compose attempts only while the decision is classified', () => {
+    const harness = createHarness()
+    const queued = harness.receive({ id: 'message-queued' }).decision
+    expect(() => harness.engine.recordReplyAttempt(queued.id)).toThrowError(
+      expect.objectContaining({ code: 'notRetryable' }),
+    )
+
+    harness.engine.classify(queued.id, { intent: 'chat', confidence: 0.7, reason: '问候' })
+    harness.clock.advance(1_000)
+    const first = harness.engine.recordReplyAttempt(queued.id)
+    expect(first).toMatchObject({
+      id: queued.id,
+      messageId: queued.messageId,
+      status: 'classified',
+      intent: 'chat',
+      confidence: 0.7,
+      draft: null,
+      outboundId: null,
+      taskId: null,
+      attempts: 1,
+      // The classification reason survives a retry; only the log names the failure.
+      reason: '问候',
+      updatedAt: '2026-11-02T09:00:01.000Z',
+    })
+    const second = harness.engine.recordReplyAttempt(queued.id)
+    expect(second).toMatchObject({ status: 'classified', attempts: 2, reason: '问候' })
+
+    const deferred = harness.receive({ id: 'message-deferred' }).decision
+    harness.engine.defer(deferred.id, 'quiet hours')
+    expect(() => harness.engine.recordReplyAttempt(deferred.id)).toThrowError(
+      expect.objectContaining({ code: 'notRetryable' }),
+    )
+
+    const { decision: drafted } = receiveDraft(harness, { id: 'message-drafted' })
+    expect(() => harness.engine.recordReplyAttempt(drafted.id)).toThrowError(
+      expect.objectContaining({ code: 'notRetryable' }),
+    )
+  })
 })
 
 describe('reply delivery', () => {

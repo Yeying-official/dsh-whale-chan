@@ -344,6 +344,7 @@ describe('user error categories', () => {
       notDrafted: 'refused',
       notSending: 'refused',
       notDeferrable: 'refused',
+      notRetryable: 'refused',
       missingTaskDetail: 'invalid',
       missingApprovalTtl: 'invalid',
       missingWorkspace: 'invalid',
@@ -371,6 +372,7 @@ describe('user error categories', () => {
     expect(new UserError('missingWorkspace')).toMatchObject({ category: 'invalid', missing: false })
     expect(new UserError('invalidTime')).toMatchObject({ category: 'invalid', missing: false })
     expect(new UserError('notFailed')).toMatchObject({ category: 'refused', missing: false })
+    expect(new UserError('notRetryable')).toMatchObject({ category: 'refused', missing: false })
     expect(new UserError('unknownTask')).toMatchObject({ category: 'missing', missing: true })
   })
 })

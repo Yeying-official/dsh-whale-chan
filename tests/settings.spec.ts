@@ -127,6 +127,14 @@ describe('settings validation', () => {
     expect(SettingsSchema.safeParse(withPath('tasks.permissionPreset', 'root')).success).toBe(false)
   })
 
+  it('defaults the compose retry switch on and keeps the reply block strict', () => {
+    expect(SETTINGS_DEFAULTS.reply.autoRetry).toBe(true)
+    expect(SettingsSchema.parse({}).reply.autoRetry).toBe(true)
+    expect(SettingsSchema.parse({ reply: { autoRetry: false } }).reply.autoRetry).toBe(false)
+    expect(SettingsSchema.safeParse({ reply: { autoRetry: 'yes' } }).success).toBe(false)
+    expect(SettingsSchema.safeParse({ reply: { autoRetry: true, extra: true } }).success).toBe(false)
+  })
+
   it('validates target rows without accepting unknown row fields', () => {
     const valid = {
       kind: 'group',

@@ -30,6 +30,7 @@ export const USER_ERRORS = {
   notDrafted: ['refused', 'Only a drafted decision can queue a reply'],
   notSending: ['refused', 'Only a decision that is sending can report a delivery result'],
   notDeferrable: ['refused', 'Only a queued or classified decision can be deferred'],
+  notRetryable: ['refused', 'Only a classified decision can record a compose retry'],
   /** The task decision is missing a title the owner can supply. */
   missingTaskDetail: ['invalid', 'A task decision needs the captured task title'],
   /** The approval TTL is a caller-supplied number, not a stored state. */
